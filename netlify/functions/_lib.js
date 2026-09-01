@@ -1,28 +1,108 @@
 /* ============================================================
-   Netlify Functions 共享库
-   - Blobs store 访问（store 名：photos）
+   Netlify Functions 共享库（v0.9.9，移植自 01-personal-blog 模式）
+   - Blobs store：显式 siteID/token 凭据优先，环境注入兜底，
+     本地开发回退 .local-data/ 文件存储（与参考项目一致）
    - 鉴权（ADMIN_TOKEN / UPLOAD_TOKEN 环境变量，未配置时放行）
    - 响应封装 / 图片尺寸解析 / id 生成
    ============================================================ */
 const { getStore } = require("@netlify/blobs");
+const fs = require("fs");
+const path = require("path");
 
 const STORE_NAME = "photos";
+const LOCAL_DIR = path.join(process.cwd(), ".local-data");
 
-// v8 推荐：环境配置（NETLIFY_BLOBS_CONTEXT 或 connectLambda）就绪后，
-// 直接以 store 名获取；无需显式 siteID/token
-function store() {
-  return getStore(STORE_NAME);
+/* ---------- 本地文件回退存储（无 Netlify 环境时使用） ---------- */
+function localStore(name) {
+  const dir = path.join(LOCAL_DIR, name);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const safe = (key) => {
+    const p = path.join(dir, key);
+    if (!p.startsWith(dir)) throw new Error("bad key");
+    return p;
+  };
+  return {
+    async set(key, val) {
+      const p = safe(key);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(p, Buffer.isBuffer(val) ? val : Buffer.from(String(val)));
+    },
+    async get(key, opts) {
+      const p = safe(key);
+      if (!fs.existsSync(p)) return null;
+      const buf = fs.readFileSync(p);
+      if (opts && opts.type === "json") return JSON.parse(buf.toString("utf8"));
+      return buf;
+    },
+    async delete(key) {
+      const p = safe(key);
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    },
+    async list(opts = {}) {
+      if (!fs.existsSync(dir)) return { blobs: [], nextCursor: undefined, hasMore: false };
+      const keys = [];
+      const walk = (d) => {
+        for (const f of fs.readdirSync(d, { withFileTypes: true })) {
+          const fp = path.join(d, f.name);
+          if (f.isDirectory()) walk(fp);
+          else keys.push(path.relative(dir, fp).replace(/\\/g, "/"));
+        }
+      };
+      walk(dir);
+      const prefix = opts.prefix || "";
+      const blobs = keys
+        .filter((k) => k.startsWith(prefix))
+        .sort()
+        .map((key) => ({ key, size: fs.statSync(safe(key)).size }));
+      const limit = opts.limit || 60;
+      const start = opts.cursor ? parseInt(opts.cursor, 10) : 0;
+      const page = blobs.slice(start, start + limit);
+      const nextCursor = start + limit < blobs.length ? String(start + limit) : undefined;
+      return { blobs: page, nextCursor, hasMore: !!nextCursor };
+    },
+  };
 }
 
+/* ---------- Blobs store（参考项目健壮模式） ----------
+   1) 有 SITE_ID + token 时显式传参（不依赖环境注入）
+   2) 否则走环境自动配置（NETLIFY_BLOBS_CONTEXT）
+   3) 部署环境报错时给出明确提示；本地开发回退文件存储 */
+function store() {
+  const { SITE_ID, NETLIFY_BLOBS_TOKEN, NETLIFY_ACCESS_TOKEN } = process.env;
+  try {
+    const options = { name: STORE_NAME };
+    if (SITE_ID && (NETLIFY_BLOBS_TOKEN || NETLIFY_ACCESS_TOKEN)) {
+      options.siteID = SITE_ID;
+      options.token = NETLIFY_BLOBS_TOKEN || NETLIFY_ACCESS_TOKEN;
+    }
+    return getStore(options);
+  } catch (err) {
+    const isMissing =
+      String(err && err.code) === "MissingBlobsEnvironmentError" ||
+      String((err && err.message) || "").includes("MissingBlobsEnvironmentError");
+    if (SITE_ID) {
+      const e = new Error(
+        isMissing
+          ? "Netlify Blobs 未启用：请在 Netlify 站点 Settings → Data collection 开启 Netlify Blobs"
+          : "Netlify Blobs 存储不可用：" + (err && err.message ? err.message : err)
+      );
+      e.code = "BLOBS_UNAVAILABLE";
+      throw e;
+    }
+    // 本地开发：回退本地文件存储（重启不丢数据）
+    return localStore(STORE_NAME);
+  }
+}
+
+/* ---------- 响应封装（Netlify Functions v2：返回 Response） ---------- */
 function json(body, statusCode = 200) {
-  return {
-    statusCode,
+  return new Response(JSON.stringify(body), {
+    status: statusCode,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "X-Content-Type-Options": "nosniff",
     },
-    body: JSON.stringify(body),
-  };
+  });
 }
 
 function notFound(msg = "Not found") {
@@ -41,10 +121,10 @@ function serverError(e) {
 
 /* 鉴权：未配置 ADMIN_TOKEN 时全部放行（开发模式）；
    配置后：读操作校验 X-Auth-Token = ADMIN_TOKEN，写操作额外接受 UPLOAD_TOKEN */
-function auth(event, write = false) {
+function auth(req, write = false) {
   const admin = process.env.ADMIN_TOKEN;
   if (!admin) return true;
-  const header = (event.headers["x-auth-token"] || event.headers["X-Auth-Token"] || "").trim();
+  const header = (req.headers.get("x-auth-token") || "").trim();
   const expected = write ? process.env.UPLOAD_TOKEN || admin : admin;
   return header === expected;
 }

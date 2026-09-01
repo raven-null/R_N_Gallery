@@ -7,8 +7,4 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# 全部 /api/* 统一路由到 photos 函数（函数内按路径分发）
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/photos"
-  status = 200
+# API 路由由 Functions v2 的 config.path 声明（见 netlify/functions/photos.js），无需 redirects

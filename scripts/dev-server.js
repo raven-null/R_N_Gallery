@@ -58,7 +58,7 @@ Module._load = function (request, parent, isMain) {
   return origLoad.apply(this, arguments);
 };
 
-const { handler } = require("../netlify/functions/photos");
+const { default: handler } = require("../netlify/functions/photos");
 
 /* ---------- 静态文件 ---------- */
 const MIME = {
@@ -80,26 +80,23 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = decodeURIComponent(url.pathname);
 
-  // API 路由 → 交给 Netlify Function handler
+  // API 路由 → 交给 Netlify Functions v2（export default + Request/Response）
   if (pathname.startsWith("/api/")) {
     let body = "";
     for await (const chunk of req) body += chunk;
-    const event = {
-      rawUrl: `http://localhost:${PORT}${url.pathname}${url.search}`,
-      httpMethod: req.method,
-      path: pathname,
+    const fnReq = new Request(`http://localhost:${PORT}${url.pathname}${url.search}`, {
+      method: req.method,
       headers: req.headers,
-      body: body || null,
-      queryStringParameters: Object.fromEntries(url.searchParams),
-    };
+      body: body || undefined,
+    });
     try {
-      const result = await handler(event);
-      res.writeHead(result.statusCode || 200, {
-        ...result.headers,
+      const fnRes = await handler(fnReq);
+      res.writeHead(fnRes.status, {
+        ...Object.fromEntries(fnRes.headers.entries()),
         "Access-Control-Allow-Origin": "*",
       });
-      if (result.isBase64Encoded) res.end(Buffer.from(result.body, "base64"));
-      else res.end(result.body);
+      const buf = Buffer.from(await fnRes.arrayBuffer());
+      res.end(buf);
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));

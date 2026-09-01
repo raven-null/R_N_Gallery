@@ -1,47 +1,47 @@
-/* ============================================================
-   统一 API 入口：所有 /api/* 请求经 netlify.toml 重定向到此
-   路由（基于原始路径解析）：
-     GET    /api/photos            列表（分页，游标）
-     GET    /api/photos/:id        单张元数据
-     GET    /api/photos/:id/raw    图片字节（CDN 缓存）
-     POST   /api/photos            上传（JSON + base64）
-     PATCH  /api/photos/:id        更新元数据
-     DELETE /api/photos/:id        删除单张
-     DELETE /api/photos            清空图库
-     GET    /api/meta/stats        用量统计
-     GET    /api/export            导出全部元数据
-     POST   /api/import            从站点静态 image/ 目录导入 Blobs
+﻿/* ============================================================
+   统一 API 入口（Netlify Functions v2，v0.9.9 移植参考项目模式）
+   路由由 config.path 声明，无需 netlify.toml redirects：
+     GET    /api/photos                列表（分页，游标）
+     GET    /api/photos/:id            单张元数据
+     GET    /api/photos/:id/raw        图片字节（CDN 缓存）
+     POST   /api/photos                上传（JSON + base64，自动转 WebP 由前端完成）
+     PATCH  /api/photos/:id            更新元数据
+     DELETE /api/photos/:id            删除单张
+     DELETE /api/photos                清空图库
+     GET    /api/meta/stats            用量统计
+     GET    /api/export                导出全部元数据
+     POST   /api/import                批量导入（供自建静态源使用）
    ============================================================ */
 const {
   store, json, notFound, badRequest, unauthorized, serverError,
   auth, nanoid, imageSize, sniffMime,
 } = require("./_lib");
-const { connectLambda } = require("@netlify/blobs");
 
 const PREFIX_META = "meta/";
 const PREFIX_IMG = "img/";
 
-exports.handler = async (event) => {
+exports.default = async (req) => {
   try {
-    // @netlify/blobs v8 兼容（v0.9.7）：
-    // Lambda compatibility mode 下 Blobs 环境不会自动配置，
-    // 必须用请求事件手动初始化；普通模式调用无副作用
-    connectLambda(event);
-    const path = new URL(event.rawUrl).pathname;
+    const url = new URL(req.url);
+    const path = url.pathname;
+    const method = req.method;
     const seg = path.split("/").filter(Boolean); // ["api", "photos", id?, "raw"?]
-    const method = event.httpMethod;
     const rest = seg.slice(2);
 
-    if (method === "GET" && path.endsWith("/api/photos")) return list(event);
-    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(event, rest[0]);
-    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 1) return getMeta(event, rest[0]);
-    if (method === "POST" && path.endsWith("/api/photos")) return upload(event);
-    if (method === "PATCH" && rest.length === 1) return patch(event, rest[0]);
-    if (method === "DELETE" && path.endsWith("/api/photos")) return clearAll(event);
-    if (method === "DELETE" && rest.length === 1) return remove(event, rest[0]);
-    if (method === "GET" && path.endsWith("/api/meta/stats")) return stats(event);
-    if (method === "GET" && path.endsWith("/api/export")) return exportAll(event);
-    if (method === "POST" && path.endsWith("/api/import")) return importStatic(event);
+    // 统一鉴权：写操作（POST/PATCH/DELETE）校验写令牌，读操作校验读令牌
+    const isWrite = method === "POST" || method === "PATCH" || method === "DELETE";
+    if (!auth(req, isWrite)) return unauthorized();
+
+    if (method === "GET" && path.endsWith("/api/photos")) return list(url);
+    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(rest[0]);
+    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 1) return getMeta(rest[0]);
+    if (method === "POST" && path.endsWith("/api/photos")) return upload(req);
+    if (method === "PATCH" && path.startsWith("/api/photos/") && rest.length === 1) return patch(req, rest[0]);
+    if (method === "DELETE" && path.endsWith("/api/photos")) return clearAll();
+    if (method === "DELETE" && path.startsWith("/api/photos/") && rest.length === 1) return remove(rest[0]);
+    if (method === "GET" && path.endsWith("/api/meta/stats")) return stats();
+    if (method === "GET" && path.endsWith("/api/export")) return exportAll();
+    if (method === "POST" && path.endsWith("/api/import")) return importStatic(req);
 
     return notFound("Route not found");
   } catch (e) {
@@ -49,64 +49,61 @@ exports.handler = async (event) => {
   }
 };
 
-/* 批量并发读取元数据（分批，避免串行远程读超时/触发限流） */
-async function getMany(s, keys, batch = 20) {
-  const out = [];
-  for (let i = 0; i < keys.length; i += batch) {
-    const slice = keys.slice(i, i + batch);
-    out.push(...(await Promise.all(slice.map((k) => s.get(k, { type: "json" })))));
-  }
-  return out;
-}
+exports.config = {
+  path: [
+    "/api/photos",
+    "/api/photos/:id",
+    "/api/photos/:id/raw",
+    "/api/meta/stats",
+    "/api/export",
+    "/api/import",
+  ],
+};
 
 /* ---------- 列表（分页） ---------- */
-async function list(event) {
-  if (!auth(event)) return unauthorized();
-  const q = event.queryStringParameters || {};
-  const limit = Math.min(parseInt(q.limit, 10) || 60, 200);
+async function list(url) {
+  const q = url.searchParams;
+  const limit = Math.min(parseInt(q.get("limit"), 10) || 60, 200);
   const s = store();
-  const res = await s.list({ prefix: PREFIX_META, cursor: q.cursor, limit });
-  const metas = await getMany(s, res.blobs.map((b) => b.key));
-  const photos = metas.filter(Boolean);
+  const res = await s.list({ prefix: PREFIX_META, cursor: q.get("cursor"), limit });
+  const photos = [];
+  for (const item of res.blobs) {
+    const m = await s.get(item.key, { type: "json" });
+    if (m) photos.push(m);
+  }
   photos.sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""));
   return json({ photos, cursor: res.nextCursor || null, hasMore: !!res.nextCursor });
 }
 
 /* ---------- 单张元数据 ---------- */
-async function getMeta(event, id) {
-  if (!auth(event)) return unauthorized();
+async function getMeta(id) {
   const m = await store().get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
   return json({ photo: m });
 }
 
-/* ---------- 图片字节输出 ---------- */
-async function raw(event, id) {
-  if (!auth(event)) return unauthorized();
+/* ---------- 图片字节输出（key 带扩展名推断 mime） ---------- */
+async function raw(id) {
   const s = store();
   const m = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
   const buf = await s.get(m.origKey || `${PREFIX_IMG}${id}`);
   if (!buf) return notFound("Image data not found");
-  return {
-    statusCode: 200,
+  return new Response(buf, {
+    status: 200,
     headers: {
       "Content-Type": m.mime || "application/octet-stream",
       "Cache-Control": "public, max-age=31536000, immutable",
-      "Content-Length": String(buf.length),
       "X-Content-Type-Options": "nosniff",
     },
-    body: buf.toString("base64"),
-    isBase64Encoded: true,
-  };
+  });
 }
 
 /* ---------- 上传 ---------- */
-async function upload(event) {
-  if (!auth(event, true)) return unauthorized();
+async function upload(req) {
   let body;
   try {
-    body = JSON.parse(event.body || "{}");
+    body = await req.json();
   } catch {
     return badRequest("Invalid JSON body");
   }
@@ -119,6 +116,9 @@ async function upload(event) {
 
   const id = nanoid();
   const mime = sniffMime(buf);
+  // key 带扩展名（参考项目模式）：缓存友好、可按扩展名推断 mime
+  const ext = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" }[mime] || "bin";
+  const origKey = `${PREFIX_IMG}${id}.${ext}`;
   const meta = {
     id,
     title: (body.title || "").trim() || "未命名",
@@ -130,21 +130,20 @@ async function upload(event) {
     width: dims.width,
     height: dims.height,
     mime,
-    origKey: `${PREFIX_IMG}${id}`,
+    origKey,
   };
 
   const s = store();
-  await s.set(meta.origKey, buf, { metadata: { mime, width: String(dims.width), height: String(dims.height) } });
-  await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta), { metadata: { mime: "application/json" } });
+  await s.set(origKey, buf);
+  await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
   return json({ ok: true, photo: meta }, 201);
 }
 
 /* ---------- 更新元数据 ---------- */
-async function patch(event, id) {
-  if (!auth(event, true)) return unauthorized();
+async function patch(req, id) {
   let body;
   try {
-    body = JSON.parse(event.body || "{}");
+    body = await req.json();
   } catch {
     return badRequest("Invalid JSON body");
   }
@@ -155,13 +154,12 @@ async function patch(event, id) {
   if (body.desc !== undefined) meta.desc = String(body.desc).trim();
   if (body.tags !== undefined) meta.tags = Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [];
   if (body.takenAt !== undefined) meta.takenAt = body.takenAt;
-  await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta), { metadata: { mime: "application/json" } });
+  await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
   return json({ ok: true, photo: meta });
 }
 
 /* ---------- 删除单张 ---------- */
-async function remove(event, id) {
-  if (!auth(event, true)) return unauthorized();
+async function remove(id) {
   const s = store();
   const meta = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!meta) return notFound("Photo not found");
@@ -171,8 +169,7 @@ async function remove(event, id) {
 }
 
 /* ---------- 清空图库 ---------- */
-async function clearAll(event) {
-  if (!auth(event, true)) return unauthorized();
+async function clearAll() {
   const s = store();
   let cursor;
   let deleted = 0;
@@ -188,8 +185,7 @@ async function clearAll(event) {
 }
 
 /* ---------- 用量统计 ---------- */
-async function stats(event) {
-  if (!auth(event)) return unauthorized();
+async function stats() {
   const s = store();
   let cursor;
   let count = 0;
@@ -197,8 +193,8 @@ async function stats(event) {
   const byMonth = {};
   do {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
-    const metas = await getMany(s, res.blobs.map((b) => b.key));
-    for (const m of metas) {
+    for (const item of res.blobs) {
+      const m = await s.get(item.key, { type: "json" });
       if (!m) continue;
       count++;
       bytes += m.size || 0;
@@ -211,69 +207,70 @@ async function stats(event) {
 }
 
 /* ---------- 导出全部元数据 ---------- */
-async function exportAll(event) {
-  if (!auth(event)) return unauthorized();
+async function exportAll() {
   const s = store();
   let cursor;
   const photos = [];
   do {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
-    const metas = await getMany(s, res.blobs.map((b) => b.key));
-    for (const m of metas) if (m) photos.push(m);
+    for (const item of res.blobs) {
+      const m = await s.get(item.key, { type: "json" });
+      if (m) photos.push(m);
+    }
     cursor = res.nextCursor;
   } while (cursor);
   return json({ exportedAt: new Date().toISOString(), count: photos.length, photos });
 }
 
-/* ---------- 从站点静态 image/ 目录导入 Blobs ----------
-   前端把图片文件名列表 POST 过来，函数从站点同源 URL 拉取并写入 Blobs */
-async function importStatic(event) {
-  if (!auth(event, true)) return unauthorized();
+/* ---------- 批量导入（供自建静态图片源使用） ---------- */
+async function importStatic(req) {
   let body;
   try {
-    body = JSON.parse(event.body || "{}");
+    body = await req.json();
   } catch {
     return badRequest("Invalid JSON body");
   }
-  const files = Array.isArray(body.files) ? body.files.map((f) => String(f).trim()).filter(Boolean).slice(0, 300) : [];
-  if (!files.length) return badRequest("Missing files list");
+  const items = Array.isArray(body.items) ? body.items.slice(0, 300) : [];
+  if (!items.length) return badRequest("Missing items list");
 
-  const host = event.headers["x-forwarded-host"] || event.headers.host;
-  const proto = host.includes("localhost") || host.startsWith("127.") ? "http" : "https";
-  const origin = `${proto}://${host}`;
   const s = store();
   let imported = 0;
   const errors = [];
-
-  for (const file of files) {
+  for (const item of items) {
     try {
-      const res = await fetch(`${origin}/image/${encodeURIComponent(file)}`);
+      const src = typeof item === "string" ? item : item.url;
+      if (!src) throw new Error("no url");
+      const title = typeof item === "string" ? null : item.title;
+      const tags = Array.isArray(item && item.tags) ? item.tags.slice(0, 10) : [];
+      const res = await fetch(src);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const buf = Buffer.from(await res.arrayBuffer());
       const dims = imageSize(buf);
       if (!dims) throw new Error("Unsupported format");
       const id = nanoid();
       const mime = sniffMime(buf);
+      const ext = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" }[mime] || "bin";
+      const origKey = `${PREFIX_IMG}${id}.${ext}`;
       const meta = {
         id,
-        title: file.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").trim() || "未命名",
+        title: (title || "").trim() || "未命名",
         desc: "",
-        tags: [],
+        tags,
         takenAt: new Date().toISOString(),
         uploadedAt: new Date().toISOString(),
         size: buf.length,
         width: dims.width,
         height: dims.height,
         mime,
-        origKey: `${PREFIX_IMG}${id}`,
-        src: `image/${file}`,
+        origKey,
+        src,
       };
-      await s.set(meta.origKey, buf, { metadata: { mime } });
-      await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta), { metadata: { mime: "application/json" } });
+      await s.set(origKey, buf);
+      await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
       imported++;
     } catch (e) {
-      errors.push({ file, error: e.message });
+      errors.push({ url: typeof item === "string" ? item : item && item.url, error: e.message });
     }
   }
-  return json({ ok: true, imported, errors }, imported || errors.length ? 200 : 500);
+  return json({ ok: true, imported, errors });
 }
