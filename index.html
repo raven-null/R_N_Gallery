@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>留影 · 图库墙</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-page="gallery">
+
+  <!-- Genie 效果 SVG 滤镜（页面切换动画用，macOS 风格吸入/喷出） -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="genieFilter" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.015 0.12" numOctaves="1" seed="2" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="0" id="genieDisplacement" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </svg>
+
+  <!-- ======= 页面主体（无顶栏，导航/搜索/标签均在侧边栏） ======= -->
+  <main class="page" id="pageGallery">
+
+    <!-- 瀑布流网格 -->
+    <div class="masonry" id="grid"></div>
+
+    <div class="loadmore" id="loadMore"><span>加载中…</span></div>
+  </main>
+
+  <!-- ======= 上传窗口（悬浮于图库上方，可层叠） ======= -->
+  <div class="page-panel" id="panelUpload">
+    <div class="panel-header">
+      <div class="traffic">
+        <span class="dot red" id="closeUpload" title="关闭窗口"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+      </div>
+      <h1>上传图片</h1>
+      <div class="spacer"></div>
+      <button class="btn ghost panel-back" id="btnBackUpload">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        返回图库
+      </button>
+    </div>
+    <div class="panel-content">
+      <div class="sub">客户端自动压缩 → POST /api/photos → 写入 Netlify Blobs（原图 + 缩略图 + 元数据）</div>
+
+      <!-- 拖拽区 -->
+      <div class="dropzone" id="dz">
+        <div class="icon">📤</div>
+        <h3>拖拽图片到这里，或点击选择</h3>
+        <p>支持 JPG / PNG / WebP / GIF，单张最大 20MB，一次最多 12 张</p>
+        <span class="badge accent">上传前自动压缩 · 剥离多余 EXIF · 生成 WebP 缩略图</span>
+        <input type="file" id="fileInput" multiple accept="image/*" hidden>
+      </div>
+
+      <!-- 上传选项 -->
+      <div class="form-grid" style="margin-top: 24px;">
+        <div class="field">
+          <label>默认标题（可留空，自动取文件名）</label>
+          <input type="text" placeholder="例如：2025 春节旅行">
+        </div>
+        <div class="field" style="grid-column: 1 / -1;">
+          <label>标签（回车添加）</label>
+          <div class="tag-input" id="tagListUpload">
+            <span class="t">旅行<button type="button" title="移除">×</button></span>
+            <input id="tagInputUpload" type="text" placeholder="输入后按回车…">
+          </div>
+          <div class="hint">标签用于图库墙筛选与搜索，建议每张图 2~4 个</div>
+        </div>
+      </div>
+
+      <!-- 上传队列 -->
+      <div class="upload-queue" id="queue"></div>
+
+      <div style="margin-top: 26px; display: flex; gap: 12px; align-items: center;">
+        <button class="btn primary" id="btnUpload" disabled style="font-size:15px;padding:11px 26px;">开始上传</button>
+        <span style="color: var(--text-faint); font-size: 13px;">3 个并发上传 · 失败自动重试 1 次</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======= 设置窗口（悬浮于图库上方，可层叠） ======= -->
+  <div class="page-panel" id="panelSettings">
+    <div class="panel-header">
+      <div class="traffic">
+        <span class="dot red" id="closeSettings" title="关闭窗口"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+      </div>
+      <h1>设置</h1>
+      <div class="spacer"></div>
+      <button class="btn ghost panel-back" id="btnBackSettings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        返回图库
+      </button>
+    </div>
+    <div class="panel-content">
+      <div class="sub">站点信息 · 存储用量 · 标签管理 · 数据维护</div>
+
+      <!-- 站点信息 -->
+      <div class="settings-card">
+        <h3><span class="ico">⚙️</span> 站点信息</h3>
+        <div class="form-grid">
+          <div class="field"><label>站点标题</label><input type="text" value="留影 Gallery"></div>
+          <div class="field"><label>站点描述</label><input type="text" value="我的私人照片库，基于 Netlify Blobs"></div>
+          <div class="field"><label>Blob Store 名称</label><input type="text" value="photos" disabled style="opacity:.55"></div>
+          <div class="field"><label>访问令牌（X-Auth-Token）</label><input type="password" id="tokenInput" placeholder="与 ADMIN_TOKEN 一致时填写" autocomplete="off"></div>
+        </div>
+        <div class="hint" style="font-size:12px;color:var(--text-faint);margin-top:10px">令牌保存在本地浏览器，所有 API 请求自动携带；未配置 ADMIN_TOKEN 时无需填写。</div>
+      </div>
+
+      <!-- 存储用量 -->
+      <div class="settings-card">
+        <h3><span class="ico">📦</span> 存储用量 <span class="badge accent" id="usagePct">—</span></h3>
+        <div class="usage-bar"><div class="bar" id="usageBar" style="width:0"></div></div>
+        <div style="font-size:12.5px;color:var(--text-faint)">来自 GET /api/meta/stats · 数据存储于 Netlify Blobs</div>
+        <div class="usage-stats">
+          <div class="s" id="stPhotos">—</div>
+          <div class="s" id="stUsed">—</div>
+          <div class="s" id="stQuota">—</div>
+        </div>
+        <div class="month-bars" id="monthBars"></div>
+      </div>
+
+      <!-- 标签管理 -->
+      <div class="settings-card">
+        <h3><span class="ico">🏷</span> 标签管理</h3>
+        <p style="color:var(--text-dim);font-size:13.5px;margin-bottom:14px">标签随图片元数据存储于 Blobs，此处的展示统计来自当前数据源。</p>
+        <div id="tagMgr"></div>
+      </div>
+
+      <!-- 数据维护 -->
+      <div class="settings-card">
+        <h3><span class="ico">🗄</span> 数据维护</h3>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <button class="btn" id="btnImport">📥 导入静态图片到 Blobs</button>
+          <button class="btn" id="btnExport">⬇ 导出全部元数据 (export.json)</button>
+        </div>
+        <div class="hint" style="font-size:12px;color:var(--text-faint);margin-top:10px">「导入静态图片」将 image/ 目录的图片写入 Blobs 并生成元数据，导入后图库自动切换为 Blobs 数据源；导出用于迁移备份。</div>
+      </div>
+
+      <!-- 危险区 -->
+      <div class="settings-card danger-zone">
+        <h3><span class="ico">⚠️</span> 危险区</h3>
+        <p>清空图库将删除 Blobs 中全部原图、缩略图与元数据，此操作不可恢复。建议先导出元数据备份。</p>
+        <button class="btn danger" id="btnWipe">🗑 清空整个图库</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======= 搜索窗口（v0.8.6，独立界面，悬浮可层叠） ======= -->
+  <div class="page-panel" id="panelSearch">
+    <div class="panel-header">
+      <div class="traffic">
+        <span class="dot red" id="closeSearch" title="关闭窗口"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+      </div>
+      <h1>搜索</h1>
+      <div class="spacer"></div>
+      <button class="btn ghost panel-back" id="btnBackSearch">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        返回图库
+      </button>
+    </div>
+    <div class="panel-content">
+      <div class="search-window">
+        <div class="search-box">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+          <input id="searchInput" type="text" placeholder="搜索标题、标签、描述…" autocomplete="off">
+          <button class="search-clear" id="searchClear" title="清除">✕</button>
+        </div>
+        <div class="search-count" id="searchCount" hidden></div>
+        <div class="search-hint" id="searchHint">输入关键词开始搜索，支持标题、标签与描述</div>
+        <div class="search-grid" id="searchResults"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 清空确认弹窗 -->
+  <div class="modal-mask" id="wipeModal">
+    <div class="modal" style="border-color: rgba(229,72,77,.4)">
+      <h3>确认清空整个图库？</h3>
+      <p>将删除 <b style="color:var(--text)">photos</b> Store 中的全部 key（原图 / 缩略图 / 元数据 / 标签索引），共 108 个 Blob key，不可恢复。</p>
+      <div class="m-actions">
+        <button class="btn ghost" id="btnCancelWipe">取消</button>
+        <button class="btn danger" id="btnConfirmWipe">确认清空</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======= 标签弹出菜单（悬停/点击标签按钮弹出，仅主要标签；搜索已独立为窗口） ======= -->
+  <div class="page-menu tag-menu" id="tagMenu" aria-label="标签筛选">
+    <div class="tag-menu-head">
+      <span class="t">主要标签</span>
+    </div>
+    <div class="tag-menu-list" id="tagMenuList"></div>
+  </div>
+
+  <!-- 悬浮按钮组 -->
+  <div class="fab-group" id="fabGroup">
+    <!-- 主按钮（悬停展开） -->
+    <button class="fab fab-main" id="fabMain" title="菜单">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="1"/>
+        <circle cx="12" cy="5" r="1"/>
+        <circle cx="12" cy="19" r="1"/>
+      </svg>
+    </button>
+    <!-- 子按钮组 -->
+    <div class="fab-sub">
+      <!-- 标签筛选按钮 -->
+      <button class="fab fab-tag" id="fabBtn" title="筛选">
+        <span class="fab-ico" id="fabIco">
+          <svg class="ico-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <svg class="ico-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </span>
+        <span class="fab-dot" id="fabDot"></span>
+      </button>
+      <!-- 页面切换按钮 -->
+      <button class="fab fab-page" id="fabPageBtn" title="切换页面">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"/>
+          <rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/>
+          <rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- 页面切换下拉菜单 -->
+  <div class="page-menu" id="pageMenu">
+    <button class="page-menu-item active" data-page="gallery">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      图库
+    </button>
+    <button class="page-menu-item" data-page="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+      搜索
+    </button>
+    <button class="page-menu-item" data-page="upload">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      上传
+    </button>
+    <button class="page-menu-item" data-page="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      设置
+    </button>
+  </div>
+
+  <!-- ======= 灯箱 ======= -->
+  <div class="lightbox" id="lightbox">
+    <div class="lb-img-wrap">
+      <img id="lbImg" alt="">
+      <button class="lb-btn lb-close" title="关闭 (Esc)">✕</button>
+      <button class="lb-btn lb-prev" title="上一张 (←)">‹</button>
+      <button class="lb-btn lb-next" title="下一张 (→)">›</button>
+    </div>
+    <div class="lb-info" id="lbInfo">
+      <div class="lb-title" id="lbTitle"></div>
+      <div class="lb-meta">
+        <span id="lbDate"></span>
+        <span id="lbSize"></span>
+        <span id="lbDims"></span>
+        <span id="lbFormat"></span>
+      </div>
+      <div class="lb-tags" id="lbTags"></div>
+    </div>
+  </div>
+
+  <footer class="footer">留影 · 基于 Netlify Blobs 的私人图库设计稿 · 图片为 SVG 占位，真实部署时替换为 API 数据</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

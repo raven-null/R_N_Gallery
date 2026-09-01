@@ -1,0 +1,14 @@
+# Netlify 配置
+[build]
+  publish = "."
+  command = "echo '静态站点，无需构建'"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# 全部 /api/* 统一路由到 photos 函数（函数内按路径分发）
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/photos"
+  status = 200

@@ -1,0 +1,13 @@
+{
+  "name": "r-n-gallery",
+  "version": "0.9.0",
+  "private": true,
+  "description": "基于 Netlify Blobs 的私人图库",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  },
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo '静态站点，无需构建'"
+  }
+}
