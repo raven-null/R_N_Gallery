@@ -1085,17 +1085,6 @@ body[data-page="gallery"] .page {
     transform: translateY(0); 
   }
 }
-.lightbox .lb-title {
-  font-size: 22px;
-  font-weight: 700;
-  margin-bottom: 16px;
-  color: #fff;
-  letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.8) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
 .lightbox .lb-meta {
   display: flex;
   gap: 16px;
@@ -1772,7 +1761,6 @@ body[data-page="gallery"] .page {
   .lightbox .lb-prev { left: 8px; }
   .lightbox .lb-next { right: 8px; }
   .lightbox .lb-info { padding: 20px; }
-  .lightbox .lb-title { font-size: 18px; }
   .lightbox .lb-meta { gap: 12px; font-size: 12px; }
   .fab-group { right: 16px; bottom: 20px; }
   .fab-main { width: 48px; height: 48px; }

@@ -156,7 +156,6 @@ function openLightboxById(id) {
   const p = PHOTOS.find((x) => x.id === id);
   if (!p) return;
   document.getElementById("lbImg").src = p.url;
-  document.getElementById("lbTitle").textContent = p.title;
   document.getElementById("lbDate").textContent = fmtDate(p.takenAt);
   document.getElementById("lbSize").textContent = fmtSize(p.size);
   document.getElementById("lbDims").textContent = `${p.width} × ${p.height}`;
