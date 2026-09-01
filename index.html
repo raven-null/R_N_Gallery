@@ -51,23 +51,19 @@
       </button>
     </div>
     <div class="panel-content">
-      <div class="sub">客户端自动压缩 → POST /api/photos → 写入 Netlify Blobs（原图 + 缩略图 + 元数据）</div>
+      <div class="sub">客户端自动转换 WebP → POST /api/photos → 写入 Netlify Blobs</div>
 
       <!-- 拖拽区 -->
       <div class="dropzone" id="dz">
         <div class="icon">📤</div>
         <h3>拖拽图片到这里，或点击选择</h3>
         <p>支持 JPG / PNG / WebP / GIF，单张最大 20MB，一次最多 12 张</p>
-        <span class="badge accent">上传前自动压缩 · 剥离多余 EXIF · 生成 WebP 缩略图</span>
+        <span class="badge accent">上传后自动转换为 WebP 格式 · 剥离多余 EXIF</span>
         <input type="file" id="fileInput" multiple accept="image/*" hidden>
       </div>
 
       <!-- 上传选项 -->
       <div class="form-grid" style="margin-top: 24px;">
-        <div class="field">
-          <label>默认标题（可留空，自动取文件名）</label>
-          <input type="text" placeholder="例如：2025 春节旅行">
-        </div>
         <div class="field" style="grid-column: 1 / -1;">
           <label>标签（回车添加）</label>
           <div class="tag-input" id="tagListUpload">

@@ -307,13 +307,12 @@ function initGallery() {
   };
 }
 
-/* ---------- 上传页 ---------- */
+/* ---------- 上传页（v0.9.6：全部转为 WebP，无默认标题） ---------- */
 function initUpload() {
   const dz = document.getElementById("dz");
   const fileInput = document.getElementById("fileInput");
   const queue = document.getElementById("queue");
   const btnUpload = document.getElementById("btnUpload");
-  const titleInput = document.getElementById("uploadTitle");
   const files = [];
 
   dz.addEventListener("click", () => fileInput.click());
@@ -333,7 +332,7 @@ function initUpload() {
         <div class="info">
           <div class="name">${f.name}</div>
           <div class="size">${fmtSize(f.size)} · ${f.type || "未知格式"}</div>
-          <div class="sub">待上传 · 将自动压缩为 JPEG</div>
+          <div class="sub">待上传 · 将自动转为 WebP</div>
           <div class="progress"><div class="bar"></div></div>
         </div>
         <div class="status">待上传</div>`;
@@ -347,7 +346,7 @@ function initUpload() {
     btnUpload.disabled = !files.length;
   }
 
-  // 浏览器端压缩：最长边 2048、JPEG 质量 0.85
+  // 浏览器端转换：最长边 2048、WebP 质量 0.85（不支持 WebP 编码时回退 JPEG）
   function compressImage(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -359,7 +358,8 @@ function initUpload() {
           canvas.width = Math.max(1, Math.round(img.width * scale));
           canvas.height = Math.max(1, Math.round(img.height * scale));
           canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.85), width: canvas.width, height: canvas.height });
+          const mime = canvas.toDataURL("image/webp").startsWith("data:image/webp") ? "image/webp" : "image/jpeg";
+          resolve({ dataUrl: canvas.toDataURL(mime, 0.85), mime, width: canvas.width, height: canvas.height });
         };
         img.onerror = reject;
         img.src = e.target.result;
@@ -369,15 +369,15 @@ function initUpload() {
     });
   }
 
-  // 单张真实上传（v0.9：canvas 压缩 → XHR 带进度 → Blobs）
+  // 单张真实上传（v0.9：canvas 转 WebP → XHR 带进度 → Blobs）
   function uploadOne(it) {
     return new Promise((resolve, reject) => {
       const row = it.row;
       const setSub = (t) => { row.querySelector(".sub").textContent = t; };
       const setPct = (p) => { row.querySelector(".bar").style.width = p + "%"; row.querySelector(".status").textContent = p + "%"; };
-      setSub("客户端压缩中…");
+      setSub("转换 WebP 中…");
       compressImage(it.f)
-        .then(({ dataUrl }) => {
+        .then(({ dataUrl, mime }) => {
           setSub("上传中…");
           const xhr = new XMLHttpRequest();
           xhr.open("POST", "/api/photos");
@@ -407,15 +407,17 @@ function initUpload() {
             reject(new Error("network"));
           };
           const tags = [...tagList.querySelectorAll(".t")].map((el) => el.childNodes[0].textContent.trim()).filter(Boolean);
+          // 标题自动取文件名（去扩展名），无默认标题输入
           xhr.send(JSON.stringify({
             dataBase64: dataUrl,
-            title: (titleInput && titleInput.value.trim()) || undefined,
+            mime,
+            title: it.f.name.replace(/\.[^.]+$/, "").trim() || undefined,
             tags,
           }));
         })
         .catch((e) => {
           row.querySelector(".status").className = "status err";
-          setSub("压缩失败");
+          setSub("转换失败");
           reject(e);
         });
     });
