@@ -438,8 +438,11 @@ function initUpload() {
   }
 
   btnUpload.addEventListener("click", () => {
-    btnUpload.disabled = true;
     const items = files.filter((it) => it.status === "ready");
+    if (!items.length) return;
+    // 诊断反馈：点击立即改按钮文字（排查"待上传"卡住问题，v0.9.17）
+    btnUpload.textContent = `处理中… (0/${items.length})`;
+    btnUpload.disabled = true;
     let done = 0;
     (async () => {
       for (const it of items) {
@@ -457,6 +460,8 @@ function initUpload() {
             await loadData();
             if (window.__refreshGallery) window.__refreshGallery();
           }
+        } else {
+          btnUpload.textContent = `处理中… (${done}/${items.length})`;
         }
       }
     })();
