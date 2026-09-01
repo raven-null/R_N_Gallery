@@ -3,6 +3,9 @@
   "version": "0.9.0",
   "private": true,
   "description": "基于 Netlify Blobs 的私人图库",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "dependencies": {
     "@netlify/blobs": "^11.0.2"
   },

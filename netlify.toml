@@ -6,5 +6,7 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+  # @netlify/blobs 11.x 要求 Node >= 22.12（Netlify 默认 18/20，必须显式指定）
+  node_version = "22"
 
 # API 路由由 Functions v2 的 config.path 声明（见 netlify/functions/photos.js），无需 redirects
