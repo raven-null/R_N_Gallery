@@ -8,8 +8,10 @@ const { getStore } = require("@netlify/blobs");
 
 const STORE_NAME = "photos";
 
+// v8 推荐：环境配置（NETLIFY_BLOBS_CONTEXT 或 connectLambda）就绪后，
+// 直接以 store 名获取；无需显式 siteID/token
 function store() {
-  return getStore({ name: STORE_NAME });
+  return getStore(STORE_NAME);
 }
 
 function json(body, statusCode = 200) {

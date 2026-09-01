@@ -45,13 +45,14 @@ function memStore(name) {
     },
   };
 }
-// 拦截 @netlify/blobs，替换为内存实现
+// 拦截 @netlify/blobs，替换为内存实现（含 v8 的 connectLambda 兼容）
 const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
   if (request === "@netlify/blobs") {
     return {
-      getStore: ({ name }) => memStore(name),
+      getStore: (name) => memStore(typeof name === "string" ? name : name.name),
       deleteStore: async () => {},
+      connectLambda: () => {},
     };
   }
   return origLoad.apply(this, arguments);

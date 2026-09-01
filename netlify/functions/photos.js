@@ -16,12 +16,17 @@ const {
   store, json, notFound, badRequest, unauthorized, serverError,
   auth, nanoid, imageSize, sniffMime,
 } = require("./_lib");
+const { connectLambda } = require("@netlify/blobs");
 
 const PREFIX_META = "meta/";
 const PREFIX_IMG = "img/";
 
 exports.handler = async (event) => {
   try {
+    // @netlify/blobs v8 兼容（v0.9.7）：
+    // Lambda compatibility mode 下 Blobs 环境不会自动配置，
+    // 必须用请求事件手动初始化；普通模式调用无副作用
+    connectLambda(event);
     const path = new URL(event.rawUrl).pathname;
     const seg = path.split("/").filter(Boolean); // ["api", "photos", id?, "raw"?]
     const method = event.httpMethod;
@@ -44,6 +49,16 @@ exports.handler = async (event) => {
   }
 };
 
+/* 批量并发读取元数据（分批，避免串行远程读超时/触发限流） */
+async function getMany(s, keys, batch = 20) {
+  const out = [];
+  for (let i = 0; i < keys.length; i += batch) {
+    const slice = keys.slice(i, i + batch);
+    out.push(...(await Promise.all(slice.map((k) => s.get(k, { type: "json" })))));
+  }
+  return out;
+}
+
 /* ---------- 列表（分页） ---------- */
 async function list(event) {
   if (!auth(event)) return unauthorized();
@@ -51,11 +66,8 @@ async function list(event) {
   const limit = Math.min(parseInt(q.limit, 10) || 60, 200);
   const s = store();
   const res = await s.list({ prefix: PREFIX_META, cursor: q.cursor, limit });
-  const photos = [];
-  for (const item of res.blobs) {
-    const m = await s.get(item.key, { type: "json" });
-    if (m) photos.push(m);
-  }
+  const metas = await getMany(s, res.blobs.map((b) => b.key));
+  const photos = metas.filter(Boolean);
   photos.sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""));
   return json({ photos, cursor: res.nextCursor || null, hasMore: !!res.nextCursor });
 }
@@ -185,8 +197,8 @@ async function stats(event) {
   const byMonth = {};
   do {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
-    for (const item of res.blobs) {
-      const m = await s.get(item.key, { type: "json" });
+    const metas = await getMany(s, res.blobs.map((b) => b.key));
+    for (const m of metas) {
       if (!m) continue;
       count++;
       bytes += m.size || 0;
@@ -206,10 +218,8 @@ async function exportAll(event) {
   const photos = [];
   do {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
-    for (const item of res.blobs) {
-      const m = await s.get(item.key, { type: "json" });
-      if (m) photos.push(m);
-    }
+    const metas = await getMany(s, res.blobs.map((b) => b.key));
+    for (const m of metas) if (m) photos.push(m);
     cursor = res.nextCursor;
   } while (cursor);
   return json({ exportedAt: new Date().toISOString(), count: photos.length, photos });
