@@ -492,62 +492,90 @@ function initUpload() {
 
 /* ---------- 设置页（v0.9：接入真实 API） ---------- */
 function initSettings() {
-  // 访问令牌（存 localStorage，API 请求自动携带）
-  const tokenInput = document.getElementById("tokenInput");
-  if (tokenInput) {
-    tokenInput.value = localStorage.getItem("rn_token") || "";
-    tokenInput.addEventListener("change", () => {
-      localStorage.setItem("rn_token", tokenInput.value.trim());
-      tokenInput.value = tokenInput.value.trim();
-    });
-  }
-
-  const usageBar = document.getElementById("usageBar");
-  const usagePct = document.getElementById("usagePct");
   const stPhotos = document.getElementById("stPhotos");
   const stUsed = document.getElementById("stUsed");
-  const stQuota = document.getElementById("stQuota");
-  const monthBars = document.getElementById("monthBars");
+  const adminZone = document.getElementById("adminZone");
+  const loginForm = document.getElementById("adminLoginForm");
+  const loggedInBox = document.getElementById("adminLoggedIn");
+  const pwdInput = document.getElementById("adminPwd");
+  let isAdmin = false;
 
-  function renderStats(count, bytes, byMonth) {
-    usageBar.style.width = "100%";
-    usagePct.textContent = `${count} 张`;
-    stPhotos.innerHTML = `<b>${count}</b>张图片`;
-    stUsed.innerHTML = `<b>${(bytes / 1e6).toFixed(0)}</b>MB 已用`;
-    stQuota.innerHTML = `<b>${USE_API ? "Blobs" : "本地"}</b>${USE_API ? "" : "演示"}数据源`;
-    const entries = Object.entries(byMonth || {}).sort((a, b) => b[0].localeCompare(a[0]));
-    const max = Math.max(1, ...entries.map(([, c]) => c));
-    monthBars.innerHTML = entries.length
-      ? entries.map(([m, c]) => `<div class="mb"><span>${m}</span><div class="track"><i style="width:${(c / max) * 100}%"></i></div><span class="cnt">${c} 张</span></div>`).join("")
-      : "";
+  /* ---------- 管理员登录（v0.9.24） ---------- */
+  async function checkAdmin() {
+    try {
+      const res = await fetch("/api/auth/check", { headers: apiHeaders() });
+      const d = await res.json();
+      isAdmin = !!(d && d.ok);
+    } catch (e) {
+      isAdmin = false;
+    }
+    applyAdminUI();
   }
+  function applyAdminUI() {
+    adminZone.hidden = !isAdmin;
+    loginForm.hidden = isAdmin;
+    loggedInBox.hidden = !isAdmin;
+    if (isAdmin) refreshTags();
+  }
+  document.getElementById("btnAdminLogin").onclick = async () => {
+    const pwd = pwdInput.value.trim();
+    if (!pwd) return;
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pwd }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        localStorage.setItem("rn_token", pwd);
+        isAdmin = true;
+        applyAdminUI();
+      } else {
+        alert(d.error || "密码错误");
+      }
+    } catch (e) {
+      alert("网络错误，请稍后重试");
+    }
+    pwdInput.value = "";
+  };
+  document.getElementById("btnAdminLogout").onclick = () => {
+    localStorage.removeItem("rn_token");
+    isAdmin = false;
+    applyAdminUI();
+  };
 
+  /* ---------- 图库统计（简化：张数 + MB） ---------- */
+  function renderStats(count, bytes) {
+    stPhotos.innerHTML = `<b>${count}</b> 张图片`;
+    stUsed.innerHTML = `<b>${(bytes / 1e6).toFixed(1)}</b> MB`;
+  }
   async function refreshStats() {
     if (USE_API) {
       try {
         const res = await apiFetch("/api/meta/stats");
         const d = await res.json();
-        renderStats(d.count, d.bytes || 0, d.byMonth || {});
+        renderStats(d.count, d.bytes || 0);
         return;
       } catch (e) { /* 回退本地统计 */ }
     }
     const total = PHOTOS.reduce((s, p) => s + (p.size || 0), 0);
-    const byMonth = {};
-    PHOTOS.forEach((p) => { const m = (p.takenAt || "").slice(0, 7); byMonth[m] = (byMonth[m] || 0) + 1; });
-    renderStats(PHOTOS.length, total, byMonth);
+    renderStats(PHOTOS.length, total);
   }
   refreshStats();
 
-  // 标签管理（统计来自当前数据源）
-  const counts = {};
-  PHOTOS.forEach((p) => p.tags.forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
-  const tagMgr = document.getElementById("tagMgr");
-  tagMgr.innerHTML = Object.entries(counts).map(([t, c]) => `
-    <span class="badge accent" style="margin:0 6px 8px 0;padding:5px 12px">${t} · ${c}
-      <button onclick="this.parentElement.remove()" style="background:none;border:none;color:inherit;margin-left:6px;cursor:pointer">×</button>
-    </span>`).join("");
+  /* ---------- 标签管理（管理员） ---------- */
+  function refreshTags() {
+    const counts = {};
+    PHOTOS.forEach((p) => p.tags.forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
+    const tagMgr = document.getElementById("tagMgr");
+    tagMgr.innerHTML = Object.entries(counts).map(([t, c]) => `
+      <span class="badge accent" style="margin:0 6px 8px 0;padding:5px 12px">${t} · ${c}
+        <button onclick="this.parentElement.remove()" style="background:none;border:none;color:inherit;margin-left:6px;cursor:pointer">×</button>
+      </span>`).join("");
+  }
 
-  // 清空图库（真实调用）
+  // 清空图库（管理员，真实调用）
   const modal = document.getElementById("wipeModal");
   document.getElementById("btnWipe").onclick = () => modal.classList.add("open");
   document.getElementById("btnConfirmWipe").onclick = async () => {
@@ -560,7 +588,7 @@ function initSettings() {
       try {
         const res = await apiFetch("/api/photos", { method: "DELETE" });
         const d = await res.json();
-        b.textContent = `✓ 已清空 ${d.deleted || 0} 个 key`;
+        b.textContent = `✓ 已清空 ${d.deleted || 0} 项`;
         await loadData();
         if (window.__refreshGallery) window.__refreshGallery();
         refreshStats();
@@ -607,6 +635,9 @@ function initSettings() {
     }
     setTimeout(() => { this.textContent = old; this.disabled = false; }, 2200);
   };
+
+  // 页面加载时检查管理员登录状态
+  checkAdmin();
 }
 
 /* ---------- 搜索窗口（v0.8.6，独立界面） ---------- */

@@ -1561,22 +1561,7 @@ body[data-page="gallery"] .page {
   font-size: 18px;
 }
 
-.usage-bar { 
-  height: 8px; 
-  background: rgba(16, 19, 27, 0.8); 
-  border-radius: 99px; 
-  overflow: hidden; 
-  margin: 16px 0 10px; 
-}
-.usage-bar .bar {
-  height: 100%;
-  width: 0;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  border-radius: 99px;
-  transition: width 1.5s var(--ease-out);
-  box-shadow: 0 0 16px rgba(255, 159, 10, 0.4);
-}
-.usage-stats { display: flex; gap: 36px; flex-wrap: wrap; margin-top: 20px; }
+.usage-stats { display: flex; gap: 48px; flex-wrap: wrap; margin-top: 4px; }
 .usage-stats .s { 
   font-size: 13px; 
   color: var(--text-faint); 
@@ -1584,24 +1569,12 @@ body[data-page="gallery"] .page {
 }
 .usage-stats .s b { 
   display: block; 
-  font-size: 24px; 
+  font-size: 28px; 
   color: var(--text); 
   font-weight: 700;
   letter-spacing: -0.02em;
   margin-bottom: 4px;
 }
-
-.month-bars { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
-.month-bars .mb { display: flex; align-items: center; gap: 14px; font-size: 13px; color: var(--text-dim); }
-.month-bars .mb .track { flex: 1; height: 6px; background: rgba(255, 255, 255, 0.06); border-radius: 99px; overflow: hidden; }
-.month-bars .mb .track i {
-  display: block; height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  border-radius: 99px;
-  transition: width 1.2s var(--ease-out);
-  box-shadow: 0 0 8px rgba(255, 159, 10, 0.3);
-}
-.month-bars .mb .cnt { width: 60px; text-align: right; color: var(--text-faint); font-weight: 400; }
 
 .danger-zone { 
   border-color: rgba(255, 69, 58, 0.25) !important; 

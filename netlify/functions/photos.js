@@ -28,9 +28,14 @@ exports.default = async (req) => {
     const seg = path.split("/").filter(Boolean); // ["api", "photos", id?, "raw"?]
     const rest = seg.slice(2);
 
-    // 统一鉴权：写操作（POST/PATCH/DELETE）校验写令牌，读操作校验读令牌
+    // 管理员登录验证必须先于写操作鉴权（登录请求自身不带 token）
+    if (method === "POST" && path.endsWith("/api/auth/login")) return authLogin(req);
+    if (method === "GET" && path.endsWith("/api/auth/check")) return authCheck(req);
+
+    // 鉴权（v0.9.24）：读操作全部放行（普通用户免登录观看）；
+    // 写操作（POST/PATCH/DELETE）校验 ADMIN_TOKEN / UPLOAD_TOKEN
     const isWrite = method === "POST" || method === "PATCH" || method === "DELETE";
-    if (!auth(req, isWrite)) return unauthorized();
+    if (isWrite && !auth(req, true)) return unauthorized();
 
     if (method === "GET" && path.endsWith("/api/photos")) return list(url);
     if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(rest[0]);
@@ -57,8 +62,32 @@ exports.config = {
     "/api/meta/stats",
     "/api/export",
     "/api/import",
+    "/api/auth/login",
+    "/api/auth/check",
   ],
 };
+
+/* ---------- 管理员登录验证（v0.9.24） ----------
+   密码 = ADMIN_TOKEN 环境变量；登录成功后前端将其作为 X-Auth-Token 使用 */
+async function authLogin(req) {
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return badRequest("Invalid JSON body");
+  }
+  const admin = process.env.ADMIN_TOKEN;
+  if (!admin) return json({ ok: false, error: "站点未配置管理员密码（请设置 ADMIN_TOKEN 环境变量）" }, 403);
+  if (String(body.password || "") === admin) return json({ ok: true });
+  return unauthorized("密码错误");
+}
+
+function authCheck(req) {
+  const admin = process.env.ADMIN_TOKEN;
+  if (!admin) return json({ ok: false });
+  const header = (req.headers.get("x-auth-token") || "").trim();
+  return header === admin ? json({ ok: true }) : json({ ok: false });
+}
 
 /* ---------- 列表（分页） ---------- */
 async function list(url) {
