@@ -888,6 +888,74 @@ body[data-page="gallery"] .page {
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 .loadmore { text-align: center; padding: 30px 0 10px; color: var(--text-faint); font-size: 13.5px; }
+
+/* ============================================================
+   图库状态（v0.9.5）· 加载中 / 空库 / 失败，页面中心动画
+   ============================================================ */
+.gallery-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 90px 20px;
+  text-align: center;
+  animation: rise 0.5s var(--ease-out) both;
+}
+.gallery-state .state-ico {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 22px;
+  position: relative;
+  color: rgba(255, 255, 255, 0.55);
+}
+.gallery-state .state-ico svg {
+  width: 100%;
+  height: 100%;
+}
+/* 呼吸光晕环（空态） */
+.gallery-state .state-ico::after {
+  content: "";
+  position: absolute;
+  inset: -20px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 159, 10, 0.28);
+  animation: ring-pulse 2.4s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes ring-pulse {
+  0% { transform: scale(0.72); opacity: 0.9; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+/* 加载态：旋转光环 */
+.gallery-state.loading .state-ico::before {
+  content: "";
+  position: absolute;
+  inset: -20px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.08);
+  border-top-color: var(--accent);
+  animation: spin 1s linear infinite;
+  pointer-events: none;
+}
+.gallery-state.loading .state-ico::after {
+  animation: ring-pulse 2.4s ease-out infinite;
+  border-color: rgba(255, 159, 10, 0.18);
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+/* 空态：图标浮动 */
+.gallery-state.empty .state-ico { animation: floaty 3s ease-in-out infinite; }
+.gallery-state.empty .state-ico::before { display: none; }
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+.gallery-state .state-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.gallery-state .state-sub { font-size: 13.5px; color: var(--text-faint); margin-bottom: 18px; }
 .empty {
   text-align: center;
   padding: 80px 20px;

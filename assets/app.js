@@ -8,16 +8,43 @@
 let PHOTOS = [];
 let USE_API = false;
 
+/* ---------- 图库状态组件（v0.9.5）：loading / empty / error / null ---------- */
+function showGalleryState(mode) {
+  const el = document.getElementById("galleryState");
+  if (!el) return;
+  el.hidden = !mode;
+  el.className = "gallery-state" + (mode ? " " + mode : "");
+  const t = document.getElementById("stateTitle");
+  const s = document.getElementById("stateSub");
+  const r = document.getElementById("btnRetry");
+  if (!mode) return;
+  if (mode === "loading") {
+    t.textContent = "正在加载图库…";
+    s.textContent = "图片存储于 Netlify Blobs";
+    r.hidden = true;
+  } else if (mode === "empty") {
+    t.textContent = "没有匹配的图片";
+    s.textContent = "换个关键词试试";
+    r.hidden = true;
+  } else if (mode === "error") {
+    t.textContent = "图库加载失败";
+    s.textContent = "请检查网络连接或稍后重试";
+    r.hidden = false;
+  }
+}
+
 async function loadData() {
+  showGalleryState("loading");
   try {
     const res = await fetch("/api/photos?limit=200", { headers: apiHeaders() });
     if (!res.ok) throw new Error("api unavailable");
     const data = await res.json();
     PHOTOS = (data.photos || []).map((p) => ({ ...p, url: `/api/photos/${p.id}/raw` }));
     USE_API = true;
+    showGalleryState(null); // 由 render 决定显示图片或空态
   } catch (e) {
-    // API 不可用（本地 file:// 直接打开等）：保持空库
     PHOTOS = [];
+    showGalleryState("error");
   }
 }
 
@@ -224,10 +251,15 @@ function initGallery() {
     grid.innerHTML = "";
     const slice = filtered.slice(0, shown || PAGE);
     if (!slice.length) {
-      grid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">🖼️</div>没有匹配的图片<br>换个关键词试试</div>`;
       document.getElementById("loadMore").style.display = "none";
+      // 加载中 / 加载失败的状态不覆盖，其余情况显示空态动画
+      const st = document.getElementById("galleryState");
+      if (!(st && (st.classList.contains("loading") || st.classList.contains("error")))) {
+        showGalleryState("empty");
+      }
       return;
     }
+    showGalleryState(null);
     grid.innerHTML = slice.map(cardHTML).join("");
     shown = slice.length;
     document.getElementById("loadMore").style.display =
@@ -578,7 +610,7 @@ function initSearch() {
     count.hidden = false;
     count.textContent = `找到 ${list.length} 张`;
     if (!list.length) {
-      results.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div>没有找到与「${q}」相关的图片</div>`;
+      results.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></div>没有找到与「${q}」相关的图片</div>`;
       return;
     }
     results.innerHTML = list.map((p) => `
@@ -601,14 +633,24 @@ function initSearch() {
   render();
 }
 
-/* ---------- 分发（v0.9：先加载数据源再初始化） ---------- */
+/* ---------- 分发（v0.9.5：先显示加载动画 → 初始化 → 拉取数据） ---------- */
 document.addEventListener("DOMContentLoaded", async () => {
-  await loadData();
+  showGalleryState("loading");
   initPageSwitch();
   initGallery();
   initSearch();
   initUpload();
   initSettings();
+  // 重试按钮
+  const retry = document.getElementById("btnRetry");
+  if (retry) {
+    retry.onclick = async () => {
+      await loadData();
+      if (window.__refreshGallery) window.__refreshGallery();
+    };
+  }
+  await loadData();
+  if (window.__refreshGallery) window.__refreshGallery();
 });
 
 /* ---------- 页面窗口（v0.8）· 上传/设置以独立窗口层叠悬浮于图库上方 ---------- */
