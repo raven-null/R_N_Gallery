@@ -30,11 +30,26 @@
 ## 本地开发
 
 ```bash
-npm install
-netlify dev        # 本地模拟 Functions + 静态站点
+npm install          # 安装依赖（@netlify/blobs）
+npm run dev          # 启动本地开发服务器 → http://localhost:8787
 ```
 
-直接双击 `index.html` 也可预览（无 API 时自动回退静态图片数据）。
+> `dev` 使用内置的 `scripts/dev-server.js`（无需 netlify-cli）：
+> 静态文件 + `/api/*` 完整路由（直接调用 Netlify Function handler），
+> Blobs 以**内存模拟**（重启后数据清空）。浏览器打开
+> `http://localhost:8787` 即可完整使用（API 数据源自动生效）。
+
+直接双击 `index.html` 也可预览 UI（无 API 时自动回退静态图片数据，但上传/导入不可用）。
+
+### 快速自检
+
+```bash
+curl http://localhost:8787/api/photos          # 列表（空库返回 {"photos":[]}）
+curl http://localhost:8787/api/meta/stats      # 统计
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"dataBase64":"data:image/png;base64,iVBORw0KGgo="}' \
+  http://localhost:8787/api/photos             # 上传
+```
 
 ## 部署（Netlify）
 

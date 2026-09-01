@@ -1,6 +1,12 @@
 # 基于 Netlify Blobs 的网页图库 · 设计文档
 
-> 版本：v0.9 ｜ 状态：已整合可部署 ｜ 目标部署：Netlify + Blobs
+> 版本：v0.9.2 ｜ 状态：已整合 + 本地检测通过 ｜ 目标部署：Netlify + Blobs
+
+## 本地检测结果（v0.9.2，全部通过）
+
+- 新增 **`scripts/dev-server.js`**：内置开发服务器（静态文件 + `/api/*` 调用真实 Function handler + 内存 Blobs 模拟），`npm run dev` → http://localhost:8787，无需 netlify-cli/网络；
+- API 全链路测试通过：列表 / 单张 / raw 字节输出（MIME 与文件头校验）/ 上传（PNG 尺寸解析）/ PATCH / DELETE 单张 / 清空 / stats（计数+字节+月份分布）/ export / import（webp 600×899 尺寸解析正确）；
+- 修复：① `/api/meta/stats` 被单张查询路由误拦截（补 `startsWith("/api/photos/")` 限定）；② import 拉取静态图时本地环境用 http、线上用 https 的协议判断；③ `IMAGES` 数组 3 个磁盘缺失的引用（640.png、148749850…、143255789…）已清理，与磁盘 243 文件完全对齐；④ 新增 `scripts/check-images.js` 完整性检查脚本。
 
 ## 整合状态（v0.9，制作完成）
 
