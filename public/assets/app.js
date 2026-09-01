@@ -34,7 +34,7 @@ function showGalleryState(mode) {
   if (!mode) return;
   if (mode === "loading") {
     t.textContent = "正在加载图库…";
-    s.textContent = "图片存储于 Netlify Blobs";
+    s.textContent = "请稍候";
     r.hidden = true;
   } else if (mode === "empty") {
     t.textContent = "没有匹配的图片";
@@ -346,7 +346,7 @@ function initUpload() {
         <div class="info">
           <div class="name">${f.name}</div>
           <div class="size">${fmtSize(f.size)} · ${f.type || "未知格式"}</div>
-          <div class="sub">待上传 · 将自动转为 WebP</div>
+          <div class="sub">待上传</div>
           <div class="progress"><div class="bar"></div></div>
         </div>
         <div class="status">待上传</div>`;
@@ -406,7 +406,7 @@ function initUpload() {
             if (xhr.status >= 200 && xhr.status < 300) {
               row.querySelector(".status").textContent = "✓";
               row.querySelector(".status").className = "status ok";
-              setSub("已存入 Netlify Blobs");
+              setSub("已上传");
               resolve();
             } else {
               let msg = "上传失败";
