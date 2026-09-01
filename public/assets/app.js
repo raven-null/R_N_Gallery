@@ -5,6 +5,20 @@
    ============================================================ */
 "use strict";
 
+// 调试辅助：全局 JS 错误在页面角落显示红条（排查上传问题用）
+window.addEventListener("error", (e) => {
+  let box = document.getElementById("debugErr");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "debugErr";
+    box.style.cssText =
+      "position:fixed;bottom:10px;left:10px;z-index:9999;background:rgba(220,38,38,.92);color:#fff;" +
+      "font:12px/1.5 monospace;padding:8px 12px;border-radius:8px;max-width:80vw;white-space:pre-wrap;box-shadow:0 4px 20px rgba(0,0,0,.4)";
+    document.body.appendChild(box);
+  }
+  box.textContent = "JS 错误: " + (e.message || e);
+});
+
 let PHOTOS = [];
 let USE_API = false;
 
