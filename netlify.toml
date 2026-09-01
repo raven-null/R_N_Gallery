@@ -1,7 +1,9 @@
 [build]
-  publish = "."
-  command = "echo static-site-no-build"
+  command = "echo 'Static site with Functions'"
+  publish = "public"
 
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+
+# API 路由由 Functions v2 的 config.path 声明（见 netlify/functions/photos.js），无需 redirects

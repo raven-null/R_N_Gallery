@@ -13,7 +13,7 @@ const path = require("path");
 const Module = require("module");
 
 const PORT = 8787;
-const ROOT = path.join(__dirname, "..");
+const ROOT = path.join(__dirname, "..", "public"); // 与 netlify.toml publish 一致
 
 /* ---------- 内存 Blobs 模拟 ---------- */
 const memStores = new Map();
