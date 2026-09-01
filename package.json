@@ -4,10 +4,10 @@
   "private": true,
   "description": "基于 Netlify Blobs 的私人图库",
   "dependencies": {
-    "@netlify/blobs": "^8.1.0"
+    "@netlify/blobs": "^8.2.0"
   },
   "scripts": {
-    "dev": "netlify dev",
+    "dev": "node scripts/dev-server.js",
     "build": "echo '静态站点，无需构建'"
   }
 }

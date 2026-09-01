@@ -28,8 +28,8 @@ exports.handler = async (event) => {
     const rest = seg.slice(2);
 
     if (method === "GET" && path.endsWith("/api/photos")) return list(event);
-    if (method === "GET" && rest.length === 2 && rest[1] === "raw") return raw(event, rest[0]);
-    if (method === "GET" && rest.length === 1) return getMeta(event, rest[0]);
+    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(event, rest[0]);
+    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 1) return getMeta(event, rest[0]);
     if (method === "POST" && path.endsWith("/api/photos")) return upload(event);
     if (method === "PATCH" && rest.length === 1) return patch(event, rest[0]);
     if (method === "DELETE" && path.endsWith("/api/photos")) return clearAll(event);
@@ -229,7 +229,8 @@ async function importStatic(event) {
   if (!files.length) return badRequest("Missing files list");
 
   const host = event.headers["x-forwarded-host"] || event.headers.host;
-  const origin = `https://${host}`;
+  const proto = host.includes("localhost") || host.startsWith("127.") ? "http" : "https";
+  const origin = `${proto}://${host}`;
   const s = store();
   let imported = 0;
   const errors = [];
