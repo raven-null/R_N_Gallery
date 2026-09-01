@@ -50,7 +50,8 @@ function showGalleryState(mode) {
 async function loadData() {
   showGalleryState("loading");
   try {
-    const res = await fetch("/api/photos?limit=200", { headers: apiHeaders() });
+    // cache: no-store 强制绕过浏览器缓存，确保上传后立即可见（v0.9.19）
+    const res = await fetch("/api/photos?limit=200", { headers: apiHeaders(), cache: "no-store" });
     if (!res.ok) throw new Error("api unavailable");
     const data = await res.json();
     PHOTOS = (data.photos || []).map((p) => ({ ...p, url: `/api/photos/${p.id}/raw` }));
