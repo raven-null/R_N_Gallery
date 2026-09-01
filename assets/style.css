@@ -196,6 +196,12 @@ input, textarea, select { font-family: inherit; }
 /* ---------- 页面容器 · 入场动效 ---------- */
 .page { max-width: 1280px; margin: 0 auto; padding: 34px 28px 80px; }
 
+/* 图库页全宽铺满（v0.9.3）：无 max-width 限制 */
+body[data-page="gallery"] .page {
+  max-width: none;
+  padding: 24px 20px 80px;
+}
+
 .page-head {
   display: flex;
   align-items: flex-end;
@@ -781,8 +787,8 @@ input, textarea, select { font-family: inherit; }
    瀑布流网格 · 液态玻璃卡片
    ============================================================ */
 .masonry { 
-  columns: 4 240px; 
-  column-gap: 18px; 
+  columns: 240px; /* 仅指定列宽，浏览器按视口宽度自动生成列数并铺满（v0.9.3） */
+  column-gap: 16px; 
 }
 
 .card {
