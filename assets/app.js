@@ -1,334 +1,24 @@
-﻿/* ============================================================
-   图库设计稿 · 共享脚本（纯前端演示，无后端依赖）
-   占位图用内联 SVG 生成，真实部署时替换为 /api/photos 数据源
+/* ============================================================
+   R_N_Gallery 前端脚本
+   数据源（v0.9.4 起）：仅从 Netlify Blobs API（/api/photos）加载；
+   已移除本地静态图片与自带假数据（image/ 目录、随机标签等）
    ============================================================ */
-
 "use strict";
 
-/* ---------- 假数据 ---------- */
-
-const TITLES = [
-  "海边日落", "城市夜景", "老巷咖啡", "山间晨雾", "周末厨房", "雨后的窗",
-  "街角书店", "海风与灯塔", "银杏大道", "巷口猫", "深夜面馆", "山顶云海",
-  "江边晚风", "夏日冰饮", "老城建筑", "湖畔倒影", "雪后初晴", "旧相机",
-  "骑行山道", "阳台多肉", "远方的火车", "夜市灯火", "森林小径", "海边栈道",
-  "咖啡馆一角", "黄昏剪影", "野餐时光", "地铁站台", "书桌一角", "花店门口",
-  "湖心小舟", "秋日落叶", "清晨集市", "天台远眺", "雨中伞影", "公路尽头",
-];
-
-const TAG_POOL = ["风景", "城市", "旅行", "美食", "日常", "夜景", "建筑", "植物"];
-const MONTHS = ["2025-01", "2025-02", "2025-03", "2025-04", "2025-05", "2024-12", "2024-11"];
-
-const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
-const pick = (arr) => arr[rnd(0, arr.length - 1)];
-
-function buildSVG(seed, w, h, label) {
-  const hue1 = seed * 47 % 360;
-  const hue2 = (hue1 + rnd(30, 140)) % 360;
-  const shapes = [];
-  const n = 3 + (seed % 3);
-  for (let i = 0; i < n; i++) {
-    const cx = rnd(5, 95), cy = rnd(5, 95), r = rnd(8, 40);
-    shapes.push(`<circle cx="${cx}%" cy="${cy}%" r="${r}%" fill="rgba(255,255,255,0.08)"/>`);
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="hsl(${hue1},55%,38%)"/>
-      <stop offset="1" stop-color="hsl(${hue2},60%,24%)"/>
-    </linearGradient></defs>
-    <rect width="${w}" height="${h}" fill="url(#g)"/>
-    ${shapes.join("")}
-    <text x="50%" y="50%" fill="rgba(255,255,255,0.5)" font-family="sans-serif" font-size="${Math.round(w / 14)}" text-anchor="middle" dominant-baseline="middle">${label}</text>
-  </svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-}
-
-const IMAGES = [
-  "image/103743220_p0_master1200.webp",
-  "image/104715039_p0_master1200.webp",
-  "image/106832400_p0_master1200.webp",
-  "image/107284494_p0_master1200.webp",
-  "image/110880036_p0_master1200.webp",
-  "image/112060560_p0_master1200.webp",
-  "image/112110860_p0_master1200.webp",
-  "image/114080166_p0_master1200.webp",
-  "image/114326435_p0_master1200.webp",
-  "image/115489667_p0_master1200.webp",
-  "image/115490125_p0_master1200.webp",
-  "image/115540271_p0_master1200.webp",
-  "image/115544568_p0_master1200.webp",
-  "image/115577390_p0_master1200.webp",
-  "image/115587250_p0_master1200.webp",
-  "image/115601436_p0_master1200.webp",
-  "image/115644653_p0_master1200.webp",
-  "image/115659964_p0_master1200.webp",
-  "image/115668587_p0_master1200.webp",
-  "image/115675233_p0_master1200.webp",
-  "image/115751416_p0_master1200.webp",
-  "image/115769965_p0_master1200.webp",
-  "image/115878114_p0_master1200.webp",
-  "image/115898679_p0_master1200.webp",
-  "image/115908961_p0_master1200.webp",
-  "image/115952650_p0_master1200.webp",
-  "image/115984241_p0_master1200.webp",
-  "image/116056187_p0_master1200.webp",
-  "image/116168231_p0_master1200.webp",
-  "image/116175351_p0_master1200.webp",
-  "image/116181131_p0_master1200.webp",
-  "image/116215975_p0_master1200.webp",
-  "image/116217936_p0_master1200.webp",
-  "image/116238756_p0_master1200.webp",
-  "image/116238756_p1_master1200.webp",
-  "image/116330656_p0_master1200.webp",
-  "image/116397559_p0_master1200.webp",
-  "image/116466034_p0_master1200.webp",
-  "image/116492383_p0_master1200.webp",
-  "image/116492383_p1_master1200.webp",
-  "image/116496284_p0_master1200.webp",
-  "image/116497871_p0_master1200.webp",
-  "image/116501438_p0_master1200.webp",
-  "image/116525574_p0_master1200.webp",
-  "image/116539963_p0_master1200.webp",
-  "image/116559973_p0_master1200.webp",
-  "image/116567805_p0_master1200.webp",
-  "image/116584300_p0_master1200.webp",
-  "image/116588422_p0_master1200.webp",
-  "image/116603756_p0_master1200.webp",
-  "image/116774710_p0_master1200.webp",
-  "image/116777017_p0_master1200.webp",
-  "image/116790581_p0_master1200.webp",
-  "image/116796629_p0_master1200.webp",
-  "image/116797937_p0_master1200.webp",
-  "image/116800090_p0_master1200.webp",
-  "image/116804976_p0_master1200.webp",
-  "image/116828226_p0_master1200.webp",
-  "image/116829611_p0_master1200.webp",
-  "image/116831971_p0_master1200.webp",
-  "image/116846172_p0_master1200.webp",
-  "image/116854370_p0_master1200.webp",
-  "image/116863286_p0_master1200.webp",
-  "image/116888989_p0_master1200.webp",
-  "image/116895667_p0_master1200.webp",
-  "image/116968693_p0_master1200.webp",
-  "image/116977464_p0_master1200.webp",
-  "image/117047449_p0_master1200.webp",
-  "image/117150093_p0_master1200.webp",
-  "image/117249612_p0_master1200.webp",
-  "image/117281955_p0_master1200.webp",
-  "image/117287363_p0_master1200.webp",
-  "image/117315975_p0_master1200.webp",
-  "image/117421511_p0_master1200.webp",
-  "image/117470112_p0_master1200.webp",
-  "image/117513133_p0_master1200.webp",
-  "image/117730389_p0_master1200.webp",
-  "image/117747746_p0_master1200.webp",
-  "image/117767872_p0_master1200.webp",
-  "image/117779633_p0_master1200.webp",
-  "image/117789763_p0_master1200.webp",
-  "image/117891340_p0_master1200.webp",
-  "image/117957082_p0_master1200.webp",
-  "image/117967164_p0_master1200.webp",
-  "image/117977916_p0_master1200.webp",
-  "image/118051098_p0_master1200.webp",
-  "image/118257715_p0_master1200.webp",
-  "image/118689658_p0_master1200.webp",
-  "image/118761695_p0_master1200.webp",
-  "image/118937249_p0_master1200.webp",
-  "image/118981245_p0_master1200.webp",
-  "image/119042176_p0_master1200.webp",
-  "image/119113171_p0_master1200.webp",
-  "image/119213080_p0_master1200.webp",
-  "image/119581897_p0_master1200.webp",
-  "image/119920925_p0_master1200.webp",
-  "image/120014999_p0_master1200.webp",
-  "image/120260206_p0_master1200.webp",
-  "image/120266467_p0_master1200.webp",
-  "image/120901470_p0_master1200.webp",
-  "image/121015371_p12_master1200.webp",
-  "image/121052825_p0_master1200.webp",
-  "image/121114329_p0_master1200.webp",
-  "image/121140953_p0_master1200.webp",
-  "image/121143568_p0_master1200.webp",
-  "image/121173581_p0_master1200.webp",
-  "image/121225345_p0_master1200.webp",
-  "image/121691790_p0_master1200.webp",
-  "image/121801936_p0_master1200.webp",
-  "image/122368745_p0_master1200.webp",
-  "image/122521132_p1_master1200.webp",
-  "image/122614610_p0_master1200.webp",
-  "image/122614610_p1_master1200.webp",
-  "image/122614610_p2_master1200.webp",
-  "image/122614610_p3_master1200.webp",
-  "image/122614610_p4_master1200.webp",
-  "image/122673888_p0_master1200.webp",
-  "image/123109218_p0_master1200.webp",
-  "image/123205450_p0_master1200.webp",
-  "image/123480319_p0_master1200.webp",
-  "image/123629759_p0_master1200.webp",
-  "image/123696031_p0_master1200.webp",
-  "image/123854361_p0_master1200.webp",
-  "image/123854588_p0_master1200.webp",
-  "image/123898111_p0_master1200.webp",
-  "image/123931514_p0_master1200.webp",
-  "image/124055136_p0_master1200.webp",
-  "image/124329325_p0_master1200.webp",
-  "image/124395768_p0_master1200.webp",
-  "image/124406455_p0_master1200.webp",
-  "image/124453293_p0_master1200.webp",
-  "image/124494047_p0_master1200.webp",
-  "image/124532264_p0_master1200.webp",
-  "image/124556595_p0_master1200.webp",
-  "image/124653368_p0_master1200.webp",
-  "image/124770810_p0_master1200.webp",
-  "image/124806633_p0_master1200 (2).webp",
-  "image/124883841_p0_master1200.webp",
-  "image/124909249_p0_master1200.webp",
-  "image/124942797_p0_master1200.webp",
-  "image/124988748_p0_master1200.webp",
-  "image/125099803_p0_master1200.webp",
-  "image/125155522_p0_master1200.webp",
-  "image/125160586_p0_master1200.webp",
-  "image/125311062_p0_master1200.webp",
-  "image/125481247_p0_master1200.webp",
-  "image/125550222_p0_master1200.webp",
-  "image/125561141_p0_master1200.webp",
-  "image/125679108_p0_master1200.webp",
-  "image/125707008_p0_master1200.webp",
-  "image/125754413_p0_master1200.webp",
-  "image/125851598_p0_master1200.webp",
-  "image/125911446_p0_master1200.webp",
-  "image/125924741_p0_master1200.webp",
-  "image/126071281_p2_master1200.webp",
-  "image/126763820_p0_master1200.webp",
-  "image/126871938_p0_master1200.webp",
-  "image/126903769_p0_master1200.webp",
-  "image/126947271_p0_master1200.webp",
-  "image/127255874_p0_master1200.webp",
-  "image/127329113_p0_master1200.webp",
-  "image/128055432_p0_master1200.webp",
-  "image/128071866_p0_master1200.webp",
-  "image/128090986_p0_master1200.webp",
-  "image/128195368_p0_master1200.webp",
-  "image/128203650_p0_master1200.webp",
-  "image/128325139_p0_master1200.webp",
-  "image/128415002_p0_master1200.webp",
-  "image/128470704_p0_master1200.webp",
-  "image/128489052_p0_master1200.webp",
-  "image/128869031_p0_master1200.webp",
-  "image/128931173_p0_master1200.webp",
-  "image/128942486_p0_master1200.webp",
-  "image/128942486_p4_master1200.webp",
-  "image/128942486_p5_master1200.webp",
-  "image/128991245_p0_master1200.webp",
-  "image/129002139_p0_master1200.webp",
-  "image/129002139_p1_master1200.webp",
-  "image/129131074_p0_master1200.webp",
-  "image/129178283_p0_master1200.webp",
-  "image/129189814_p0_master1200.webp",
-  "image/129318088_p0_master1200.webp",
-  "image/129338469_p0_master1200.webp",
-  "image/129359297_p1_master1200.webp",
-  "image/129464025_p0_master1200.webp",
-  "image/129473158_p0_master1200.webp",
-  "image/129565090_p0_master1200.webp",
-  "image/129604111_p0_master1200.webp",
-  "image/129686358_p0_master1200.webp",
-  "image/129690227_p1_master1200.webp",
-  "image/129691274_p1_master1200.webp",
-  "image/129780217_p0_master1200.webp",
-  "image/130007092_p0_master1200.webp",
-  "image/130115462_p0_master1200.webp",
-  "image/130151613_p0_master1200.webp",
-  "image/130179977_p0_master1200.webp",
-  "image/130243478_p0_master1200.webp",
-  "image/130253899_p0_master1200.webp",
-  "image/130263598_p1_master1200.webp",
-  "image/130331442_p0_master1200.webp",
-  "image/130396095_p4_master1200.webp",
-  "image/130473468_p0_master1200.webp",
-  "image/130821724_p0_master1200.webp",
-  "image/130897625_p0_master1200.webp",
-  "image/1712731386973.webp",
-  "image/1717436233131.webp",
-  "image/1741415484991c6164e199d312f0a626025effefb4fdd.webp",
-  "image/1741415487461a46d2043c3b78f110ac7c538ac1e4c92.webp",
-  "image/174141549031892cfc51be8f7e8b91fccf8753dedac7b.webp",
-  "image/174141549204676e7b99c8d73fafc3e228d880028f210.webp",
-  "image/17462886854960475b6d0f2f3a6ed5ad9d89918ed45b0980265843097ad0673563681ffe8fc90.0.webp",
-  "image/1748407863540.webp",
-  "image/1748407878857.webp",
-  "image/20240506173111239523.webp",
-  "image/92758904_p0_master1200.webp",
-  "image/95351785_p0_master1200.webp",
-  "image/98552343_p0_master1200.webp",
-  "image/mmexport01de5757ddad05ebe3357e6f4b1fcc0f_1735.webp",
-  "image/mmexport10191eb54b261097704241ca0881100b_1734.webp",
-  "image/mmexport1981c3c819a6e5e5eeec5c1ac1b02a03_1734.webp",
-  "image/mmexport29a4b521afce8acfd48226755d5462fe_1735.webp",
-  "image/mmexport42076ac490d5d38a72407d8f458af6e7_1734.webp",
-  "image/mmexport4e6ba8ccd0fba8c22675ea2b98063b96_1734.webp",
-  "image/mmexport5399b2982e59962ccd9f28b093e7237c_1734.webp",
-  "image/mmexport54b52fb5c65a7a99b2c4c7e95c94e822_1734.webp",
-  "image/mmexport66497a25e0d5ed0881f7e9be9f10fd43_1733.webp",
-  "image/mmexport6930af4003b21651a86ef3cfd5ccbfc8_1734.webp",
-  "image/mmexport6d8cfb2618311e4eea37c25ac72f898f_1736.webp",
-  "image/mmexport74fe7c86dfbac61febcb1c41d3e449b8_1734.webp",
-  "image/mmexport85c1bf33a9bc3ee825a3cd87030ffc2e_1734.webp",
-  "image/mmexport899578641df0c6495da3592373c40da5_1734.webp",
-  "image/mmexport8e52cb7657cb1670b3735d81f09c38a1_1734.webp",
-  "image/mmexporta982930f7721962fb8f87193762f5051_1735.webp",
-  "image/mmexportab283236d9d9b66668e0c9ca93011b86_1734.webp",
-  "image/mmexportc0823d3638d4dda2991453f72b2a5ab2_1734.webp",
-  "image/mmexportc143ab643ec3b550a355a09f2d35916a_1734.webp",
-  "image/mmexportc17bd2dbbf164da936f82954c1724fd9_1734.webp",
-  "image/mmexportc41b7d68051fcd3ba4e72a5fbcfdfddc_1735.webp",
-  "image/mmexportc623cc2d0d4a94a57670a28024271c5a_1734.webp",
-  "image/mmexportd94e3cc6760817576fe16a1bcd806e3d_1734.webp",
-  "image/mmexportdbc7480161c6dc4de2914417cfba39e5_1734.webp",
-  "image/mmexporte9199566c618311ecb1b7b9479b5affe_1734.webp",
-  "image/v2-34f3bb50afbd22088b3971ad5b4460ac_1440w.webp",
-];
-
-/* ============================================================
-   数据源（v0.9 整合版）：
-   优先从 Netlify Blobs API（/api/photos）加载；API 不可用时
-   回退到内置静态图片列表（本地 file:// 预览 / image/ 目录）
-   ============================================================ */
 let PHOTOS = [];
 let USE_API = false;
-
-const STATIC_PHOTOS = IMAGES.map((url, i) => {
-  const id = "k" + (i + 1).toString(36) + rnd(100, 999).toString(36);
-  const tags = new Set([pick(TAG_POOL), pick(TAG_POOL)]);
-  const title = TITLES[i % TITLES.length];
-  const month = MONTHS[i % MONTHS.length];
-  return {
-    id,
-    title,
-    desc: `${title} · 一组随手记录的生活片段`,
-    tags: [...tags],
-    takenAt: `${month}-${String(rnd(1, 28)).padStart(2, "0")}T${String(rnd(7, 21)).padStart(2, "0")}:${String(rnd(0, 59)).padStart(2, "0")}:00`,
-    uploadedAt: `${month}-20T10:00:00Z`,
-    size: rnd(900, 6200) * 1000,
-    width: 800,
-    height: rnd(420, 1000),
-    mime: "image/jpeg",
-    url,
-  };
-}).sort((a, b) => b.takenAt.localeCompare(a.takenAt));
 
 async function loadData() {
   try {
     const res = await fetch("/api/photos?limit=200", { headers: apiHeaders() });
     if (!res.ok) throw new Error("api unavailable");
     const data = await res.json();
-    if (data.photos && data.photos.length) {
-      PHOTOS = data.photos.map((p) => ({ ...p, url: `/api/photos/${p.id}/raw` }));
-      USE_API = true;
-      return;
-    }
-  } catch (e) { /* 回退静态 */ }
-  PHOTOS = [...STATIC_PHOTOS];
+    PHOTOS = (data.photos || []).map((p) => ({ ...p, url: `/api/photos/${p.id}/raw` }));
+    USE_API = true;
+  } catch (e) {
+    // API 不可用（本地 file:// 直接打开等）：保持空库
+    PHOTOS = [];
+  }
 }
 
 /* ---------- API 请求封装（token 存 localStorage，设置页可配置） ---------- */
@@ -792,7 +482,7 @@ function initSettings() {
   }
   refreshStats();
 
-  // 标签管理（演示：本地统计）
+  // 标签管理（统计来自当前数据源）
   const counts = {};
   PHOTOS.forEach((p) => p.tags.forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
   const tagMgr = document.getElementById("tagMgr");
@@ -800,33 +490,6 @@ function initSettings() {
     <span class="badge accent" style="margin:0 6px 8px 0;padding:5px 12px">${t} · ${c}
       <button onclick="this.parentElement.remove()" style="background:none;border:none;color:inherit;margin-left:6px;cursor:pointer">×</button>
     </span>`).join("");
-
-  // 导入静态图片到 Blobs（v0.9）
-  const btnImport = document.getElementById("btnImport");
-  if (btnImport) {
-    btnImport.onclick = async function () {
-      const old = this.textContent;
-      this.disabled = true;
-      this.textContent = "导入中…";
-      try {
-        const res = await apiFetch("/api/import", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ files: IMAGES.map((f) => f.replace(/^image\//, "")) }),
-        });
-        const d = await res.json();
-        this.textContent = `✓ 已导入 ${d.imported} 张${d.errors && d.errors.length ? `（失败 ${d.errors.length}）` : ""}`;
-        if (d.imported) {
-          await loadData();
-          if (window.__refreshGallery) window.__refreshGallery();
-          refreshStats();
-        }
-      } catch (e) {
-        this.textContent = `✗ ${e.message}`;
-      }
-      setTimeout(() => { this.textContent = old; this.disabled = false; }, 2600);
-    };
-  }
 
   // 清空图库（真实调用）
   const modal = document.getElementById("wipeModal");

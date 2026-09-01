@@ -61,7 +61,6 @@
         <div class="field" style="grid-column: 1 / -1;">
           <label>标签（回车添加）</label>
           <div class="tag-input" id="tagListUpload">
-            <span class="t">旅行<button type="button" title="移除">×</button></span>
             <input id="tagInputUpload" type="text" placeholder="输入后按回车…">
           </div>
           <div class="hint">标签用于图库墙筛选与搜索，建议每张图 2~4 个</div>
@@ -132,10 +131,9 @@
       <div class="settings-card">
         <h3><span class="ico">🗄</span> 数据维护</h3>
         <div style="display:flex;gap:12px;flex-wrap:wrap">
-          <button class="btn" id="btnImport">📥 导入静态图片到 Blobs</button>
           <button class="btn" id="btnExport">⬇ 导出全部元数据 (export.json)</button>
         </div>
-        <div class="hint" style="font-size:12px;color:var(--text-faint);margin-top:10px">「导入静态图片」将 image/ 目录的图片写入 Blobs 并生成元数据，导入后图库自动切换为 Blobs 数据源；导出用于迁移备份。</div>
+        <div class="hint" style="font-size:12px;color:var(--text-faint);margin-top:10px">导出全部图片元数据，用于迁移备份。</div>
       </div>
 
       <!-- 危险区 -->

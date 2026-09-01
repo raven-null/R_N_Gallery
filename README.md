@@ -9,15 +9,17 @@
 - 灯箱（信息面板：标题 / 日期 / 大小 / 分辨率 / 格式 / 标签）
 - 标签筛选（主要标签悬浮菜单）· 独立搜索窗口（`/` 快捷键）
 - 上传（浏览器端 canvas 压缩 → base64 → Blobs）
-- 设置（用量统计 / 导入静态图 / 导出元数据 / 清空）
+- 设置（用量统计 / 导出元数据 / 清空）
 - 上传 / 设置 / 搜索以悬浮窗口打开，旋转式文件堆叠
+- 数据仅来自 Netlify Blobs API（v0.9.4 起移除本地静态图片与假数据）
 
 ## 目录结构
 
 ```
 ├── index.html              前端主壳（SPA）
 ├── assets/                 样式与脚本
-├── image/                  静态图片素材（可导入 Blobs 后删除）
+├── scripts/
+│   └── dev-server.js       本地开发服务器（内存 Blobs 模拟）
 ├── netlify/
 │   └── functions/
 │       ├── _lib.js         共享库（store / 鉴权 / 尺寸解析）
@@ -39,7 +41,7 @@ npm run dev          # 启动本地开发服务器 → http://localhost:8787
 > Blobs 以**内存模拟**（重启后数据清空）。浏览器打开
 > `http://localhost:8787` 即可完整使用（API 数据源自动生效）。
 
-直接双击 `index.html` 也可预览 UI（无 API 时自动回退静态图片数据，但上传/导入不可用）。
+直接双击 `index.html` 只能预览 UI 骨架（无 API 时图库为空），完整功能请用 `npm run dev`。
 
 ### 快速自检
 
@@ -56,8 +58,10 @@ curl -X POST -H "Content-Type: application/json" \
 1. 把仓库推送到 GitHub（见下）；
 2. Netlify → **Add new site → Import an existing project** → 选择 `R_N_Gallery` 仓库；
 3. 构建配置自动读取 `netlify.toml`（publish = `.`，无需构建命令）；
-4. 部署完成后访问站点 → 设置窗口 → **导入静态图片**，将 `image/` 目录的图片写入 Blobs；
-5. 可选：删除 `image/` 目录释放空间（导入后前端自动走 API 数据源）。
+4. 部署完成后即可通过**上传窗口**添加图片（数据直接进入 Blobs）；
+5. 可选：配置 `ADMIN_TOKEN` 环境变量后，在设置页填写同一值作为访问令牌。
+
+> 注：v0.9.4 起已移除 `image/` 静态目录与「导入静态图片」入口（后端 `/api/import` 保留，如需批量导入可自行调用，需站点存在静态图片源）。
 
 ### 环境变量（可选）
 
