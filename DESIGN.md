@@ -1,6 +1,22 @@
 # 基于 Netlify Blobs 的网页图库 · 设计文档
 
-> 版本：v0.8 ｜ 状态：设计稿 ｜ 目标部署：Netlify
+> 版本：v0.9 ｜ 状态：已整合可部署 ｜ 目标部署：Netlify + Blobs
+
+## 整合状态（v0.9，制作完成）
+
+- **项目结构**：`index.html`（SPA 主壳）+ `assets/` + `image/`（静态图源）+ `netlify/functions/`（统一 API）+ `netlify.toml` + `package.json` + `README.md`；遗留独立页（upload/settings/detail）已删除；
+- **后端**：`photos.js` 统一入口处理全部 `/api/*`（列表/单张/raw 图片输出/上传/更新/删除/清空/统计/导出/导入），`_lib.js` 共享（Blobs store、`ADMIN_TOKEN`/`UPLOAD_TOKEN` 鉴权、webp/jpeg/png/gif 尺寸解析）；
+- **Blob key**：`img/<id>`（原图字节）+ `meta/<id>.json`（元数据）；
+- **前端数据源**：优先拉取 `/api/photos`（URL 指向 `/api/photos/<id>/raw`），API 不可用时回退 `image/` 静态列表（本地 file:// 预览可用）；上传为真实流程（canvas 压缩 → XHR 带进度 → Blobs）；设置页接入真实统计/导入/导出/清空，token 存 localStorage；
+- **导入流程**：部署后 → 设置窗口 →「导入静态图片到 Blobs」，将 `image/` 写入 Blobs（函数从站点同源 URL 拉取并解析尺寸），导入后图库自动切换数据源。
+
+## 部署指引（需用户执行）
+
+1. `git push -u origin main`（推送 GitHub 仓库 `raven-null/R_N_Gallery`，需有效 token/凭据）；
+2. Netlify → Import from GitHub → 选择仓库（自动读取 `netlify.toml`，publish=`.`、无需构建）；
+3. 可选配置环境变量 `ADMIN_TOKEN`（设置页填写同一值作访问令牌）；
+4. 访问站点 → 设置 → 导入静态图片 → 图库数据进入 Blobs；
+5. 可选：删除 `image/` 目录释放仓库体积。
 
 ## 变更日志
 
