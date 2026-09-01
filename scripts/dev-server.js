@@ -27,8 +27,10 @@ function memStore(name) {
     async get(key, opts) {
       const v = map.get(key);
       if (v === undefined) return null;
+      // 模拟 @netlify/blobs v8 行为：默认返回字符串；json/arrayBuffer 按类型
       if (opts && opts.type === "json") return JSON.parse(v.toString("utf8"));
-      return v;
+      if (opts && opts.type === "arrayBuffer") return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength);
+      return v.toString("utf8");
     },
     async delete(key) {
       map.delete(key);

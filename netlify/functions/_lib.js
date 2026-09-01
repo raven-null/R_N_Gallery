@@ -31,8 +31,10 @@ function localStore(name) {
       const p = safe(key);
       if (!fs.existsSync(p)) return null;
       const buf = fs.readFileSync(p);
+      // 与 @netlify/blobs v8 行为一致：默认返回字符串，json/arrayBuffer 按类型
       if (opts && opts.type === "json") return JSON.parse(buf.toString("utf8"));
-      return buf;
+      if (opts && opts.type === "arrayBuffer") return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      return buf.toString("utf8");
     },
     async delete(key) {
       const p = safe(key);

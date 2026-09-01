@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
    统一 API 入口（Netlify Functions v2，v0.9.9 移植参考项目模式）
    路由由 config.path 声明，无需 netlify.toml redirects：
      GET    /api/photos                列表（分页，游标）
@@ -82,12 +82,12 @@ async function getMeta(id) {
   return json({ photo: m });
 }
 
-/* ---------- 图片字节输出（key 带扩展名推断 mime） ---------- */
+/* ---------- 图片字节输出（v0.9.20：必须用 arrayBuffer 读，v8 默认返回字符串会损坏二进制） ---------- */
 async function raw(id) {
   const s = store();
   const m = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
-  const buf = await s.get(m.origKey || `${PREFIX_IMG}${id}`);
+  const buf = await s.get(m.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" });
   if (!buf) return notFound("Image data not found");
   return new Response(buf, {
     status: 200,
