@@ -101,6 +101,8 @@ function json(body, statusCode = 200) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "X-Content-Type-Options": "nosniff",
+      // 列表/元数据禁止缓存，避免清空/更新后浏览器仍显示旧数据
+      "Cache-Control": "no-store",
     },
   });
 }
