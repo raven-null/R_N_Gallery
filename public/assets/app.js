@@ -358,6 +358,8 @@ function initUpload() {
       queue.appendChild(row);
     });
     btnUpload.disabled = !files.length;
+    // v0.9.18：拖入/选择后自动开始上传，无需再点按钮
+    if (files.length) startUpload();
   }
 
   // 浏览器端转换：最长边 2048、WebP 质量 0.85（不支持 WebP 编码时回退 JPEG）
@@ -437,10 +439,10 @@ function initUpload() {
     });
   }
 
-  btnUpload.addEventListener("click", () => {
+  // 开始上传（v0.9.18：addFiles 后自动调用，按钮点击同样触发）
+  function startUpload() {
     const items = files.filter((it) => it.status === "ready");
     if (!items.length) return;
-    // 诊断反馈：点击立即改按钮文字（排查"待上传"卡住问题，v0.9.17）
     btnUpload.textContent = `处理中… (0/${items.length})`;
     btnUpload.disabled = true;
     let done = 0;
@@ -465,7 +467,8 @@ function initUpload() {
         }
       }
     })();
-  });
+  }
+  btnUpload.addEventListener("click", startUpload);
 
   // 标签输入
   const tagBox = document.getElementById("tagInputUpload");
