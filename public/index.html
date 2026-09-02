@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>渡·影·集</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='2' width='20' height='20' rx='5' fill='%2314171f'/%3E%3Crect x='4.5' y='4.5' width='15' height='15' rx='3' fill='none' stroke='%23ff9f0a' stroke-width='1.6'/%3E%3Ccircle cx='9' cy='9' r='1.3' fill='%23ff9f0a'/%3E%3Cpath d='M19.5 14.5l-3.6-3.6a.8.8 0 0 0-1.1 0L7 18.5' stroke='%23ff9f0a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="assets/style.css?v=20260927">
+<link rel="stylesheet" href="assets/style.css?v=20260928">
 </head>
 <body data-page="gallery">
 
@@ -528,10 +528,160 @@
       <button class="btn primary sm" id="aiChatSend" type="button">发送</button>
     </div>
   </div>
-<footer class="footer">渡鸦影集</footer>
+
+
+  <!-- ======= 标签弹出菜单（悬停/点击标签按钮弹出，按分组展示，支持搜索） ======= -->
+  <div class="page-menu tag-menu" id="tagMenu" aria-label="标签筛选">
+    <div class="tag-menu-head">
+      <span class="t">标签筛选</span>
+    </div>
+    <div class="tag-search">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+      <input id="tagSearch" type="text" placeholder="搜索标签 / 别名…" autocomplete="off">
+      <button class="tag-search-clear" id="tagSearchClear" title="清除">✕</button>
+    </div>
+    <div class="tag-menu-list" id="tagMenuList"></div>
+  </div>
+
+  <!-- 悬浮按钮组（v0.13.3：上分支=切换页面，左分支=标签筛选/批量选择/排序） -->
+  <div class="fab-group" id="fabGroup">
+    <!-- 上分支：切换页面（紧贴主按钮上方 = 最下面） -->
+    <div class="fab-branch up">
+      <button class="fab fab-page" id="fabPageBtn" title="切换页面">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"/>
+          <rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/>
+          <rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+      </button>
+    </div>
+    <!-- 左分支：图库控制 -->
+    <div class="fab-branch left">
+      <!-- 标签筛选按钮 -->
+      <button class="fab fab-tag" id="fabBtn" title="筛选">
+        <span class="fab-ico" id="fabIco">
+          <svg class="ico-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <svg class="ico-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </span>
+        <span class="fab-dot" id="fabDot"></span>
+      </button>
+      <!-- 批量选择按钮（v0.11.2） -->
+      <button class="fab fab-page" id="fabSelectBtn" title="批量选择">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 12l2.5 2.5L15.5 9.5"/></svg>
+      </button>
+      <!-- 排序按钮（v0.11.2） -->
+      <button class="fab fab-page" id="fabSortBtn" title="排序">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h10M8 18h7"/><path d="M3.5 6l1.5-1.5L6.5 6M5 4.5V10m-1.5 4l1.5-1.5L6.5 14M5 12.5V20"/></svg>
+      </button>
+    </div>
+    <!-- 主按钮（悬停展开两支） -->
+    <button class="fab fab-main" id="fabMain" title="菜单">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="1"/>
+        <circle cx="12" cy="5" r="1"/>
+        <circle cx="12" cy="19" r="1"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- 排序菜单（v0.11.2） -->
+  <div class="page-menu sort-menu" id="sortMenu" aria-label="图片排序">
+    <button class="page-menu-item active" data-sort="newest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      最新上传
+    </button>
+    <button class="page-menu-item" data-sort="oldest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      最早上传
+    </button>
+    <button class="page-menu-item" data-sort="size">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 3H3v18h18V3z"/><path d="M21 9H3M9 21V9"/></svg>
+      文件大小
+    </button>
+  </div>
+
+  <!-- 批量操作条（选择模式 + 有选中时出现） -->
+  <div class="batch-bar" id="batchBar" hidden>
+    <button class="btn ghost sm" id="batchCancel">✕ 取消</button>
+    <span class="batch-count" id="batchCount">已选 0 张</span>
+    <button class="btn ghost sm" id="batchTag">＋ 加标签</button>
+    <button class="btn ghost sm" id="batchAlbum">＋ 入相册</button>
+    <button class="btn danger sm" id="batchDel">删除</button>
+  </div>
+
+  <!-- 页面切换下拉菜单 -->
+  <div class="page-menu" id="pageMenu">
+    <button class="page-menu-item active" data-page="gallery">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      图库
+    </button>
+    <button class="page-menu-item" data-page="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+      搜索
+    </button>
+    <button class="page-menu-item" data-page="upload">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      上传
+    </button>
+    <button class="page-menu-item" data-page="tags">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+      标签
+    </button>    <button class="page-menu-item" data-page="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      设置
+    </button>
+  </div>
+
+  <!-- ======= 灯箱（v0.11.2：信息面板可收起 + 收藏/下载/旋转/编辑） ======= -->
+  <div class="lightbox" id="lightbox">
+    <div class="lb-img-wrap">
+      <img id="lbImg" alt="">
+      <button class="lb-btn lb-close" title="关闭 (Esc)">✕</button>
+      <button class="lb-btn lb-prev" title="上一张 (←)">‹</button>
+      <button class="lb-btn lb-next" title="下一张 (→)">›</button>
+      <!-- 工具条（右上角） -->
+      <div class="lb-tools">
+        <button class="lb-tool" id="lbToolPlay" title="幻灯片放映">
+          <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolFav" title="收藏">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolInfo" title="显示 / 隐藏信息">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="0.5"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolEdit" title="编辑标题 / 描述 / 标签">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolRot" title="旋转 90°（保存）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolDl" title="下载原图">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolAlbum" title="加入相册">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </button>
+      </div>
+    </div>
+    <aside class="lb-info" id="lbInfo">
+      <p class="lb-desc" id="lbDesc" hidden></p>
+      <div class="lb-meta">
+        <span id="lbDate"></span>
+        <span id="lbSize"></span>
+        <span id="lbDims"></span>
+        <span id="lbFormat"></span>
+      </div>
+      <div class="lb-tags" id="lbTags"></div>
+    </aside>
+  </div>
+
+  <footer class="footer">渡鸦影集</footer>
 
 <!-- 拼音搜索支持（v0.13；加载失败自动降级为无拼音匹配） -->
-<script src="assets/pinyin-pro.min.js?v=20260927" defer></script>
-<script src="assets/app.js?v=20260927"></script>
+<script src="assets/pinyin-pro.min.js?v=20260928" defer></script>
+<script src="assets/app.js?v=20260928"></script>
 </body>
 </html>
