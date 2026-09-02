@@ -282,7 +282,6 @@ async function loadData() {
   try {
     // cache: no-store 强制绕过浏览器缓存，确保上传后立即可见（v0.9.19）
     const res = await fetch("/api/photos?limit=200", { headers: apiHeaders(), cache: "no-store" });
-    if (res.status === 401) { showGuestGate(); return; } // 访客密码门禁（v0.12）
     if (!res.ok) throw new Error("api unavailable");
     const data = await res.json();
     PHOTOS = (data.photos || []).map((p) => ({
@@ -1735,43 +1734,6 @@ function initAlbumModal() {
   });
 }
 
-/* ---------- 访客门禁 ---------- */
-let gateShown = false;
-function showGuestGate() {
-  const g = document.getElementById("guestGate");
-  if (!g || gateShown) return;
-  gateShown = true;
-  g.hidden = false;
-  const pass = document.getElementById("guestPass");
-  const btn = document.getElementById("guestBtn");
-  const err = document.getElementById("guestErr");
-  btn.onclick = async () => {
-    err.hidden = true;
-    btn.disabled = true;
-    try {
-      const r = await fetch("/api/auth/guest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pass.value }),
-      });
-      const d = await r.json().catch(() => null);
-      if (r.ok && d && d.ok) { location.reload(); return; }
-      err.textContent = (d && d.error) || "密码错误";
-      err.hidden = false;
-    } catch (e) { err.textContent = "网络错误，请重试"; err.hidden = false; }
-    btn.disabled = false;
-  };
-  pass.addEventListener("keydown", (ev) => { if (ev.key === "Enter") btn.click(); });
-  setTimeout(() => pass.focus(), 80);
-}
-async function initGuestGate() {
-  try {
-    const r = await fetch("/api/auth/check", { cache: "no-store" });
-    const d = await r.json();
-    if (d && d.viewEnabled && !d.guest && !d.admin) showGuestGate();
-  } catch (e) { /* 网络异常跳过 */ }
-}
-
 /* ---------- 操作日志 ---------- */
 async function openLogs() {
   const m = document.getElementById("logsModal");
@@ -2680,7 +2642,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   initWmSettings();
   initLang();
   initSlideSetting();
-  initGuestGate();
   initFabHold();
   initAiChat();
   // 上传页 AI 推荐标签按钮

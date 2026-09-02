@@ -58,36 +58,38 @@ curl -X POST -H "Content-Type: application/json" \
 1. 把仓库推送到 GitHub（见下）；
 2. Netlify → **Add new site → Import an existing project** → 选择 `R_N_Gallery` 仓库；
 3. 构建配置自动读取 `netlify.toml`（publish = `.`，无需构建命令）；
-4. 部署完成后即可通过**上传窗口**添加图片（数据直接进入 Blobs）；
-5. 可选：配置 `ADMIN_TOKEN` 环境变量后，在设置页填写同一值作为访问令牌。
+4. 部署完成后即可通过**上传窗口**添加图片（数据直接进入 Blobs）。
 
 > 注：v0.9.4 起已移除 `image/` 静态目录与「导入静态图片」入口（后端 `/api/import` 保留，如需批量导入可自行调用，需站点存在静态图片源）。
 
-### 环境变量（可选）
+### 访问权限（v0.13.6 起）
 
-| 变量 | 说明 |
-|---|---|
-| `ADMIN_TOKEN` | 设置后所有 API 请求需携带 `X-Auth-Token` 请求头（前端在设置页填写，存于 localStorage） |
-| `UPLOAD_TOKEN` | 写操作（上传/删除/导入）可单独使用此令牌；未设置时与 `ADMIN_TOKEN` 相同 |
-
-> 未配置任何 token 时 API 完全开放（仅建议本地/私有使用）。
+**已移除登录 / 鉴权**：不再校验 `ADMIN_TOKEN` / `VIEW_TOKEN`，任何人无需密码即可浏览、上传与管理。此站点默认仅适合私有/小范围使用；如需访问保护，请自行在 Netlify 前端加 Basic Auth 或网关（如 Cloudflare Access）。
 
 ## API
 
-统一前缀 `/api`，重定向至 `photos` 函数：
+统一前缀 `/api`，重定向至 `photos` 函数（另 `POST /api/ai/chat` 由 `ai-proxy` 函数处理）：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/photos?limit=&cursor=` | 元数据分页列表 |
 | GET | `/api/photos/:id` | 单张元数据 |
 | GET | `/api/photos/:id/raw` | 图片字节（`Cache-Control: immutable`） |
-| POST | `/api/photos` | 上传：`{ dataBase64, title, desc, tags, takenAt }` |
+| GET | `/api/photos/:id/thumb` | 缩略图（前端上传时生成，无则 404） |
+| GET | `/api/photos/check?hash=` | 按内容 sha1 查重 |
+| POST | `/api/photos` | 上传：`{ dataBase64, thumbBase64?, title?, desc?, tags }` |
 | PATCH | `/api/photos/:id` | 更新元数据 |
 | DELETE | `/api/photos/:id` | 删除单张 |
 | DELETE | `/api/photos` | 清空图库 |
-| GET | `/api/meta/stats` | 用量统计 |
-| GET | `/api/export` | 导出全部元数据 |
-| POST | `/api/import` | 导入静态 `image/`：`{ files: [...] }` |
+| POST | `/api/photos/:id/image` | 覆盖原图字节（旋转等） |
+| GET | `/api/meta/stats` | 用量统计（含 quota） |
+| GET | `/api/meta/logs` | 操作日志 |
+| DELETE | `/api/meta/logs` | 清空日志 |
+| GET/PUT | `/api/tags` | 标签配置（组/标签） |
+| POST | `/api/tags/rename` · `/api/tags/remove` | 标签改名/合并、删除（同步照片） |
+| GET/PUT | `/api/albums` | 相册配置 |
+| POST | `/api/import` | URL/批量导入：`{ items: [{ url, tags }] }` |
+| POST | `/api/ai/chat` | AI 对话代理（`X-AI-Key` 或环境变量 `ZHIPU_API_KEY`） |
 
 ## Blob key 设计
 

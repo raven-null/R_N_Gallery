@@ -2948,50 +2948,6 @@ body.select-mode .card .pick { display: grid; }
 .import-url .hint.ok { color: var(--ok); }
 .import-url .hint.err { color: var(--danger); }
 
-/* ---------- 访客门禁（v0.12） ---------- */
-.guest-gate {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(5,6,10,0.88);
-  -webkit-backdrop-filter: blur(30px);
-  backdrop-filter: blur(30px);
-}
-.guest-card {
-  width: min(340px, 90vw);
-  padding: 36px 30px 30px;
-  border-radius: 24px;
-  text-align: center;
-  background: linear-gradient(160deg, rgba(30,34,45,0.95) 0%, rgba(12,14,21,0.96) 100%);
-  border: 1px solid var(--w010);
-  box-shadow: var(--shadow-xl);
-}
-.guest-logo { font-size: 38px; margin-bottom: 8px; }
-.guest-card h3 { font-size: 20px; margin-bottom: 4px; }
-.guest-card p { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
-.guest-card input {
-  width: 100%;
-  padding: 11px 14px;
-  background: rgba(0,0,0,0.35);
-  border: 1px solid var(--w010);
-  border-radius: 12px;
-  color: var(--text);
-  font-size: 15px;
-  text-align: center;
-  outline: none;
-  margin-bottom: 14px;
-}
-.guest-card input:focus { border-color: rgba(255,159,10,0.5); }
-.guest-card .btn { width: 100%; justify-content: center; }
-.guest-card .hint.err { margin-top: 10px; }
-[data-theme="light"] .guest-card {
-  background: linear-gradient(160deg, rgba(255,255,255,0.97) 0%, rgba(245,247,250,0.98) 100%);
-}
-[data-theme="light"] .guest-card input { background: rgba(0,0,0,0.04); }
-
 /* ---------- 相册弹窗（v0.12） ---------- */
 .album-list { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; margin-bottom: 12px; }
 .album-row {

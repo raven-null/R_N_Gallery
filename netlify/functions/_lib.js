@@ -123,35 +123,6 @@ function serverError(e) {
   return json({ error: "Internal error: " + (e && e.message) }, 500);
 }
 
-/* ---------- 鉴权（v0.12 扩展访客密码） ----------
-   未配置任何 token 时全部放行（开发模式）。
-   读操作：X-Auth-Token = ADMIN_TOKEN，或访客 cookie rn_view / 请求头 = VIEW_TOKEN
-   写操作：X-Auth-Token = UPLOAD_TOKEN || ADMIN_TOKEN（仅管理员）
-   访客密码（VIEW_TOKEN）仅解锁浏览，不解锁写操作 */
-function cookieVal(req, name) {
-  const c = req.headers.get("cookie") || "";
-  const m = c.match(new RegExp("(?:^|;\\s*)" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=([^;]+)"));
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
-function auth(req, write = false) {
-  const admin = process.env.ADMIN_TOKEN;
-  const view = process.env.VIEW_TOKEN;
-  if (!admin && !view) return true; // 完全开放
-  const header = (req.headers.get("x-auth-token") || "").trim();
-  if (write) {
-    const expected = process.env.UPLOAD_TOKEN || admin;
-    return !!expected && header === expected;
-  }
-  if (admin && header === admin) return true;
-  if (view) {
-    if (header === view) return true;
-    const vc = cookieVal(req, "rn_view");
-    if (vc && vc === view) return true;
-  }
-  return false;
-}
-
 function nanoid(len = 8) {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   let s = "";
@@ -224,8 +195,6 @@ module.exports = {
   badRequest,
   unauthorized,
   serverError,
-  auth,
-  cookieVal,
   nanoid,
   imageSize,
   sniffMime,

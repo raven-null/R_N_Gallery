@@ -18,8 +18,8 @@
      POST   /api/photos/:id/image      覆盖原图字节（旋转等编辑后保存）
    ============================================================ */
 const {
-  store, json, notFound, badRequest, unauthorized, serverError,
-  auth, cookieVal, nanoid, imageSize, sniffMime,
+  store, json, notFound, badRequest, serverError,
+  nanoid, imageSize, sniffMime,
 } = require("./_lib");
 const crypto = require("crypto");
 
@@ -51,16 +51,7 @@ exports.default = async (req) => {
     const seg = path.split("/").filter(Boolean); // ["api", "photos", id?, "raw"?]
     const rest = seg.slice(2);
 
-    // 登录验证必须先于鉴权（登录请求自身不带 token）
-    if (method === "POST" && path.endsWith("/api/auth/login")) return authLogin(req);
-    if (method === "POST" && path.endsWith("/api/auth/guest")) return guestLogin(req);
-    if (method === "GET" && path.endsWith("/api/auth/check")) return authCheck(req);
 
-    // 鉴权（v0.9.24 / v0.12）：写操作校验 ADMIN/UPLOAD_TOKEN；
-    // 读操作在配置 VIEW_TOKEN 访客密码后校验 cookie rn_view（普通浏览需先访问密码）
-    const isWrite = method === "POST" || method === "PATCH" || method === "DELETE";
-    if (isWrite && !auth(req, true)) return unauthorized();
-    if (!isWrite && !auth(req, false)) return unauthorized();
 
     if (method === "GET" && path.endsWith("/api/photos")) return list(url);
     if (method === "GET" && path.endsWith("/api/tags")) return tagsGet();
@@ -70,11 +61,9 @@ exports.default = async (req) => {
     if (method === "GET" && path.endsWith("/api/albums")) return albumsGet();
     if (method === "PUT" && path.endsWith("/api/albums")) return albumsPut(req);
     if (method === "GET" && path.endsWith("/api/meta/logs")) {
-      if (!auth(req, true)) return unauthorized();
       return logsGet();
     }
     if (method === "DELETE" && path.endsWith("/api/meta/logs")) {
-      if (!auth(req, true)) return unauthorized();
       return logsClear();
     }
     if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(rest[0]);
@@ -107,9 +96,6 @@ exports.config = {
     "/api/meta/stats",
     "/api/export",
     "/api/import",
-    "/api/auth/login",
-    "/api/auth/check",
-    "/api/auth/guest",
     "/api/tags",
     "/api/tags/rename",
     "/api/tags/remove",
@@ -117,62 +103,6 @@ exports.config = {
     "/api/meta/logs",
   ],
 };
-
-/* ---------- 管理员登录验证（v0.9.24） ----------
-   密码 = ADMIN_TOKEN 环境变量；登录成功后前端将其作为 X-Auth-Token 使用 */
-async function authLogin(req) {
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("Invalid JSON body");
-  }
-  const admin = process.env.ADMIN_TOKEN;
-  if (!admin) return json({ ok: false, error: "站点未配置管理员密码（请设置 ADMIN_TOKEN 环境变量）" }, 403);
-  if (String(body.password || "") === admin) {
-    logAction(req, "管理员登录", "");
-    return json({ ok: true });
-  }
-  logAction(req, "管理员登录失败", "");
-  return unauthorized("密码错误");
-}
-
-function authCheck(req) {
-  const admin = process.env.ADMIN_TOKEN;
-  const view = process.env.VIEW_TOKEN;
-  const header = (req.headers.get("x-auth-token") || "").trim();
-  const isAdmin = !!admin && header === admin;
-  const vc = cookieVal(req, "rn_view");
-  return json({
-    admin: isAdmin,
-    guest: !!(view && (vc === view || (header && header === view))),
-    viewEnabled: !!view,
-    adminEnabled: !!admin,
-  });
-}
-
-/* ---------- 访客登录（v0.12：VIEW_TOKEN → HttpOnly cookie） ---------- */
-async function guestLogin(req) {
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("Invalid JSON body");
-  }
-  const view = process.env.VIEW_TOKEN;
-  if (!view) return json({ ok: false, error: "站点未开启访客密码（未配置 VIEW_TOKEN）" }, 403);
-  if (String(body.password || "") !== view) {
-    logAction(req, "访客登录失败", "");
-    return unauthorized("密码错误");
-  }
-  logAction(req, "访客登录", "");
-  const res = json({ ok: true });
-  res.headers.append(
-    "Set-Cookie",
-    `rn_view=${encodeURIComponent(view)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
-  );
-  return res;
-}
 
 /* ---------- 操作日志（v0.12） ---------- */
 async function logAction(req, action, detail) {
