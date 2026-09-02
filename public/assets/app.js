@@ -2016,7 +2016,7 @@ function initFabHold() {
   g.addEventListener("mouseenter", () => { clearTimeout(leaveT); g.classList.add("hover-hold"); });
   g.addEventListener("mouseleave", () => {
     clearTimeout(leaveT);
-    leaveT = setTimeout(() => g.classList.remove("hover-hold"), 300);
+    leaveT = setTimeout(() => g.classList.remove("hover-hold"), 600);
   });
   document.addEventListener("pointerdown", (e) => {
     if (!g.contains(e.target)) g.classList.remove("hover-hold");

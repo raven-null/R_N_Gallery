@@ -3187,3 +3187,8 @@ body.select-mode .card .pick { display: grid; }
 }
 .ai-chat-foot input:focus { border-color: rgba(255,159,10,0.5); }
 .ai-chat-foot .btn { flex: none; border-radius: 999px; }
+/* 展开保持期间：整个感应区可命中，鼠标可在主按钮与分支按钮间自由移动（v0.13.8） */
+.fab-group.hover-hold,
+.fab-group.active {
+  pointer-events: auto;
+}
