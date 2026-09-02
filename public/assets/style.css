@@ -758,7 +758,7 @@ body[data-page="gallery"] .page {
   position: fixed;
   right: 84px;
   bottom: 80px;
-  z-index: 79;
+  z-index: 86;
   display: flex;
   flex-direction: column;
   gap: 8px;
