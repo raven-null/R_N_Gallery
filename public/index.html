@@ -1,11 +1,11 @@
-﻿<!DOCTYPE html>
-<html lang="zh-CN">
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark" data-cols="standard">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>留影 · 图库墙</title>
+<title>渡·影·集</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='2' width='20' height='20' rx='5' fill='%2314171f'/%3E%3Crect x='4.5' y='4.5' width='15' height='15' rx='3' fill='none' stroke='%23ff9f0a' stroke-width='1.6'/%3E%3Ccircle cx='9' cy='9' r='1.3' fill='%23ff9f0a'/%3E%3Cpath d='M19.5 14.5l-3.6-3.6a.8.8 0 0 0-1.1 0L7 18.5' stroke='%23ff9f0a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="assets/style.css?v=20260909">
+<link rel="stylesheet" href="assets/style.css?v=20260925">
 </head>
 <body data-page="gallery">
 
@@ -22,11 +22,24 @@
 
     <!-- 图库状态（加载中 / 空库 / 加载失败），正常时隐藏 -->
     <div class="gallery-state" id="galleryState" hidden>
-      <div class="state-ico" id="stateIco">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15.5l-5.2-5.2a1 1 0 0 0-1.4 0L5 19.5"/></svg>
+      <div aria-label="Orange and tan hamster running in a metal wheel" role="img" class="wheel-and-hamster">
+        <div class="wheel"></div>
+        <div class="hamster">
+          <div class="hamster__body">
+            <div class="hamster__head">
+              <div class="hamster__ear"></div>
+              <div class="hamster__eye"></div>
+              <div class="hamster__nose"></div>
+            </div>
+            <div class="hamster__limb hamster__limb--fr"></div>
+            <div class="hamster__limb hamster__limb--fl"></div>
+            <div class="hamster__limb hamster__limb--br"></div>
+            <div class="hamster__limb hamster__limb--bl"></div>
+            <div class="hamster__tail"></div>
+          </div>
+        </div>
+        <div class="spoke"></div>
       </div>
-      <div class="state-title" id="stateTitle">正在加载图库…</div>
-      <div class="state-sub" id="stateSub">请稍候</div>
       <button class="btn primary sm" id="btnRetry" hidden>↻ 重试</button>
     </div>
 
@@ -61,12 +74,29 @@
         <input type="file" id="fileInput" multiple accept="image/*" hidden>
       </div>
 
+      <!-- URL 导入（v0.12） -->
+      <div class="import-url">
+        <div class="import-url-head">
+          <span>或从 URL 导入（每行一个图片链接）</span>
+          <button class="btn ghost sm" id="btnImportUrl" type="button">导入</button>
+        </div>
+        <textarea id="urlList" rows="2" placeholder="https://example.com/a.jpg&#10;https://example.com/b.webp"></textarea>
+        <div class="hint" id="importResult"></div>
+      </div>
+
       <!-- 上传选项 -->
       <div class="form-grid" style="margin-top: 24px;">
         <div class="field" style="grid-column: 1 / -1;">
-          <label>标签（回车添加）</label>
-          <div class="tag-input" id="tagListUpload">
-            <input id="tagInputUpload" type="text" placeholder="输入后按回车…">
+          <label>标签（输入时从标签库选择，回车可自定义）</label>
+          <div class="tag-input-wrap">
+            <div class="tag-input" id="tagListUpload">
+              <input id="tagInputUpload" type="text" placeholder="输入后按回车…" autocomplete="off">
+            </div>
+            <div class="tag-suggest" id="tagSuggest" hidden></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+            <button class="btn ghost sm" id="btnAiSuggest" type="button">✨ AI 推荐标签</button>
+            <span class="hint" id="aiSuggestHint" style="margin-top:0"></span>
           </div>
         </div>
       </div>
@@ -95,67 +125,199 @@
         返回图库
       </button>
     </div>
-    <div class="panel-content">
+    <div class="panel-content settings-scroll">
 
-      <!-- 管理员登录（v0.9.24） -->
-      <div class="settings-card">
-        <h3><span class="ico">🔐</span> 管理员</h3>
-        <div id="adminLoginForm">
-          <div class="field">
-            <label>管理员密码</label>
-            <input type="password" id="adminPwd" placeholder="请输入管理员密码" autocomplete="off" style="max-width:320px">
+      <!-- 外观设置（v0.11.1：主题 / 列宽） -->
+      <div class="settings-section">
+        <div class="settings-section-title">外观</div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <span class="settings-label">主题</span>
+            <div class="seg" id="themeSeg" role="group" aria-label="主题">
+              <button class="seg-btn" data-theme="light">浅色</button>
+              <button class="seg-btn" data-theme="dark">深色</button>
+              <button class="seg-btn" data-theme="auto">跟随系统</button>
+            </div>
           </div>
-          <button class="btn primary sm" id="btnAdminLogin" style="margin-top:12px">登录</button>
-        </div>
-        <div id="adminLoggedIn" hidden style="display:flex;align-items:center;gap:12px">
-          <span class="badge accent">✓ 管理员已登录</span>
-          <button class="btn sm" id="btnAdminLogout">退出登录</button>
+          <div class="settings-row">
+            <span class="settings-label">瀑布流列宽</span>
+            <div class="seg" id="colsSeg" role="group" aria-label="瀑布流列宽">
+              <button class="seg-btn" data-cols="narrow">窄 180</button>
+              <button class="seg-btn" data-cols="standard">标准 240</button>
+              <button class="seg-btn" data-cols="wide">宽 320</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">图片加载</span>
+            <div class="seg" id="qualitySeg" role="group" aria-label="图片加载质量">
+              <button class="seg-btn" data-quality="high">高画质</button>
+              <button class="seg-btn" data-quality="normal">平衡</button>
+              <button class="seg-btn" data-quality="low">省流</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">语言</span>
+            <div class="seg" id="langSeg" role="group" aria-label="语言">
+              <button class="seg-btn" data-lang="zh">中文</button>
+              <button class="seg-btn" data-lang="en">English</button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- 图库统计（简化：张数 + MB） -->
-      <div class="settings-card">
-        <h3><span class="ico">📦</span> 图库统计</h3>
-        <div class="usage-stats">
-          <div class="s" id="stPhotos">—</div>
-          <div class="s" id="stUsed">—</div>
+      <!-- AI 助手设置（v0.12） -->
+      <div class="settings-section" id="aiSection">
+        <div class="settings-section-title">AI 助手</div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <span class="settings-label">启用 AI 助手</span>
+            <label class="switch" title="启用后显示 AI 相关入口">
+              <input type="checkbox" id="aiOn">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="settings-row ai-opt">
+            <span class="settings-label">API Key</span>
+            <span class="settings-value ai-key-box">
+              <input type="password" id="aiKey" class="ai-key-input" placeholder="粘贴质谱 AI Key" autocomplete="off">
+              <button class="btn ghost sm" id="aiKeyToggle" type="button" style="flex:none">显示</button>
+            </span>
+          </div>
+          <div class="settings-row ai-opt" style="flex-wrap:wrap;gap:6px">
+            <span class="settings-label">温度</span>
+            <span class="settings-value" style="display:flex;align-items:center;gap:10px;min-width:220px;flex:1;justify-content:flex-end">
+              <input type="range" id="aiTemp" min="0" max="1" step="0.1" value="0.7">
+              <b id="aiTempVal" style="min-width:30px;font-variant-numeric:tabular-nums">0.7</b>
+            </span>
+          </div>
+          <div class="settings-row-wrap ai-opt">
+            <label class="ai-label">人设（System Prompt）</label>
+            <textarea id="aiSys" rows="2" maxlength="500" placeholder="可选，自定义助手人设…"></textarea>
+          </div>
+          <div class="settings-row ai-opt">
+            <span class="settings-label">测试对话</span>
+            <span class="settings-value" style="display:flex;gap:10px;align-items:center">
+              <button class="btn ghost sm" id="aiTest" type="button" style="flex:none">发送「你好」</button>
+              <span id="aiTestResult" class="ai-result"></span>
+            </span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label" style="font-size:11.5px;color:var(--text-faint);line-height:1.5">Key 仅在调用时经本站代理转发，不写入代码；也可在部署环境配置 <b>ZHIPU_API_KEY</b>（此时无需填写）</span>
+          </div>
         </div>
       </div>
 
-      <!-- 管理员专属功能 -->
-      <div id="adminZone" hidden>
-
-        <!-- 站点信息 -->
-        <div class="settings-card">
-          <h3><span class="ico">⚙️</span> 站点信息</h3>
-          <div class="form-grid">
-            <div class="field"><label>站点标题</label><input type="text" value="留影 Gallery"></div>
-            <div class="field"><label>站点描述</label><input type="text" value="我的私人照片库"></div>
-            <div class="field"><label>存储名称</label><input type="text" value="photos" disabled style="opacity:.55"></div>
+      <!-- 快捷键说明 -->
+      <div class="settings-section">
+        <div class="settings-section-title">快捷键</div>
+        <div class="settings-group">
+          <div class="settings-row shortcut-row">
+            <span class="settings-label"><span class="kbd">/</span><span class="shortcut-desc">打开搜索窗口</span></span>
           </div>
-        </div>
-
-        <!-- 标签管理 -->
-        <div class="settings-card">
-          <h3><span class="ico">🏷</span> 标签管理</h3>
-          <div id="tagMgr"></div>
-        </div>
-
-        <!-- 数据维护 -->
-        <div class="settings-card">
-          <h3><span class="ico">🗄</span> 数据维护</h3>
-          <div style="display:flex;gap:12px;flex-wrap:wrap">
-            <button class="btn" id="btnExport">⬇ 导出全部元数据 (export.json)</button>
+          <div class="settings-row shortcut-row">
+            <span class="settings-label"><span class="kbd">←</span><span class="kbd">→</span><span class="shortcut-desc">灯箱中切换上一张 / 下一张</span></span>
           </div>
-        </div>
-
-        <!-- 危险区 -->
-        <div class="settings-card danger-zone">
-          <h3><span class="ico">⚠️</span> 危险区</h3>
-          <p>清空图库将删除全部图片与元数据，此操作不可恢复。建议先导出元数据备份。</p>
-          <button class="btn danger" id="btnWipe">🗑 清空整个图库</button>
+          <div class="settings-row shortcut-row">
+            <span class="settings-label"><span class="kbd">Esc</span><span class="shortcut-desc">关闭灯箱 / 弹窗 / 悬浮菜单</span></span>
+          </div>
+          <div class="settings-row shortcut-row">
+            <span class="settings-label"><span class="kbd">空格</span><span class="shortcut-desc">幻灯片播放 / 暂停</span></span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">幻灯片间隔</span>
+            <div class="seg" id="slideSeg" role="group" aria-label="幻灯片间隔">
+              <button class="seg-btn" data-sec="3">3 秒</button>
+              <button class="seg-btn" data-sec="5">5 秒</button>
+              <button class="seg-btn" data-sec="10">10 秒</button>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- 图库统计 -->
+      <div class="settings-section">
+        <div class="settings-section-title">图库统计</div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <span class="settings-label">图片数量</span>
+            <span class="settings-value" id="stPhotos">—</span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">已用空间</span>
+            <span class="settings-value" id="stUsed">—</span>
+          </div>
+          <div class="settings-row-wrap">
+            <div class="quota-block">
+              <div class="quota-bar"><div class="quota-fill" id="quotaFill"></div></div>
+              <div class="quota-text"><span id="quotaText"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 水印设置（v0.12，纯前端合成） -->
+      <div class="settings-section" id="wmSection">
+        <div class="settings-section-title">水印</div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <span class="settings-label">上传时加图片水印</span>
+            <label class="switch" title="新上传的图片右下角盖水印（对已上传图片无效）">
+              <input type="checkbox" id="wmOn">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="settings-row wm-opt">
+            <span class="settings-label">水印图</span>
+            <span class="settings-value" style="display:flex;gap:10px;align-items:center">
+              <img id="wmPreview" class="wm-preview" alt="" hidden>
+              <button class="btn ghost sm" id="wmUpload" type="button">选择 PNG</button>
+              <button class="btn ghost sm" id="wmClear" type="button" hidden>移除</button>
+              <input type="file" id="wmFile" accept="image/png,image/webp,image/jpeg" hidden>
+            </span>
+          </div>
+          <div class="settings-row-wrap wm-opt">
+            <div class="hint" style="font-size:11.5px;color:var(--text-faint)">建议使用透明底 PNG；水印将等比缩放到图片宽度的 18%，置于右下角。仅作用于启用后新上传的图片。</div>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- 数据维护 -->
+      <div class="settings-section">
+        <div class="settings-section-title">数据维护</div>
+        <div class="settings-group">
+          <button class="settings-row settings-row-action" id="btnLogs">
+            <span class="settings-label">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h16v16H4z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/></svg>
+              操作日志
+            </span>
+            <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          <button class="settings-row settings-row-action" id="btnExport">
+            <span class="settings-label">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              导出元数据
+            </span>
+            <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 危险区 -->
+      <div class="settings-section settings-section-danger">
+        <div class="settings-section-title">危险操作</div>
+        <div class="settings-group">
+          <button class="settings-row settings-row-action settings-row-danger" id="btnWipe">
+            <span class="settings-label">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              清空整个图库
+            </span>
+            <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+        <div class="settings-footer">此操作不可恢复，建议先导出元数据备份。</div>
+      </div>
+
     </div>
   </div>
 
@@ -188,11 +350,36 @@
     </div>
   </div>
 
+  <!-- ======= 标签管理窗口（v0.13.5：从设置页独立出来，悬浮可层叠） ======= -->
+  <div class="page-panel" id="panelTags">
+    <div class="panel-header">
+      <div class="traffic">
+        <span class="dot red" id="closeTags" title="关闭窗口"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+      </div>
+      <h1>标签管理</h1>
+      <div class="spacer"></div>
+      <button class="btn ghost panel-back" id="btnBackTags">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        返回图库
+      </button>
+    </div>
+    <div class="panel-content settings-scroll">
+      <div class="settings-section">
+        <div class="settings-group">
+          <div class="settings-row-wrap">
+            <div id="tagMgrRoot"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
   <!-- 清空确认弹窗 -->
   <div class="modal-mask" id="wipeModal">
     <div class="modal" style="border-color: rgba(229,72,77,.4)">
       <h3>确认清空整个图库？</h3>
-      <p>将删除 <b style="color:var(--text)">photos</b> Store 中的全部 key（原图 / 缩略图 / 元数据 / 标签索引），共 108 个 Blob key，不可恢复。</p>
+      <p>将删除全部图片及其元数据（标签分组配置保留），不可恢复。</p>
       <div class="m-actions">
         <button class="btn ghost" id="btnCancelWipe">取消</button>
         <button class="btn danger" id="btnConfirmWipe">确认清空</button>
@@ -200,35 +387,176 @@
     </div>
   </div>
 
-  <!-- ======= 标签弹出菜单（悬停/点击标签按钮弹出，仅主要标签；搜索已独立为窗口） ======= -->
+  <!-- 标签编辑弹窗（设置页标签管理共用，表单由 JS 渲染） -->
+  <div class="modal-mask" id="tagModal">
+    <div class="modal" id="tagModalBox">
+      <div id="tagModalBody"></div>
+    </div>
+  </div>
+
+  <!-- 通用确认弹窗（v0.11.2：批量删除等） -->
+  <div class="modal-mask" id="confirmModal">
+    <div class="modal">
+      <h3 id="confirmTitle">确认操作？</h3>
+      <p id="confirmDesc"></p>
+      <div class="m-actions">
+        <button class="btn ghost" id="confirmCancel">取消</button>
+        <button class="btn danger" id="confirmOk">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 图片信息编辑弹窗（v0.11.2：描述 / 标签） -->
+  <div class="modal-mask" id="editModal">
+    <div class="modal">
+      <h3>编辑图片</h3>
+      <form class="tag-form" onsubmit="return false">
+        <div class="field">
+          <label>描述</label>
+          <textarea id="edDesc" rows="3" maxlength="500"></textarea>
+        </div>
+        <div class="field">
+          <label>标签</label>
+          <div class="tag-input-wrap">
+            <div class="tag-input" id="edTagBox">
+              <input type="text" id="edTagInput" placeholder="输入后回车添加…" autocomplete="off">
+            </div>
+            <div class="tag-suggest" id="edTagSuggest" hidden></div>
+          </div>
+        </div>
+        <div class="m-actions">
+          <button class="btn ghost" type="button" id="edCancel">取消</button>
+          <button class="btn primary" type="button" id="edSave">保存</button>
+        </div>
+        <div class="hint" id="edErr" style="display:none;color:var(--danger)"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 批量加标签弹窗（v0.11.2） -->
+  <div class="modal-mask" id="batchTagModal">
+    <div class="modal">
+      <h3 id="batchTagTitle">为选中图片添加标签</h3>
+      <form class="tag-form" onsubmit="return false">
+        <div class="field">
+          <label>要添加的标签</label>
+          <div class="tag-input-wrap">
+            <div class="tag-input" id="btTagBox">
+              <input type="text" id="btTagInput" placeholder="输入后回车添加…" autocomplete="off">
+            </div>
+            <div class="tag-suggest" id="btTagSuggest" hidden></div>
+          </div>
+          <div class="hint">添加到全部选中图片（原有标签保留）</div>
+        </div>
+        <div class="m-actions">
+          <button class="btn ghost" type="button" id="btCancel">取消</button>
+          <button class="btn primary" type="button" id="btOk">应用</button>
+        </div>
+        <div class="hint" id="btErr" style="display:none;color:var(--danger)"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 相册选择弹窗（v0.12） -->
+  <div class="modal-mask" id="albumModal">
+    <div class="modal">
+      <h3 id="albumModalTitle">加入相册</h3>
+      <div id="albumList" class="album-list"></div>
+      <div class="album-new-row">
+        <input type="text" id="albumNewName" placeholder="新建相册名称…" maxlength="30">
+        <button class="btn ghost sm" id="albumNewBtn" type="button">＋ 新建并加入</button>
+      </div>
+      <div class="hint" id="albumHint" style="display:none"></div>
+      <div class="m-actions"><button class="btn ghost" id="albumClose">取消</button></div>
+    </div>
+  </div>
+
+  <!-- 操作日志弹窗（v0.12） -->
+  <div class="modal-mask" id="logsModal">
+    <div class="modal logs-modal">
+      <h3>操作日志</h3>
+      <div id="logsList" class="logs-list"></div>
+      <div class="m-actions">
+        <button class="btn ghost sm" id="logsClearBtn" type="button">清空日志</button>
+        <button class="btn ghost" id="logsClose" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 上传项编辑弹窗（v0.13：描述 / 标签） -->
+  <div class="modal-mask" id="uqModal">
+    <div class="modal">
+      <h3>编辑待上传项</h3>
+      <form class="tag-form" onsubmit="return false">
+        <div class="field">
+          <label>描述</label>
+          <textarea id="uqDesc" rows="2" maxlength="500"></textarea>
+        </div>
+        <div class="field">
+          <label>标签（留空则跟随上方全局标签）</label>
+          <div class="tag-input-wrap">
+            <div class="tag-input" id="uqTagBox">
+              <input type="text" id="uqTagInput" placeholder="输入后回车添加…" autocomplete="off">
+            </div>
+            <div class="tag-suggest" id="uqTagSuggest" hidden></div>
+          </div>
+        </div>
+        <div class="m-actions">
+          <button class="btn ghost" type="button" id="uqCancel">取消</button>
+          <button class="btn primary" type="button" id="uqSave">保存</button>
+        </div>
+        <div class="hint" id="uqErr" style="display:none;color:var(--danger)"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- AI 快捷对话（v0.13.4：启用 AI 后显示，风格与 FAB 一致） -->
+  <button class="ai-fab" id="aiFab" title="AI 助手" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/>
+      <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/>
+    </svg>
+  </button>
+  <div class="ai-chat" id="aiChatBox" hidden>
+    <div class="ai-chat-head">
+      <span class="ai-chat-title">✨ AI 助手</span>
+      <button class="ai-chat-close" id="aiChatClose" title="关闭">✕</button>
+    </div>
+    <div class="ai-chat-msgs" id="aiChatMsgs"></div>
+    <div class="ai-chat-foot">
+      <input type="text" id="aiChatText" placeholder="输入问题，回车发送…" autocomplete="off">
+      <button class="btn primary sm" id="aiChatSend" type="button">发送</button>
+    </div>
+  </div>
+  <!-- 访客密码门禁（v0.12：服务端配置 VIEW_TOKEN 时显示） -->
+  <div class="guest-gate" id="guestGate" hidden>
+    <div class="guest-card">
+      <div class="guest-logo">🖼️</div>
+      <h3>私人图库</h3>
+      <p>输入访问密码以继续</p>
+      <input type="password" id="guestPass" placeholder="访问密码" autocomplete="current-password">
+      <button class="btn primary" id="guestBtn" type="button">进入</button>
+      <div class="hint err" id="guestErr" hidden></div>
+    </div>
+  </div>
+
+  <!-- ======= 标签弹出菜单（悬停/点击标签按钮弹出，按分组展示，支持搜索） ======= -->
   <div class="page-menu tag-menu" id="tagMenu" aria-label="标签筛选">
     <div class="tag-menu-head">
-      <span class="t">主要标签</span>
+      <span class="t">标签筛选</span>
+    </div>
+    <div class="tag-search">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+      <input id="tagSearch" type="text" placeholder="搜索标签 / 别名…" autocomplete="off">
+      <button class="tag-search-clear" id="tagSearchClear" title="清除">✕</button>
     </div>
     <div class="tag-menu-list" id="tagMenuList"></div>
   </div>
 
-  <!-- 悬浮按钮组 -->
+  <!-- 悬浮按钮组（v0.13.3：上分支=切换页面，左分支=标签筛选/批量选择/排序） -->
   <div class="fab-group" id="fabGroup">
-    <!-- 主按钮（悬停展开） -->
-    <button class="fab fab-main" id="fabMain" title="菜单">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <circle cx="12" cy="12" r="1"/>
-        <circle cx="12" cy="5" r="1"/>
-        <circle cx="12" cy="19" r="1"/>
-      </svg>
-    </button>
-    <!-- 子按钮组 -->
-    <div class="fab-sub">
-      <!-- 标签筛选按钮 -->
-      <button class="fab fab-tag" id="fabBtn" title="筛选">
-        <span class="fab-ico" id="fabIco">
-          <svg class="ico-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-          <svg class="ico-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </span>
-        <span class="fab-dot" id="fabDot"></span>
-      </button>
-      <!-- 页面切换按钮 -->
+    <!-- 上分支：切换页面（紧贴主按钮上方 = 最下面） -->
+    <div class="fab-branch up">
       <button class="fab fab-page" id="fabPageBtn" title="切换页面">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <rect x="3" y="3" width="7" height="7" rx="1"/>
@@ -238,6 +566,58 @@
         </svg>
       </button>
     </div>
+    <!-- 左分支：图库控制 -->
+    <div class="fab-branch left">
+      <!-- 标签筛选按钮 -->
+      <button class="fab fab-tag" id="fabBtn" title="筛选">
+        <span class="fab-ico" id="fabIco">
+          <svg class="ico-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <svg class="ico-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </span>
+        <span class="fab-dot" id="fabDot"></span>
+      </button>
+      <!-- 批量选择按钮（v0.11.2） -->
+      <button class="fab fab-page" id="fabSelectBtn" title="批量选择">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 12l2.5 2.5L15.5 9.5"/></svg>
+      </button>
+      <!-- 排序按钮（v0.11.2） -->
+      <button class="fab fab-page" id="fabSortBtn" title="排序">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h10M8 18h7"/><path d="M3.5 6l1.5-1.5L6.5 6M5 4.5V10m-1.5 4l1.5-1.5L6.5 14M5 12.5V20"/></svg>
+      </button>
+    </div>
+    <!-- 主按钮（悬停展开两支） -->
+    <button class="fab fab-main" id="fabMain" title="菜单">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="1"/>
+        <circle cx="12" cy="5" r="1"/>
+        <circle cx="12" cy="19" r="1"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- 排序菜单（v0.11.2） -->
+  <div class="page-menu sort-menu" id="sortMenu" aria-label="图片排序">
+    <button class="page-menu-item active" data-sort="newest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      最新上传
+    </button>
+    <button class="page-menu-item" data-sort="oldest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      最早上传
+    </button>
+    <button class="page-menu-item" data-sort="size">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 3H3v18h18V3z"/><path d="M21 9H3M9 21V9"/></svg>
+      文件大小
+    </button>
+  </div>
+
+  <!-- 批量操作条（选择模式 + 有选中时出现） -->
+  <div class="batch-bar" id="batchBar" hidden>
+    <button class="btn ghost sm" id="batchCancel">✕ 取消</button>
+    <span class="batch-count" id="batchCount">已选 0 张</span>
+    <button class="btn ghost sm" id="batchTag">＋ 加标签</button>
+    <button class="btn ghost sm" id="batchAlbum">＋ 入相册</button>
+    <button class="btn danger sm" id="batchDel">删除</button>
   </div>
 
   <!-- 页面切换下拉菜单 -->
@@ -254,21 +634,50 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       上传
     </button>
-    <button class="page-menu-item" data-page="settings">
+    <button class="page-menu-item" data-page="tags">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+      标签
+    </button>    <button class="page-menu-item" data-page="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       设置
     </button>
   </div>
 
-  <!-- ======= 灯箱 ======= -->
+  <!-- ======= 灯箱（v0.11.2：信息面板可收起 + 收藏/下载/旋转/编辑） ======= -->
   <div class="lightbox" id="lightbox">
     <div class="lb-img-wrap">
       <img id="lbImg" alt="">
       <button class="lb-btn lb-close" title="关闭 (Esc)">✕</button>
       <button class="lb-btn lb-prev" title="上一张 (←)">‹</button>
       <button class="lb-btn lb-next" title="下一张 (→)">›</button>
+      <!-- 工具条（右上角） -->
+      <div class="lb-tools">
+        <button class="lb-tool" id="lbToolPlay" title="幻灯片放映">
+          <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolFav" title="收藏">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolInfo" title="显示 / 隐藏信息">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="0.5"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolEdit" title="编辑标题 / 描述 / 标签">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolRot" title="旋转 90°（保存）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolDl" title="下载原图">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button class="lb-tool" id="lbToolAlbum" title="加入相册">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </button>
+      </div>
     </div>
-    <div class="lb-info" id="lbInfo">
+    <aside class="lb-info" id="lbInfo">
+      <p class="lb-desc" id="lbDesc" hidden></p>
       <div class="lb-meta">
         <span id="lbDate"></span>
         <span id="lbSize"></span>
@@ -276,11 +685,13 @@
         <span id="lbFormat"></span>
       </div>
       <div class="lb-tags" id="lbTags"></div>
-    </div>
+    </aside>
   </div>
 
-  <footer class="footer">留影 · 私人图库</footer>
+  <footer class="footer">渡鸦影集</footer>
 
-<script src="assets/app.js?v=20260909"></script>
+<!-- 拼音搜索支持（v0.13；加载失败自动降级为无拼音匹配） -->
+<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.26.0/dist/index.min.js"></script>
+<script src="assets/app.js?v=20260925"></script>
 </body>
 </html>

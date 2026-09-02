@@ -12,7 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const Module = require("module");
 
-const PORT = 8787;
+const PORT = parseInt(process.env.PORT, 10) || 8787;
 const ROOT = path.join(__dirname, "..", "public"); // 与 netlify.toml publish 一致
 
 /* ---------- 内存 Blobs 模拟 ---------- */
@@ -61,6 +61,7 @@ Module._load = function (request, parent, isMain) {
 };
 
 const { default: handler } = require("../netlify/functions/photos");
+const { default: aiHandler } = require("../netlify/functions/ai-proxy");
 
 /* ---------- 静态文件 ---------- */
 const MIME = {
@@ -92,7 +93,8 @@ const server = http.createServer(async (req, res) => {
       body: body || undefined,
     });
     try {
-      const fnRes = await handler(fnReq);
+      // 多函数分发：/api/ai/* → ai-proxy.js，其余 → photos.js
+      const fnRes = await (pathname.startsWith("/api/ai/") ? aiHandler : handler)(fnReq);
       res.writeHead(fnRes.status, {
         ...Object.fromEntries(fnRes.headers.entries()),
         "Access-Control-Allow-Origin": "*",
