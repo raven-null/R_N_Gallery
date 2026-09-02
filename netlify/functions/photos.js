@@ -22,6 +22,7 @@ const {
   nanoid, imageSize, sniffMime,
 } = require("./_lib");
 const crypto = require("crypto");
+const sharp = require("sharp"); // v0.13.8：服务端缩略图（列表秒开）
 
 const PREFIX_META = "meta/";
 const PREFIX_IMG = "img/";
@@ -31,6 +32,31 @@ const KEY_LOGS = "logs"; // 操作日志（v0.12）
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 const sha1hex = (buf) => crypto.createHash("sha1").update(buf).digest("hex");
 const thumbKeyOf = (id) => `thumb-${id}`;
+
+/* 服务端生成 480px 缩略图（v0.13.8）：最长边 480、webp q80、自动旋转、不放大 */
+async function genThumbBuf(buf) {
+  const out = await sharp(buf, { failOn: "none", animated: false })
+    .rotate()
+    .resize(480, 480, { fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 80, effort: 4 })
+    .toBuffer();
+  return out;
+}
+/* 保存缩略图到 meta（有前端 thumb 用前端的，否则服务端生成） */
+async function saveThumb(s, meta, id, origBuf, frontThumb) {
+  try {
+    if (frontThumb) {
+      meta.thumbKey = thumbKeyOf(id);
+      meta.thumbMime = frontThumb.mime;
+      await s.set(meta.thumbKey, frontThumb.buf);
+    } else if (origBuf) {
+      const out = await genThumbBuf(origBuf);
+      meta.thumbKey = thumbKeyOf(id);
+      meta.thumbMime = "image/webp";
+      await s.set(meta.thumbKey, out);
+    }
+  } catch (e) { /* 缩略图失败不影响主流程 */ }
+}
 
 /* 解析可选缩略图（前端生成，webp/jpeg 兼容），非法时返回 null */
 function parseThumb(body) {
@@ -245,24 +271,35 @@ async function replaceImage(req, id) {
   meta.height = dims.height;
   meta.mime = mime;
   meta.hash = sha1hex(buf);
-  if (thumb) {
-    meta.thumbKey = thumbKeyOf(id);
-    meta.thumbMime = thumb.mime;
-    await s.set(meta.thumbKey, thumb.buf);
-  }
+  await saveThumb(s, meta, id, buf, thumb); // 前端缩略图优先，否则服务端生成
   meta.updatedAt = new Date().toISOString();
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
   logAction(req, "替换图片内容", (meta.title || id) + ` ${dims.width}x${dims.height}`);
   return json({ ok: true, photo: meta });
 }
 
-/* ---------- 缩略图输出（v0.12：前端生成上传，key: thumb-{id}） ---------- */
+/* ---------- 缩略图输出（v0.12/0.13.8：无缩略图时服务端即时生成并缓存，旧图自动补齐） ---------- */
 async function thumb(id) {
   const s = store();
   const meta = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
-  if (!meta || !meta.thumbKey) return notFound("Thumbnail not found");
-  const buf = await s.get(meta.thumbKey, { type: "arrayBuffer" });
-  if (!buf) return notFound("Thumbnail data not found");
+  if (!meta) return notFound("Photo not found");
+  let buf = null;
+  if (meta.thumbKey) buf = await s.get(meta.thumbKey, { type: "arrayBuffer" });
+  if (!buf) {
+    // 懒生成：读原图 → sharp 480px → 存入 Blobs（下次直接命中，immutable 缓存）
+    const orig = await s.get(meta.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" });
+    if (!orig) return notFound("Image data not found");
+    try {
+      const out = await genThumbBuf(Buffer.from(orig));
+      meta.thumbKey = thumbKeyOf(id);
+      meta.thumbMime = "image/webp";
+      await s.set(meta.thumbKey, out);
+      await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
+      buf = out;
+    } catch (e) {
+      return notFound("Thumbnail generation failed");
+    }
+  }
   return new Response(buf, {
     status: 200,
     headers: {
@@ -327,14 +364,10 @@ async function upload(req) {
     origKey,
     hash: sha1hex(buf), // 内容哈希（v0.12 重复检测）
   };
-  if (thumb) {
-    meta.thumbKey = thumbKeyOf(id);
-    meta.thumbMime = thumb.mime;
-  }
 
   const s = store();
-  if (thumb) await s.set(meta.thumbKey, thumb.buf);
   await s.set(origKey, buf);
+  await saveThumb(s, meta, id, buf, thumb); // 前端缩略图优先，否则服务端生成（v0.13.8）
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
   logAction(req, "上传图片", meta.title);
   return json({ ok: true, photo: meta }, 201);
@@ -479,6 +512,7 @@ async function importStatic(req) {
         hash: sha1hex(buf),
       };
       await s.set(origKey, buf);
+      await saveThumb(s, meta, id, buf, null); // 导入图无前端缩略图 → 服务端生成（v0.13.8）
       await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
       imported++;
     } catch (e) {
