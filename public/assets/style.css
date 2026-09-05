@@ -2603,46 +2603,33 @@ html[data-cols="wide"] { --col-w: 320px; }
 }
 .lb-info .lb-meta { margin-bottom: 14px; }
 
-/* --- 灯箱工具条（图片底部中央，hover 显现） --- */
+/* --- 灯箱工具条（v0.13.8：位于右侧信息面板顶部，常显） --- */
 .lb-tools {
-  position: absolute;
-  left: 50%;
-  bottom: 22px;
-  transform: translateX(-50%);
-  z-index: 6;
   display: flex;
-  gap: 4px;
-  padding: 6px;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.55);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255,255,255,0.14);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.25s;
+  align-items: center;
+  gap: 2px;
+  margin: -4px 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--w006);
 }
-.lightbox.open:hover .lb-tools { opacity: 1; pointer-events: auto; }
 .lb-tool {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   border: none;
   background: transparent;
-  color: #dfe3ea;
+  color: var(--text-dim);
   display: grid;
   place-items: center;
   cursor: pointer;
   transition: background 0.2s, color 0.2s, transform 0.15s;
 }
-.lb-tool:hover { background: rgba(255,255,255,0.16); color: #fff; }
+.lb-tool:hover { background: var(--w008); color: var(--text); }
 .lb-tool:active { transform: scale(0.9); }
-.lb-tool svg { width: 18px; height: 18px; }
+.lb-tool svg { width: 17px; height: 17px; }
 .lb-tool.on { color: var(--accent); }
 .lb-tool.fav-on svg { fill: var(--accent); stroke: var(--accent); }
 .lb-tool:disabled { opacity: 0.5; cursor: wait; }
-
 /* 收起信息面板：图片占满 */
 .lightbox.no-info .lb-info { display: none; }
 .lightbox.no-info { gap: 0; }
@@ -2800,7 +2787,6 @@ body.select-mode .card .pick { display: grid; }
 .lb-tool .ico-pause { width: 18px; height: 18px; }
 .lightbox.sliding .lb-btn { opacity: 0.45; }
 .lightbox.sliding:hover .lb-btn { opacity: 1; }
-.lightbox.tools-hidden .lb-tools { opacity: 0; pointer-events: none; }
 .lightbox.sliding .lb-btn.lb-close { opacity: 0.6; }
 .lightbox.sliding:hover .lb-btn.lb-close { opacity: 1; }
 .lb-slide-badge {
