@@ -1064,6 +1064,7 @@ function initUpload() {
       queue.appendChild(row);
       const chk = row.querySelector(".uq-check input");
       if (chk) chk.addEventListener("change", () => toggleUqSelect(item));
+      row.querySelector(".sub").textContent = "3 秒后自动上传，可先点 ✎ 编辑";
       // v0.13：逐张编辑 / 移除
       row.querySelector(".u-edit").onclick = () => openUqEdit(item);
       row.querySelector(".u-del").onclick = () => {
@@ -1078,7 +1079,6 @@ function initUpload() {
     // v0.13：延迟自动上传，给逐张编辑 / 移除留时间（可点「开始上传」立即开始）
     if (files.length) {
       clearTimeout(window.__uqAutoTimer);
-      row.querySelector(".sub").textContent = "3 秒后自动上传，可先点 ✎ 编辑";
       window.__uqAutoTimer = setTimeout(() => startUpload(), 3000);
     }
   }
