@@ -3557,3 +3557,21 @@ body.select-mode .card .pick { display: grid; }
   .cw-right { position: static; width: 100%; }
   .cw-cards { max-height: 42vh; }
 }
+/* ============================================================
+   交通灯黄点：窗口最大化 / 还原（v0.14.5）
+   ============================================================ */
+.page-panel {
+  transition: transform 0.45s var(--ease-out), filter 0.3s ease, opacity 0.3s ease,
+    width 0.32s var(--ease-out), height 0.32s var(--ease-out);
+}
+.page-panel.maximized {
+  width: min(1440px, 97vw);
+  height: min(94vh, 1150px);
+}
+.page-panel.maximized .traffic .yellow {
+  filter: brightness(0.72);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.12);
+}
+.traffic .yellow { cursor: pointer; }
+.traffic .yellow:hover { filter: brightness(1.1); }
+.traffic .yellow:active { transform: scale(0.9); }

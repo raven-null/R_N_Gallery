@@ -3371,4 +3371,16 @@ function initPageSwitch() {
     btnBack[id].addEventListener("click", () => closeWindow(id));
     btnClose[id].addEventListener("click", () => closeWindow(id));
   });
+
+  // 黄点：窗口最大化 / 还原（v0.14.5）
+  document.querySelectorAll(".page-panel .traffic .yellow").forEach((yel) => {
+    yel.style.cursor = "pointer";
+    yel.addEventListener("click", () => {
+      const panel = yel.closest(".page-panel");
+      if (!panel) return;
+      const on = panel.classList.toggle("maximized");
+      yel.title = on ? "还原窗口大小" : "最大化窗口";
+    });
+    yel.title = "最大化窗口";
+  });
 }
