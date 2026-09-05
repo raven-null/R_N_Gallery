@@ -653,9 +653,16 @@ function initGallery() {
     const gh = e.target.closest(".tag-group-head");
     if (gh && gh.dataset.gid) {
       const gid = gh.dataset.gid;
-      if (collapsedGroups.has(gid)) collapsedGroups.delete(gid);
+      const collapsed = collapsedGroups.has(gid);
+      if (collapsed) collapsedGroups.delete(gid);
       else collapsedGroups.add(gid);
-      renderTagMenuContent();
+      // v0.14.1：纯 DOM 折叠（不重建列表，避免 flyout 因 DOM 替换而退出）
+      gh.classList.toggle("collapsed", !collapsed);
+      let node = gh.nextElementSibling;
+      while (node && !node.classList.contains("tag-group-head")) {
+        if (node.classList.contains("tag-menu-item")) node.classList.toggle("is-hidden", !collapsed);
+        node = node.nextElementSibling;
+      }
     }
   });
   // 组内搜索：匹配标签名与别名
