@@ -2480,9 +2480,12 @@ function openTagModal(mode, payload, presetName) {
   fName.focus();
 
   body.querySelector("#fCancel").onclick = closeTagModal;
-  body.querySelector("#fDel").onclick = () => {
-    openTagModal(isGroup ? "remove-group" : "remove-tag", isGroup ? target.id : target.name);
-  };
+  const fDelEl = body.querySelector("#fDel"); // 仅编辑模式存在（新建模式无删除按钮）
+  if (fDelEl) {
+    fDelEl.onclick = () => {
+      openTagModal(isGroup ? "remove-group" : "remove-tag", isGroup ? target.id : target.name);
+    };
+  }
 
   fSave.onclick = async () => {
     const name = fName.value.trim();
