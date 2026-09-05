@@ -1986,7 +1986,7 @@ input.settings-value:focus {
 .modal-mask {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 120; /* v0.14.1: 高于灯箱(100)，灯箱内弹窗不被遮挡 */
   background: rgba(0,0,0,0.5);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
