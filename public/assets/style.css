@@ -3328,3 +3328,74 @@ body.select-mode .card .pick { display: grid; }
   box-shadow: 0 0 0 2px rgba(255,159,10,0.25);
   background: rgba(255,159,10,0.08);
 }
+/* ============================================================
+   上传队列 · 批量分类（v0.14.2）
+   ============================================================ */
+.uq-selbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--w008);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(160deg, var(--s31) 0%, var(--s10) 100%);
+}
+.uq-sel-count { font-size: 13px; color: var(--accent); font-weight: 600; }
+.uq-sel-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.uq-sel-label { font-size: 11.5px; color: var(--text-faint); flex: none; }
+.uq-sel-row .quick-pick { margin: 0; max-height: none; overflow: visible; }
+.uq-sel-row input {
+  flex: 1;
+  min-width: 160px;
+  padding: 7px 11px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--w010);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+.uq-sel-row input:focus { border-color: rgba(255,159,10,0.45); }
+[data-theme="light"] .uq-sel-row input { background: rgba(255,255,255,0.75); }
+
+/* 队列行：勾选框 + 选中高亮 + 分类 chips */
+.uq-item { position: relative; }
+.uq-check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  border: 2px solid var(--w020);
+  border-radius: 50%;
+  background: rgba(0,0,0,0.25);
+  transition: all 0.2s;
+}
+.uq-check input { display: none; }
+.uq-check .mk { font-size: 12px; color: transparent; transition: color 0.15s; }
+.uq-item.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+.uq-item.sel .uq-check { border-color: var(--accent); background: var(--accent); }
+.uq-item.sel .uq-check .mk { color: #fff; }
+.uq-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.uq-tags span {
+  font-size: 10.5px;
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: var(--w008);
+  border: 1px solid var(--w010);
+  color: var(--text-dim);
+}
+.uq-tags span.cls {
+  background: rgba(255,159,10,0.12);
+  border-color: rgba(255,159,10,0.3);
+  color: var(--accent);
+}
