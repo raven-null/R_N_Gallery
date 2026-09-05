@@ -70,26 +70,18 @@ function addTagChip(box, name) {
 }
 const tagsOfBox = (box) => [...box.querySelectorAll(".t")].map((el) => el.childNodes[0].textContent.trim()).filter(Boolean);
 
+/* 标签建议输入（v0.14 借鉴博客后台：focus 显示全部候选、退格删 chip、回车自定义） */
 function bindTagSuggest(input, suggest, box, afterPick) {
   if (!input || !suggest) return;
   const hide = () => { suggest.hidden = true; suggest.innerHTML = ""; };
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && input.value.trim()) {
-      e.preventDefault();
-      addTagChip(box, input.value.trim());
-      hide();
-      if (afterPick) afterPick();
-    }
-  });
-  input.addEventListener("input", () => {
-    const kw = input.value.trim().toLowerCase();
-    if (!kw || !TAGS.tags.length) return hide();
+  const renderHits = (kw) => {
     const used = new Set(tagsOfBox(box));
-    const hits = TAGS.tags
-      .filter((t) => !used.has(t.name) && tagQueryMatch(t, kw))
-      .slice(0, 8);
+    const q = String(kw || "").trim().toLowerCase();
+    let hits = TAGS.tags.filter((t) => !used.has(t.name) && tagQueryMatch(t, q));
+    if (!q) hits = hits.slice(0, 12);
+    else hits = hits.slice(0, 8);
     if (!hits.length) {
-      suggest.innerHTML = `<div class="ts-empty">标签库无匹配 · 回车可自定义</div>`;
+      suggest.innerHTML = `<div class="ts-empty">${q ? "无匹配标签 · 回车可自定义" : "标签库为空，回车可自定义新标签"}</div>`;
       suggest.hidden = false;
       return;
     }
@@ -101,14 +93,41 @@ function bindTagSuggest(input, suggest, box, afterPick) {
         ${g ? `<span class="g">${esc(g.name)}</span>` : ""}</button>`;
     }).join("");
     suggest.hidden = false;
+  };
+  input.addEventListener("focus", () => {
+    if (TAGS.tags.length && !suggest.hidden) return;
+    if (input.value.trim()) return;
+    renderHits("");
   });
-  suggest.addEventListener("mousedown", (e) => {
-    const it = e.target.closest(".ts-item");
-    if (it) { e.preventDefault(); addTagChip(box, it.dataset.name); hide(); if (afterPick) afterPick(); }
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && input.value.trim()) {
+      e.preventDefault();
+      addTagChip(box, input.value.trim());
+      input.value = "";
+      hide();
+      if (afterPick) afterPick();
+    } else if (e.key === "Backspace" && !input.value.trim()) {
+      const chips = box.querySelectorAll(".t");
+      if (chips.length) {
+        chips[chips.length - 1].remove();
+        if (afterPick) afterPick();
+      }
+    }
   });
-  input.addEventListener("blur", () => setTimeout(hide, 150));
+  input.addEventListener("input", () => {
+    if (!suggest) return;
+    const kw = input.value.trim().toLowerCase();
+    if (!kw || !TAGS.tags.length) return hide();
+    renderHits(kw);
+  });
+  if (suggest) {
+    suggest.addEventListener("mousedown", (e) => {
+      const it = e.target.closest(".ts-item");
+      if (it) { e.preventDefault(); addTagChip(box, it.dataset.name); input.value = ""; hide(); if (afterPick) afterPick(); }
+    });
+    input.addEventListener("blur", () => setTimeout(hide, 150));
+  }
 }
-
 /* ---------- 通用确认弹窗 ---------- */
 let confirmCb = null;
 function askConfirm(title, desc, okLabel, cb) {
@@ -223,6 +242,7 @@ async function loadTags() {
     const res = await apiFetch("/api/tags");
     const d = await res.json();
     TAGS = (d && Array.isArray(d.groups) && Array.isArray(d.tags)) ? d : { groups: [], tags: [] };
+    if (window.__refreshQuickPick) window.__refreshQuickPick();
   } catch (e) {
     TAGS = { groups: [], tags: [] }; // API 不可用时降级为纯自由标签
   }
@@ -690,8 +710,8 @@ function initGallery() {
 
   const favSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`;
   function cardHTML(p) {
-    return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}">
-      <img loading="lazy" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
+    return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true">
+      <img loading="lazy" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
       <button class="pick" title="选中">✓</button>
       <button class="fav-star${isFav(p.id) ? " on" : ""}" title="${isFav(p.id) ? "取消收藏" : "收藏"}">${favSVG}</button>
       <div class="card__content">
@@ -752,6 +772,19 @@ function initGallery() {
         scrollBusy = false;
       }
     }
+  });
+
+  /* 卡片拖拽（v0.14：拖到标签管理窗口的标签上打标） */
+  grid.addEventListener("dragstart", (e) => {
+    const card = e.target.closest(".card");
+    if (!card || selectMode) { e.preventDefault(); return; }
+    card.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "copy";
+    try { e.dataTransfer.setData("text/plain", card.dataset.id); } catch (err) { /* ignore */ }
+  });
+  grid.addEventListener("dragend", (e) => {
+    const card = e.target.closest(".card");
+    if (card) card.classList.remove("dragging");
   });
 
   /* 卡片事件委托（v0.13.2：星标 / 选中 / 打开灯箱，避免整批重绑） */
@@ -1121,7 +1154,7 @@ function initUpload() {
             setSub("网络错误");
             reject(new Error("network"));
           };
-          const gTags = [...tagList.querySelectorAll(".t")].map((el) => el.childNodes[0].textContent.trim()).filter(Boolean);
+          const gTags = [...(window.__upTagList || document.getElementById("tagListUpload")).querySelectorAll(".t")].map((el) => el.childNodes[0].textContent.trim()).filter(Boolean);
           const tags = it.tags !== undefined ? it.tags : gTags; // 逐张编辑优先（v0.13）
           // 标题：逐张编辑优先，否则取文件名（去扩展名）
           const title = it.title || it.f.name.replace(/\.[^.]+$/, "").trim() || undefined;
@@ -1174,66 +1207,11 @@ function initUpload() {
   }
   btnUpload.addEventListener("click", startUpload);
 
-  // 标签输入（v0.11：输入时从标签库建议，回车自定义）
-  const tagBox = document.getElementById("tagInputUpload");
+  // 标签输入（v0.14：统一组件：focus 全列表点选、回车自定义、退格删 chip、快捷点选）
   const tagList = document.getElementById("tagListUpload");
-  const suggest = document.getElementById("tagSuggest");
-
-  function hideSuggest() {
-    if (suggest) { suggest.hidden = true; suggest.innerHTML = ""; }
-  }
-  function pickUploadTag(name) {
-    const dup = [...tagList.querySelectorAll(".t")].some((el) => el.childNodes[0].textContent.trim() === name);
-    if (!dup) {
-      const el = document.createElement("span");
-      el.className = "t";
-      el.innerHTML = `${esc(name)}<button type="button" title="移除">×</button>`;
-      el.querySelector("button").onclick = () => el.remove();
-      tagList.insertBefore(el, tagBox);
-    }
-    tagBox.value = "";
-    hideSuggest();
-    tagBox.focus();
-  }
-  tagBox.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && tagBox.value.trim()) {
-      e.preventDefault();
-      pickUploadTag(tagBox.value.trim());
-    }
-  });
-  // 输入建议：匹配标签名与别名，显示所属组
-  tagBox.addEventListener("input", () => {
-    if (!suggest) return;
-    const kw = tagBox.value.trim().toLowerCase();
-    if (!kw || !TAGS.tags.length) return hideSuggest();
-    const used = new Set([...tagList.querySelectorAll(".t")].map((el) => el.childNodes[0].textContent.trim()));
-    const hits = TAGS.tags
-      .filter((t) => !used.has(t.name) && tagQueryMatch(t, kw))
-      .slice(0, 8);
-    if (!hits.length) {
-      suggest.innerHTML = `<div class="ts-empty">标签库无匹配 · 回车可自定义新标签</div>`;
-      suggest.hidden = false;
-      return;
-    }
-    suggest.innerHTML = hits.map((t) => {
-      const c = t.color || tagGroupColor(t.group) || null;
-      const g = t.group ? TAGS.groups.find((x) => x.id === t.group) : null;
-      return `<button type="button" class="ts-item" data-name="${escAttr(t.name)}">
-        <i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>${esc(t.name)}
-        ${g ? `<span class="g">${esc(g.name)}</span>` : ""}</button>`;
-    }).join("");
-    suggest.hidden = false;
-  });
-  // mousedown 先于 blur 触发，避免点击项时建议层先消失
-  if (suggest) {
-    suggest.addEventListener("mousedown", (e) => {
-      const it = e.target.closest(".ts-item");
-      if (it) { e.preventDefault(); pickUploadTag(it.dataset.name); }
-    });
-    tagBox.addEventListener("blur", () => setTimeout(hideSuggest, 150));
-  }
+  bindTagSuggest(document.getElementById("tagInputUpload"), document.getElementById("tagSuggest"), tagList, refreshQuickPickAll);
+  window.__upTagList = tagList; // 供 uploadOne 读取
 }
-
 /* ---------- 批量选择模式（v0.11.2） ---------- */
 function updateBatchUI() {
   const bar = document.getElementById("batchBar");
@@ -1284,6 +1262,7 @@ async function batchDelete() {
 }
 
 /* ---------- 批量加标签（v0.11.2） ---------- */
+let btMode = "add";
 function openBatchTag() {
   if (!selected.size) return;
   document.getElementById("batchTagTitle").textContent = `为选中的 ${selected.size} 张图片添加标签`;
@@ -1292,24 +1271,48 @@ function openBatchTag() {
   const err = document.getElementById("btErr");
   err.style.display = "none";
   document.getElementById("batchTagModal").classList.add("open");
+  setBtMode("add");
+}
+function setBtMode(mode) {
+  btMode = mode;
+  const seg = document.getElementById("btMode");
+  if (seg) seg.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+  const box = document.getElementById("btTagBox");
+  const hint = box && box.parentElement && box.parentElement.querySelector(".hint");
+  const input = document.getElementById("btTagInput");
+  if (mode === "clear") {
+    box.querySelectorAll(".t").forEach((el) => el.remove());
+    if (input) input.disabled = true;
+    if (hint) hint.textContent = "清空所选图片的全部标签";
+  } else {
+    if (input) input.disabled = false;
+    if (hint) hint.textContent = mode === "replace" ? "将覆盖为以下标签（原标签移除）" : "添加到全部选中图片（原有标签保留）";
+  }
 }
 async function applyBatchTag() {
   const box = document.getElementById("btTagBox");
-  const tags = tagsOfBox(box);
-  if (!tags.length) return;
+  const inputTags = tagsOfBox(box);
   const okBtn = document.getElementById("btOk");
   const err = document.getElementById("btErr");
+  if (btMode === "replace" && !inputTags.length) {
+    err.textContent = "覆盖模式请至少输入一个标签";
+    err.style.display = "block";
+    return;
+  }
   okBtn.disabled = true;
   try {
     const ids = [...selected];
     await Promise.all(ids.map(async (id) => {
       const p = PHOTOS.find((x) => x.id === id);
       if (!p) return;
-      const merged = [...new Set([...(p.tags || []), ...tags])].slice(0, 10);
+      let next;
+      if (btMode === "clear") next = [];
+      else if (btMode === "replace") next = inputTags.slice(0, 10);
+      else next = [...new Set([...(p.tags || []), ...inputTags])].slice(0, 10);
       await apiFetch(`/api/photos/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags: merged }),
+        body: JSON.stringify({ tags: next }),
       });
     }));
     document.getElementById("batchTagModal").classList.remove("open");
@@ -1322,7 +1325,6 @@ async function applyBatchTag() {
   }
   okBtn.disabled = false;
 }
-
 /* ---------- 单张编辑弹窗（v0.11.2：描述 / 标签 / 删除） ---------- */
 let editTargetId = null;
 function openEditModal(id) {
@@ -1336,6 +1338,7 @@ function openEditModal(id) {
   const err = document.getElementById("edErr");
   err.style.display = "none";
   document.getElementById("editModal").classList.add("open");
+  if (window.__refreshQuickPick) window.__refreshQuickPick();
 }
 async function saveEditModal() {
   const id = editTargetId;
@@ -1393,7 +1396,9 @@ function initEditModal() {
   delBtn.innerHTML = `<button class="btn danger sm" type="button" id="edDelete">删除这张图片</button>`;
   m.querySelector("form").appendChild(delBtn);
   m.querySelector("#edDelete").addEventListener("click", delFromEditModal);
-  bindTagSuggest(document.getElementById("edTagInput"), document.getElementById("edTagSuggest"), document.getElementById("edTagBox"));
+  bindTagSuggest(document.getElementById("edTagInput"), document.getElementById("edTagSuggest"), document.getElementById("edTagBox"), refreshQuickPickAll);
+  const btSeg = document.getElementById("btMode");
+  if (btSeg) btSeg.querySelectorAll(".seg-btn").forEach((b) => b.addEventListener("click", () => setBtMode(b.dataset.mode)));
   bindTagSuggest(document.getElementById("btTagInput"), document.getElementById("btTagSuggest"), document.getElementById("btTagBox"));
   document.getElementById("btCancel").addEventListener("click", () => document.getElementById("batchTagModal").classList.remove("open"));
   document.getElementById("btOk").addEventListener("click", applyBatchTag);
@@ -2124,7 +2129,7 @@ function mgrPills(tagObjs, counts) {
   if (!tagObjs.length) return `<div class="tag-mgr-empty" style="padding:2px 2px 0">（空）</div>`;
   return `<div class="tmgr-pills">` + tagObjs.map((t) => {
     const c = t.color || tagGroupColor(t.group) || null;
-    return `<span class="tmgr-pill">
+    return `<span class="tmgr-pill" data-tag="${escAttr(t.name)}">
       <i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>${esc(t.name)}
       <span class="cnt">${counts[t.name] || 0} 张</span>
       <button class="act" data-tact="edit" data-tname="${escAttr(t.name)}" title="编辑 / 改名">✎</button>
@@ -2133,61 +2138,187 @@ function mgrPills(tagObjs, counts) {
   }).join("") + `</div>`;
 }
 
+const TMGR_VIEW_KEY = "rn_tmgr_view";
 function refreshTagManager() {
   const root = document.getElementById("tagMgrRoot");
   if (!root) return;
   const counts = tagCounts();
   const used = Object.keys(counts);
+  const view = localStorage.getItem(TMGR_VIEW_KEY) === "stat" ? "stat" : "group";
 
-  let html = `<div class="tag-mgr-hint">分组与别名用于筛选菜单和上传建议；<b style="color:var(--text)">改名 / 删除</b>会同步所有图片。</div>`;
+  let html = `<div class="tmgr-seg">
+      <div class="seg" id="tmgrViewSeg" role="group" aria-label="视图">
+        <button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
+        <button class="seg-btn${view === "stat" ? " on" : ""}" data-view="stat">统计</button>
+      </div>
+    </div>`;
 
-  if (!used.length && !TAGS.tags.length) {
-    html += `<div class="tag-mgr-empty" style="padding:4px 2px 2px">图库中还没有标签。上传图片时填写标签，即可在此分组管理。</div>`;
-  } else {
-    const groups = [...TAGS.groups].sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
-    if (groups.length) {
-      for (const g of groups) {
-        const items = TAGS.tags
-          .filter((t) => t.group === g.id)
-          .sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
+  if (view === "group") {
+    html += `<div class="tag-mgr-hint">分组与别名用于筛选菜单和上传建议；<b style="color:var(--text)">改名 / 删除</b>会同步所有图片。</div>`;
+    if (!used.length && !TAGS.tags.length) {
+      html += `<div class="tag-mgr-empty" style="padding:4px 2px 2px">图库中还没有标签。上传图片时填写标签，即可在此分组管理。</div>`;
+    } else {
+      const groups = [...TAGS.groups].sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
+      if (groups.length) {
+        for (const g of groups) {
+          const items = TAGS.tags
+            .filter((t) => t.group === g.id)
+            .sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
+          html += `<div class="tmgr-head" style="margin-top:6px">
+            <i class="dot" style="--tg:${g.color || "#ff9f0a"}"></i>${esc(g.name)}
+            <span class="cnt">${items.length} 个标签</span>
+            <button class="act" data-gact="edit" data-gid="${escAttr(g.id)}" title="编辑组">✎</button>
+          </div>`;
+          html += mgrPills(items, counts);
+        }
+      }
+      const freeNames = used.filter((n) => !tagByName(n));
+      if (freeNames.length) {
         html += `<div class="tmgr-head" style="margin-top:6px">
-          <i class="dot" style="--tg:${g.color || "#ff9f0a"}"></i>${esc(g.name)}
-          <span class="cnt">${items.length} 个标签</span>
-          <button class="act" data-gact="edit" data-gid="${escAttr(g.id)}" title="编辑组">✎</button>
+          <i class="dot"></i>未分组 · 待整理<span class="cnt">${freeNames.length}</span>
         </div>`;
-        html += mgrPills(items, counts);
+        html += mgrPills(freeNames.map((n) => ({ name: n, color: null, group: "" })), counts);
       }
     }
-    // 游离标签：照片中出现、但尚未纳入标签库
-    const freeNames = used.filter((n) => !tagByName(n));
-    if (freeNames.length) {
-      html += `<div class="tmgr-head" style="margin-top:6px">
-        <i class="dot"></i>未分组 · 待整理<span class="cnt">${freeNames.length}</span>
+  } else {
+    // 统计视图（v0.14 借鉴博客后台）：全部标签按使用数排序卡片 + 拖放目标
+    const all = new Map();
+    TAGS.tags.forEach((t) => all.set(t.name, t));
+    used.forEach((n) => { if (!all.has(n)) all.set(n, { name: n, color: null, group: "" }); });
+    const items = [...all.values()]
+      .sort((a, b) => ((counts[b.name] || 0) - (counts[a.name] || 0)) || a.name.localeCompare(b.name, "zh"));
+    html += `<div class="tag-mgr-hint">共 ${items.length} 个标签 · 点击标签项可将拖入的图片归入该标签（拖拽分类）。</div>`;
+    html += `<div class="stat-grid">` + items.map((t) => {
+      const c = t.color || tagGroupColor(t.group) || null;
+      const inLib = !!tagByName(t.name);
+      return `<div class="stat-item" data-tag="${escAttr(t.name)}" title="拖图片到这里 = 加上该标签">
+        <i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>
+        <span class="nm">${esc(t.name)}</span>
+        <span class="cnt">${counts[t.name] || 0} 张</span>
+        <span class="ops">
+          <button data-sact="edit" title="${inLib ? "编辑 / 改名" : "加入标签库并整理"}">✎</button>
+          <button class="danger" data-sact="remove" title="删除（从引用图片移除）">×</button>
+        </span>
       </div>`;
-      html += mgrPills(freeNames.map((n) => ({ name: n, color: null, group: "" })), counts);
-    }
+    }).join("") + `</div>`;
   }
 
   html += `<div class="tag-mgr-actions">
     <button class="btn ghost sm" id="btnNewTag">＋ 新建标签</button>
     <button class="btn ghost sm" id="btnNewGroup">＋ 新建标签组</button>
-
   </div>`;
   root.innerHTML = html;
 
   const q = (sel) => root.querySelector(sel);
   if (q("#btnNewTag")) q("#btnNewTag").addEventListener("click", () => openTagModal("new-tag"));
   if (q("#btnNewGroup")) q("#btnNewGroup").addEventListener("click", () => openTagModal("new-group"));
-
+  const seg = q("#tmgrViewSeg");
+  if (seg) {
+    seg.querySelectorAll(".seg-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        localStorage.setItem(TMGR_VIEW_KEY, b.dataset.view);
+        refreshTagManager();
+      });
+    });
+  }
+  if (view === "stat") {
+    root.querySelectorAll("[data-sact='edit']").forEach((b) => {
+      const nm = b.closest(".stat-item").dataset.tag;
+      b.addEventListener("click", () => {
+        if (tagByName(nm)) openTagModal("edit-tag", nm);
+        else openTagModal("new-tag", null, nm);
+      });
+    });
+    root.querySelectorAll("[data-sact='remove']").forEach((b) => {
+      const nm = b.closest(".stat-item").dataset.tag;
+      b.addEventListener("click", () => openTagModal("remove-tag", nm));
+    });
+  }
   root.querySelectorAll("[data-gact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-group", b.dataset.gid)));
   root.querySelectorAll("[data-tact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-tag", b.dataset.tname)));
   root.querySelectorAll("[data-tact='remove']").forEach((b) => b.addEventListener("click", () => openTagModal("remove-tag", b.dataset.tname)));
+  bindTagDrops(root); // 拖拽分类目标
 }
-
 function refreshTagUI() {
   refreshTagManager();
   renderTagMenuContent();
 }
+
+/* ---------- 拖拽分类（v0.14：把卡片拖到标签上打标） ---------- */
+function bindTagDrops(scope) {
+  const targets = scope ? scope.querySelectorAll(".tmgr-pill[data-tag], .stat-item[data-tag]") : document.querySelectorAll(".tmgr-pill[data-tag], .stat-item[data-tag]");
+  targets.forEach((el) => {
+    el.classList.remove("drop-hover");
+    el.addEventListener("dragover", (e) => {
+      if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes("text/plain")) {
+        e.preventDefault();
+        el.classList.add("drop-hover");
+      }
+    });
+    el.addEventListener("dragleave", () => el.classList.remove("drop-hover"));
+    el.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      el.classList.remove("drop-hover");
+      const id = e.dataTransfer.getData("text/plain");
+      const tag = el.dataset.tag;
+      if (!id || !tag) return;
+      const p = PHOTOS.find((x) => x.id === id);
+      if (!p) return;
+      if ((p.tags || []).includes(tag)) return;
+      const merged = [...new Set([...(p.tags || []), tag])].slice(0, 10);
+      try {
+        await apiFetch(`/api/photos/${p.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags: merged }),
+        });
+        await loadData();
+        if (window.__refreshGallery) window.__refreshGallery();
+      } catch (err) { /* 静默 */ }
+    });
+  });
+}
+
+/* ---------- 快捷点选（v0.14：编辑/上传时点击即选） ---------- */
+function renderQuickPick(boxEl, wrapEl) {
+  if (!wrapEl || !boxEl) return;
+  if (!TAGS.tags.length) {
+    wrapEl.classList.remove("show");
+    wrapEl.innerHTML = `<div class="qp-empty">标签库为空，可先到「标签」页新建</div>`;
+    return;
+  }
+  const used = new Set(tagsOfBox(boxEl));
+  wrapEl.classList.add("show");
+  wrapEl.innerHTML = TAGS.tags.slice(0, 60).map((t) => {
+    const c = t.color || tagGroupColor(t.group) || null;
+    return `<span class="qp-item${used.has(t.name) ? " sel" : ""}" data-tag="${escAttr(t.name)}">
+      <i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>${esc(t.name)}</span>`;
+  }).join("");
+  wrapEl.querySelectorAll(".qp-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      const n = el.dataset.tag;
+      const has = tagsOfBox(boxEl).includes(n);
+      if (has) {
+        [...boxEl.querySelectorAll(".t")].forEach((chip) => {
+          if (chip.childNodes[0].textContent.trim() === n) chip.remove();
+        });
+      } else {
+        addTagChip(boxEl, n);
+      }
+      renderQuickPick(boxEl, wrapEl);
+      const pick = document.getElementById("edQuickPick") === wrapEl ? "ed" : "up";
+      if (pick === "up") {
+        // 上传页需要重新启用按钮（chips 变化不影响 disabled 逻辑，无需处理）
+      }
+    });
+  });
+}
+function refreshQuickPickAll() {
+  renderQuickPick(document.getElementById("edTagBox"), document.getElementById("edQuickPick"));
+  renderQuickPick(document.getElementById("tagListUpload"), document.getElementById("upQuickPick"));
+}
+window.__refreshQuickPick = refreshQuickPickAll;
+
 
 function closeTagModal() {
   const m = document.getElementById("tagModal");
@@ -2209,7 +2340,7 @@ function groupSelectHTML(sel) {
 }
 
 /* 标签 / 标签组编辑弹窗。payload：标签名或组 id */
-function openTagModal(mode, payload) {
+function openTagModal(mode, payload, presetName) {
   const modal = document.getElementById("tagModal");
   const body = document.getElementById("tagModalBody");
   if (!modal || !body) return;
@@ -2290,7 +2421,7 @@ function openTagModal(mode, payload) {
     : tagByName(payload) || null;
   if ((mode === "edit-group" || mode === "edit-tag") && !target) return closeTagModal();
 
-  const editName = target ? target.name : "";
+  const editName = target ? target.name : (presetName || "");
   const selGroup = target ? (target.group || "") : "";
   const selColor = target ? (target.color || (target.group ? tagGroupColor(target.group) : null)) : null;
   const title = isGroup ? (target ? "编辑标签组" : "新建标签组") : (target ? "编辑标签" : "新建标签");
@@ -2673,6 +2804,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (window.__refreshGallery) window.__refreshGallery();
   renderTagMenuContent();
   refreshTagManager();
+  refreshQuickPickAll();
 });
 
 /* ---------- 页面窗口（v0.8）· 上传/设置以独立窗口层叠悬浮于图库上方 ---------- */

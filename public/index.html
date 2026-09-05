@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>渡·影·集</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='2' width='20' height='20' rx='5' fill='%2314171f'/%3E%3Crect x='4.5' y='4.5' width='15' height='15' rx='3' fill='none' stroke='%23ff9f0a' stroke-width='1.6'/%3E%3Ccircle cx='9' cy='9' r='1.3' fill='%23ff9f0a'/%3E%3Cpath d='M19.5 14.5l-3.6-3.6a.8.8 0 0 0-1.1 0L7 18.5' stroke='%23ff9f0a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="assets/style.css?v=20261005">
+<link rel="stylesheet" href="assets/style.css?v=20261006">
 </head>
 <body data-page="gallery">
 
@@ -95,6 +95,7 @@
             </div>
             <div class="tag-suggest" id="tagSuggest" hidden></div>
           </div>
+          <div class="quick-pick" id="upQuickPick"></div>
           <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
             <button class="btn ghost sm" id="btnAiSuggest" type="button">✨ AI 推荐标签</button>
             <span class="hint" id="aiSuggestHint" style="margin-top:0"></span>
@@ -424,6 +425,7 @@
             </div>
             <div class="tag-suggest" id="edTagSuggest" hidden></div>
           </div>
+          <div class="quick-pick" id="edQuickPick"></div>
         </div>
         <div class="m-actions">
           <button class="btn ghost" type="button" id="edCancel">取消</button>
@@ -438,6 +440,11 @@
   <div class="modal-mask" id="batchTagModal">
     <div class="modal">
       <h3 id="batchTagTitle">为选中图片添加标签</h3>
+      <div class="seg bt-mode" id="btMode" role="group" aria-label="批量标签方式">
+        <button class="seg-btn on" data-mode="add">追加</button>
+        <button class="seg-btn" data-mode="replace">覆盖</button>
+        <button class="seg-btn" data-mode="clear">清空</button>
+      </div>
       <form class="tag-form" onsubmit="return false">
         <div class="field">
           <label>要添加的标签</label>
@@ -684,7 +691,7 @@
   <footer class="footer">渡鸦影集</footer>
 
 <!-- 拼音搜索支持（v0.13；加载失败自动降级为无拼音匹配） -->
-<script src="assets/pinyin-pro.min.js?v=20261005" defer></script>
-<script src="assets/app.js?v=20261005"></script>
+<script src="assets/pinyin-pro.min.js?v=20261006" defer></script>
+<script src="assets/app.js?v=20261006"></script>
 </body>
 </html>

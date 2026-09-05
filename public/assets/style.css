@@ -3241,3 +3241,90 @@ body.select-mode .card .pick { display: grid; }
   border-color: rgba(255,255,255,0.42);
   color: #fff;
 }
+/* ============================================================
+   标签借鉴模块 v0.14：快捷点选 / 统计视图 / 拖拽分类
+   ============================================================ */
+/* 快捷点选 pills */
+.quick-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s var(--ease-out);
+}
+.quick-pick.show { max-height: 132px; overflow-y: auto; }
+.qp-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--w008);
+  background: var(--w005);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.qp-item:hover { border-color: rgba(255,159,10,0.4); color: var(--text); }
+.qp-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tg, rgba(255,255,255,0.3)); flex: none; }
+.qp-item.sel {
+  background: rgba(255,159,10,0.12);
+  border-color: rgba(255,159,10,0.35);
+  color: var(--accent);
+}
+.qp-empty { font-size: 11.5px; color: var(--text-faint); }
+.qp-toggle {
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 0;
+}
+.qp-toggle:hover { color: var(--accent); }
+
+/* 标签统计视图（管理窗口） */
+.tmgr-seg { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.stat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--w008);
+  border-radius: 10px;
+  background: var(--w005);
+  transition: all 0.18s;
+}
+.stat-item .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tg, #ff9f0a); flex: none; }
+.stat-item .nm { font-size: 12.5px; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-item .cnt { margin-left: auto; font-size: 11px; color: var(--text-faint); flex: none; }
+.stat-item .ops { display: flex; gap: 2px; flex: none; }
+.stat-item .ops button {
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 3px;
+  border-radius: 5px;
+}
+.stat-item .ops button:hover { color: var(--accent); background: var(--w008); }
+.stat-item .ops button.danger:hover { color: var(--danger); }
+
+/* 拖拽分类视觉 */
+.card.dragging { opacity: 0.45; transform: scale(0.98); }
+.tmgr-pill.drop-hover,
+.stat-item.drop-hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255,159,10,0.25);
+  background: rgba(255,159,10,0.08);
+}
