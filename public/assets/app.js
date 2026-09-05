@@ -3372,15 +3372,56 @@ function initPageSwitch() {
     btnClose[id].addEventListener("click", () => closeWindow(id));
   });
 
-  // 黄点：窗口铺满整个页面 / 还原（v0.14.5）
+  // ===== 交通灯 macOS 语义（v0.14.7）：红=关闭（上方已绑）黄=最小化 绿=全屏 =====
+  const minimized = new Set();
+  const dockMeta = {
+    upload: { label: "上传图片", color: "#ff9f0a" },
+    settings: { label: "设置", color: "#0a84ff" },
+    search: { label: "搜索", color: "#30d158" },
+    tags: { label: "标签管理", color: "#bf5af2" },
+  };
+  const dockBar = document.getElementById("dockBar");
+  function renderDock() {
+    if (!dockBar) return;
+    if (!minimized.size) { dockBar.hidden = true; dockBar.innerHTML = ""; return; }
+    dockBar.hidden = false;
+    dockBar.innerHTML = [...minimized].map((p) => {
+      const m = dockMeta[p] || { label: p, color: "#8e8e93" };
+      return `<button class="dock-item" data-page="${p}" style="--dcol:${m.color}" title="恢复「${m.label}」">${esc(m.label)}</button>`;
+    }).join("");
+    dockBar.querySelectorAll(".dock-item").forEach((b) => b.addEventListener("click", () => openWindow(b.dataset.page)));
+  }
+  // 菜单 / 快捷键直接打开已最小化窗口时：解除最小化
+  const baseOpenWindow = openWindow;
+  openWindow = (page) => {
+    if (minimized.has(page)) { minimized.delete(page); renderDock(); }
+    baseOpenWindow(page);
+  };
+  window.__openWindow = openWindow;
+  // 黄点 = 最小化到 Dock（最小化时若处于全屏先还原为普通窗口）
   document.querySelectorAll(".page-panel .traffic .yellow").forEach((yel) => {
     yel.style.cursor = "pointer";
+    yel.title = "最小化（收到底部 Dock）";
     yel.addEventListener("click", () => {
-      const panel = yel.closest(".page-panel");
+      const found = Object.entries(panels).find(([, el]) => el === yel.closest(".page-panel"));
+      if (!found || !openStack.includes(found[0])) return;
+      const id = found[0];
+      if (minimized.has(id)) return;
+      panels[id].classList.remove("maximized");
+      minimized.add(id);
+      renderDock();
+      closeWindow(id);
+    });
+  });
+  // 绿点 = 全屏（铺满整个页面）/ 还原
+  document.querySelectorAll(".page-panel .traffic .green").forEach((gre) => {
+    gre.style.cursor = "pointer";
+    gre.title = "全屏（铺满页面）";
+    gre.addEventListener("click", () => {
+      const panel = gre.closest(".page-panel");
       if (!panel) return;
       const on = panel.classList.toggle("maximized");
-      yel.title = on ? "退出全屏，还原窗口" : "铺满整个页面（全屏）";
+      gre.title = on ? "退出全屏" : "全屏（铺满页面）";
     });
-    yel.title = "铺满整个页面（全屏）";
   });
 }
