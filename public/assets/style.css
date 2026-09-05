@@ -3202,11 +3202,12 @@ body.select-mode .card .pick { display: grid; }
 .lb-info-float:active { transform: scale(0.92); }
 .lb-info-float svg { width: 19px; height: 19px; }
 .lb-info-float.on { color: var(--accent); }
+
 /* ============================================================
    灯箱控件 · 液态玻璃（v0.13.9：左右切换 / 信息开关 / 关闭）
    亮半透明玻璃：高光边 + 顶部高光 + 下缘折射 + 大模糊
    ============================================================ */
-.lb-btn,
+.lightbox .lb-btn,
 .lb-info-float,
 [data-theme="light"] .lightbox .lb-btn {
   background: linear-gradient(
@@ -3228,7 +3229,7 @@ body.select-mode .card .pick { display: grid; }
   color: #fff;
   text-shadow: 0 1px 2px rgba(0,0,0,0.25);
 }
-.lb-btn:hover,
+.lightbox .lb-btn:hover,
 .lb-info-float:hover,
 [data-theme="light"] .lightbox .lb-btn:hover {
   background: linear-gradient(
