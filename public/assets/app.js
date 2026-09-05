@@ -2241,7 +2241,11 @@ function refreshTagManager() {
     });
   }
   root.querySelectorAll("[data-gact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-group", b.dataset.gid)));
-  root.querySelectorAll("[data-tact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-tag", b.dataset.tname)));
+  root.querySelectorAll("[data-tact='edit']").forEach((b) => b.addEventListener("click", () => {
+    const nm = b.dataset.tname;
+    if (tagByName(nm)) openTagModal("edit-tag", nm);
+    else openTagModal("new-tag", null, nm); // 游离标签：入库整理（预填名称，同名照片引用自动归属）
+  }));
   root.querySelectorAll("[data-tact='remove']").forEach((b) => b.addEventListener("click", () => openTagModal("remove-tag", b.dataset.tname)));
   bindTagDrops(root); // 拖拽分类目标
 }
