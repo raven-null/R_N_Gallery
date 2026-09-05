@@ -16,7 +16,8 @@ window.addEventListener("error", (e) => {
       "font:12px/1.5 monospace;padding:8px 12px;border-radius:8px;max-width:80vw;white-space:pre-wrap;box-shadow:0 4px 20px rgba(0,0,0,.4)";
     document.body.appendChild(box);
   }
-  box.textContent = "JS 错误: " + (e.message || e);
+  const st = (e.error && e.error.stack) ? "\\n" + String(e.error.stack).split("\\n").slice(1, 5).join("\\n") : "";
+  box.textContent = "JS 错误: " + (e.message || e) + st;
 });
 
 let PHOTOS = [];
@@ -815,9 +816,12 @@ function initGallery() {
 
   // 灯箱（全局实现 openLightboxById；←→ 按当前筛选视图顺序切换）
   const openLightbox = openLightboxById;
-  document.querySelector(".lb-close").onclick = () => { stopSlide(); lightbox.classList.remove("open"); };
-  document.querySelector(".lb-prev").onclick = () => step(-1);
-  document.querySelector(".lb-next").onclick = () => step(1);
+  const lbCloseEl = document.querySelector(".lb-close");
+  const lbPrevEl = document.querySelector(".lb-prev");
+  const lbNextEl = document.querySelector(".lb-next");
+  if (lbCloseEl) lbCloseEl.onclick = () => { stopSlide(); lightbox.classList.remove("open"); };
+  if (lbPrevEl) lbPrevEl.onclick = () => step(-1);
+  if (lbNextEl) lbNextEl.onclick = () => step(1);
   function step(d) {
     const cur = lightbox.dataset.cur;
     // 搜索窗口打开灯箱时可能不在当前筛选列表，回退到全图顺序
@@ -2008,8 +2012,10 @@ function saveUqEdit() {
 function initUqModal() {
   const m = document.getElementById("uqModal");
   if (!m) return;
-  document.getElementById("uqCancel").onclick = () => m.classList.remove("open");
-  document.getElementById("uqSave").onclick = saveUqEdit;
+  const uqC = document.getElementById("uqCancel");
+  const uqS = document.getElementById("uqSave");
+  if (uqC) uqC.onclick = () => m.classList.remove("open");
+  if (uqS) uqS.onclick = saveUqEdit;
   bindTagSuggest(document.getElementById("uqTagInput"), document.getElementById("uqTagSuggest"), document.getElementById("uqTagBox"));
 }
 
