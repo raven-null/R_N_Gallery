@@ -1030,7 +1030,11 @@ function initUpload() {
   const files = [];
 
   dz.addEventListener("click", () => fileInput.click());
-  ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("drag"); }));
+  // v0.14.3：仅外部文件拖入时高亮/放行；行内拖分类不触发（避免与分类槽冲突）
+  const isFileDrag = (e) => !!(e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files")) && !window.__uqDragItems;
+  ["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => {
+    if (isFileDrag(e)) { e.preventDefault(); dz.classList.add("drag"); }
+  }));
   ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("drag"); }));
   dz.addEventListener("drop", (e) => addFiles(e.dataTransfer.files));
   fileInput.addEventListener("change", () => addFiles(fileInput.files));
@@ -1042,8 +1046,7 @@ function initUpload() {
       const row = document.createElement("div");
       row.className = "uq-item";
       row.innerHTML = `
-        <label class="uq-check" title="勾选后可在下方批量分类"><input type="checkbox"><span class="mk">✓</span></label>
-        <img class="thumb" alt="">
+        <img class="thumb" alt="" draggable="false">
         <div class="info">
           <div class="uq-name-row"><span class="name">${esc(f.name)}</span></div>
           <div class="uq-tags"></div>
@@ -1062,25 +1065,53 @@ function initUpload() {
       reader.readAsDataURL(f);
       item.row = row;
       queue.appendChild(row);
-      const chk = row.querySelector(".uq-check input");
-      if (chk) chk.addEventListener("change", () => toggleUqSelect(item));
       row.__item = item;
-      row.querySelector(".sub").textContent = "3 秒后自动上传，可先点 ✎ 编辑";
+      row.querySelector(".sub").textContent = "拖到右侧分类槽，或点行多选后拖动";
+      // v0.14.3：整行可拖到右侧分类槽
+      row.draggable = true;
+      row.addEventListener("dragstart", (e) => {
+        if (item.status === "ok") { e.preventDefault(); return; }
+        let group = uqSelSet.has(item) ? [...uqSelSet] : [item];
+        group = group.filter((x) => x.status !== "ok");
+        if (!group.length) { e.preventDefault(); return; }
+        window.__uqDragItems = group;
+        e.dataTransfer.effectAllowed = "copyMove";
+        try { e.dataTransfer.setData("text/x-uq", String(group.length)); } catch (err) { /* ignore */ }
+        row.classList.add("dragging");
+        if (group.length > 1) setUqStatus(`已选 ${group.length} 张，拖到分类槽即可整批归类`);
+      });
+      row.addEventListener("dragend", () => {
+        row.classList.remove("dragging");
+        document.querySelectorAll(".uq-slot.drop-over").forEach((s) => s.classList.remove("drop-over"));
+        window.__uqDragItems = null;
+      });
+      // v0.14.3：点击行 = 多选（再拖任意一张 = 整批归类）
+      row.addEventListener("click", (e) => {
+        if (e.target.closest("button") || e.target.closest(".uq-tags")) return;
+        if (item.status === "ok") return;
+        toggleUqSelect(item);
+      });
       // v0.13：逐张编辑 / 移除
       row.querySelector(".u-edit").onclick = () => openUqEdit(item);
       row.querySelector(".u-del").onclick = () => {
-        if (uqSelSet.has(item)) { uqSelSet.delete(item); updUqSelBar(); }
+        if (uqSelSet.has(item)) { uqSelSet.delete(item); }
         const idx = files.indexOf(item);
         if (idx >= 0) files.splice(idx, 1);
         row.remove();
         btnUpload.disabled = !files.length;
+        updateUqSelStatus();
+        refreshUqSlots();
       };
     });
     btnUpload.disabled = !files.length;
-    // v0.13：延迟自动上传，给逐张编辑 / 移除留时间（可点「开始上传」立即开始）
+    btnUpload.textContent = "开始上传";
+    const upHintFresh = document.getElementById("upHint");
+    if (upHintFresh) upHintFresh.innerHTML = "拖图片到右侧分类槽可单独归类；<b>15 秒</b>后自动上传，也可点按钮立即开始";
+    refreshUqSlots();
+    // v0.14.3：延迟自动上传，给拖拽分类留时间（可点「开始上传」立即开始）
     if (files.length) {
       clearTimeout(window.__uqAutoTimer);
-      window.__uqAutoTimer = setTimeout(() => startUpload(), 3000);
+      window.__uqAutoTimer = setTimeout(() => startUpload(), 15000);
     }
   }
 
@@ -1155,6 +1186,7 @@ function initUpload() {
             if (xhr.status >= 200 && xhr.status < 300) {
               row.querySelector(".status").textContent = "✓";
               row.querySelector(".status").className = "status ok";
+              row.classList.add("done");
               setSub("已上传");
               resolve();
             } else {
@@ -1200,6 +1232,8 @@ function initUpload() {
     if (uqBox && uqInp && uqInp.value.trim()) addTagChip(uqBox, uqInp.value.trim());
     const items = files.filter((it) => it.status === "ready");
     if (!items.length) return;
+    const upHintEl = document.getElementById("upHint");
+    if (upHintEl) upHintEl.innerHTML = "正在上传…请勿关闭窗口";
     btnUpload.textContent = `处理中… (0/${items.length})`;
     btnUpload.disabled = true;
     let done = 0;
@@ -1215,6 +1249,7 @@ function initUpload() {
         if (++done === items.length) {
           btnUpload.disabled = false;
           btnUpload.textContent = "全部完成";
+          if (upHintEl) upHintEl.innerHTML = "全部完成 ✓ 可继续添加图片";
           cancelUqSel();
           if (USE_API) {
             await loadData();
@@ -1232,18 +1267,56 @@ function initUpload() {
   const tagList = document.getElementById("tagListUpload");
   bindTagSuggest(document.getElementById("tagInputUpload"), document.getElementById("tagSuggest"), tagList, refreshQuickPickAll);
   window.__upTagList = tagList; // 供 uploadOne 读取
-  // 批量分类条（v0.14.2）
-  document.getElementById("uqSelCancel").addEventListener("click", cancelUqSel);
-  document.getElementById("uqSelClearTags").addEventListener("click", clearUqSelTags);
-  const uqSelInput = document.getElementById("uqSelInput");
-  if (uqSelInput) {
-    uqSelInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && uqSelInput.value.trim()) {
-        e.preventDefault();
-        applyUqTagToSel(uqSelInput.value.trim());
+  // 右侧分类槽（v0.14.3）：槽容器事件委托 + 自定义分类输入
+  const uqSlotsEl = document.getElementById("uqSlots");
+  if (uqSlotsEl) {
+    uqSlotsEl.addEventListener("dragover", (e) => {
+      const slot = e.target.closest(".uq-slot");
+      if (!slot || !(window.__uqDragItems || []).length) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      uqSlotsEl.querySelectorAll(".uq-slot.drop-over").forEach((s) => { if (s !== slot) s.classList.remove("drop-over"); });
+      slot.classList.add("drop-over");
+    });
+    uqSlotsEl.addEventListener("dragleave", (e) => {
+      const slot = e.target.closest(".uq-slot");
+      if (slot) slot.classList.remove("drop-over");
+    });
+    uqSlotsEl.addEventListener("drop", (e) => {
+      const slot = e.target.closest(".uq-slot");
+      if (!slot) return;
+      e.preventDefault();
+      slot.classList.remove("drop-over");
+      const items = window.__uqDragItems || [];
+      window.__uqDragItems = null;
+      if (items.length) {
+        applyTagsToItems(items, slot.dataset.tag);
+        clearUqSelection();
       }
     });
   }
+  const uqNewSlotInput = document.getElementById("uqNewSlotInput");
+  if (uqNewSlotInput) {
+    uqNewSlotInput.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const v = uqNewSlotInput.value.trim();
+      if (!v) return;
+      uqNewSlotInput.value = "";
+      const libHit = TAGS.tags.find((t) => t.name === v);
+      if (libHit) {
+        // 已在标签库：仅提示并闪烁对应槽
+        const slotEl = [...(uqSlotsEl ? uqSlotsEl.querySelectorAll(".uq-slot") : [])].find((s) => s.dataset.tag === v);
+        if (slotEl) { slotEl.classList.add("flash"); setTimeout(() => slotEl.classList.remove("flash"), 1000); }
+        return;
+      }
+      uqExtraSlots.add(v);
+      refreshUqSlots();
+      const slotEl = uqSlotsEl ? [...uqSlotsEl.querySelectorAll(".uq-slot")].find((s) => s.dataset.tag === v) : null;
+      if (slotEl) { slotEl.classList.add("flash"); setTimeout(() => slotEl.classList.remove("flash"), 1000); }
+    });
+  }
+  refreshUqSlots();
 }
 /* ---------- 批量选择模式（v0.11.2） ---------- */
 function updateBatchUI() {
@@ -2007,6 +2080,7 @@ function saveUqEdit() {
   }
   document.getElementById("uqModal").classList.remove("open");
   renderUqRowTags(it);
+  refreshUqSlots();
 }
 function initUqModal() {
   const m = document.getElementById("uqModal");
@@ -2325,12 +2399,13 @@ function renderQuickPick(boxEl, wrapEl) {
 function refreshQuickPickAll() {
   renderQuickPick(document.getElementById("edTagBox"), document.getElementById("edQuickPick"));
   renderQuickPick(document.getElementById("tagListUpload"), document.getElementById("upQuickPick"));
-  renderUqSelPills();
+  refreshUqSlots();
   renderAllUqRowTags();
 }
 
-/* ---------- 上传队列批量分类（v0.14.2：勾选多张 → 点标签整批打上分类） ---------- */
-let uqSelSet = new Set();
+/* ---------- 上传队列两栏拖拽分类（v0.14.3：左图片行 → 右侧分类槽） ---------- */
+let uqSelSet = new Set();          // 点选多张：再拖任意一张 = 整批归类
+const uqExtraSlots = new Set();    // 上传面板临时自定义分类（不回写标签库）
 function uqGlobalTags() {
   return [...(window.__upTagList || document.getElementById("tagListUpload")).querySelectorAll(".t")]
     .map((el) => el.childNodes[0].textContent.trim()).filter(Boolean);
@@ -2346,61 +2421,107 @@ function renderAllUqRowTags() {
     if (rowEl.__item) renderUqRowTags(rowEl.__item);
   });
 }
+/* 行 chips = 该行专属分类（拖入的）；点 ✕ 移除。全局标签见右侧顶部输入 */
 function renderUqRowTags(it) {
   const row = it.row;
   if (!row) return;
   const el = row.querySelector(".uq-tags");
   if (!el) return;
-  const tags = rowSendTags(it); // 全局 ∪ 分类（v0.14.2）
-  el.innerHTML = tags.length
-    ? tags.map((n) => `<span class="cls">${esc(n)}</span>`).join("")
-    : "";
+  const tags = it.tags || [];
+  el.innerHTML = tags.map((n) => `<span class="cls" data-tag="${escAttr(n)}">${esc(n)}<i class="x" title="移除此分类">✕</i></span>`).join("");
+  el.querySelectorAll(".cls").forEach((c) => {
+    c.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const nm = c.dataset.tag;
+      if (Array.isArray(it.tags)) {
+        it.tags = it.tags.filter((x) => x !== nm);
+        if (!it.tags.length) it.tags = undefined;
+      }
+      renderUqRowTags(it);
+      refreshUqSlots();
+    });
+  });
 }
-function updUqSelBar() {
-  const bar = document.getElementById("uqSelBar");
-  if (!bar) return;
-  bar.hidden = !uqSelSet.size;
-  const cnt = document.getElementById("uqSelCount");
-  if (cnt) cnt.textContent = `已选 ${uqSelSet.size} 张`;
+/* 右侧分类槽计数：队列中（未完成）归属该分类的图片数 */
+function uqSlotCount(name) {
+  const queue = document.getElementById("queue");
+  if (!queue) return 0;
+  let n = 0;
+  queue.querySelectorAll(".uq-item").forEach((r) => {
+    const it = r.__item;
+    if (it && it.status !== "ok" && Array.isArray(it.tags) && it.tags.includes(name)) n++;
+  });
+  return n;
 }
-function renderUqSelPills() {
-  const wrap = document.getElementById("uqSelQuick");
+/* 渲染分类槽：标签库标签按组展示 + 临时自定义槽 */
+function refreshUqSlots() {
+  const wrap = document.getElementById("uqSlots");
   if (!wrap) return;
-  if (!TAGS.tags.length) {
-    wrap.innerHTML = `<div class="qp-empty">标签库为空，可自定义输入</div>`;
+  const gmap = new Map();
+  (TAGS.groups || []).forEach((g) => gmap.set(g.id, g));
+  const grouped = new Map();
+  TAGS.tags.forEach((t) => {
+    const g = t.group && gmap.has(t.group) ? gmap.get(t.group) : null;
+    const key = g ? g.id : "__none";
+    if (!grouped.has(key)) grouped.set(key, { g, items: [] });
+    grouped.get(key).items.push(t);
+  });
+  const sections = [];
+  grouped.forEach(({ g, items }) => sections.push({ title: g ? g.name : "", color: g ? g.color : null, items }));
+  if (uqExtraSlots.size) {
+    sections.push({ title: "", color: null, items: [...uqExtraSlots].map((n) => ({ name: n, extra: true })) });
+  }
+  if (!sections.length) {
+    wrap.innerHTML = `<div class="uq-empty-tip">还没有分类。用下方输入框创建临时分类，或先到「标签」页建好标签库再回来。</div>`;
     return;
   }
-  wrap.innerHTML = TAGS.tags.slice(0, 60).map((t) => {
-    const c = t.color || tagGroupColor(t.group) || null;
-    return `<span class="qp-item" data-tag="${escAttr(t.name)}">
-      <i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>${esc(t.name)}</span>`;
+  wrap.innerHTML = sections.map((sec) => {
+    const head = sec.title
+      ? `<div class="uq-sec">${sec.color ? `<i class="dot" style="--tg:${sec.color}"></i>` : ""}${esc(sec.title)}</div>`
+      : "";
+    const slots = sec.items.map((t) => {
+      const c = t.color || sec.color || "";
+      const ct = uqSlotCount(t.name);
+      return `<div class="uq-slot" data-tag="${escAttr(t.name)}">
+        ${c ? `<i class="dot" style="--tg:${c}"></i>` : `<i class="dot"></i>`}
+        <span class="nm">${esc(t.name)}</span>
+        <span class="ct${ct ? " hot" : ""}">${ct || ""}</span>
+      </div>`;
+    }).join("");
+    return head + slots;
   }).join("");
-  wrap.querySelectorAll(".qp-item").forEach((el) => {
-    el.addEventListener("click", () => applyUqTagToSel(el.dataset.tag));
-  });
+}
+function setUqStatus(msg) {
+  const el = document.getElementById("uqSelStatus");
+  if (!el) return;
+  if (msg) { el.innerHTML = msg; el.classList.add("show"); }
+  else el.classList.remove("show");
+}
+function updateUqSelStatus() {
+  if (uqSelSet.size) setUqStatus(`已选 <span class="cnt">${uqSelSet.size}</span> 张 · 拖任意一张到分类槽即整批归类`);
+  else setUqStatus(null);
 }
 function toggleUqSelect(it) {
   if (uqSelSet.has(it)) uqSelSet.delete(it);
   else uqSelSet.add(it);
   if (it.row) it.row.classList.toggle("sel", uqSelSet.has(it));
-  updUqSelBar();
+  updateUqSelStatus();
 }
-function applyUqTagToSel(name) {
-  if (!uqSelSet.size) return;
-  uqSelSet.forEach((it) => {
+function clearUqSelection() {
+  uqSelSet.forEach((it) => { if (it.row) it.row.classList.remove("sel"); });
+  uqSelSet.clear();
+  updateUqSelStatus();
+}
+function cancelUqSel() { clearUqSelection(); }
+function applyTagsToItems(items, name) {
+  if (!items.length || !name) return;
+  items.forEach((it) => {
+    if (it.status === "ok") return;
     it.tags = [...new Set([...(it.tags || []), name])].slice(0, 10);
     renderUqRowTags(it);
   });
-  const inp = document.getElementById("uqSelInput");
-  if (inp) { inp.value = ""; inp.focus(); }
-}
-function clearUqSelTags() {
-  uqSelSet.forEach((it) => { it.tags = undefined; renderUqRowTags(it); });
-}
-function cancelUqSel() {
-  uqSelSet.forEach((it) => { if (it.row) it.row.classList.remove("sel"); });
-  uqSelSet.clear();
-  updUqSelBar();
+  refreshUqSlots();
+  clearUqSelection();
 }
 window.__refreshQuickPick = refreshQuickPickAll;
 
