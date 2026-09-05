@@ -2218,17 +2218,23 @@ function mgrPills(tagObjs, counts) {
 }
 
 const TMGR_VIEW_KEY = "rn_tmgr_view";
+/* ---------- 分类工作台状态（v0.14.4：统计视图 → 两栏拖拽分类） ---------- */
+let cwFilter = "all";        // all | loose（只显示未入库分类的图片）
+let cwShown = 40;            // 左栏一次性渲染张数
+let cwList = [];             // 当前筛选后的图片列表
+const cwSel = new Set();     // 左栏点选（再拖任意一张 = 整批归类）
+const cwExtraSlots = new Set(); // 面板内临时自定义分类（不回写标签库）
 function refreshTagManager() {
   const root = document.getElementById("tagMgrRoot");
   if (!root) return;
   const counts = tagCounts();
   const used = Object.keys(counts);
-  const view = localStorage.getItem(TMGR_VIEW_KEY) === "stat" ? "stat" : "group";
+  const view = localStorage.getItem(TMGR_VIEW_KEY) === "group" ? "group" : "classify";
 
   let html = `<div class="tmgr-seg">
       <div class="seg" id="tmgrViewSeg" role="group" aria-label="视图">
         <button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
-        <button class="seg-btn${view === "stat" ? " on" : ""}" data-view="stat">统计</button>
+        <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>
       </div>
     </div>`;
 
@@ -2260,26 +2266,32 @@ function refreshTagManager() {
       }
     }
   } else {
-    // 统计视图（v0.14 借鉴博客后台）：全部标签按使用数排序卡片 + 拖放目标
-    const all = new Map();
-    TAGS.tags.forEach((t) => all.set(t.name, t));
-    used.forEach((n) => { if (!all.has(n)) all.set(n, { name: n, color: null, group: "" }); });
-    const items = [...all.values()]
-      .sort((a, b) => ((counts[b.name] || 0) - (counts[a.name] || 0)) || a.name.localeCompare(b.name, "zh"));
-    html += `<div class="tag-mgr-hint">共 ${items.length} 个标签 · 点击标签项可将拖入的图片归入该标签（拖拽分类）。</div>`;
-    html += `<div class="stat-grid">` + items.map((t) => {
-      const c = t.color || tagGroupColor(t.group) || null;
-      const inLib = !!tagByName(t.name);
-      return `<div class="stat-item" data-tag="${escAttr(t.name)}" title="拖图片到这里 = 加上该标签">
-        <i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>
-        <span class="nm">${esc(t.name)}</span>
-        <span class="cnt">${counts[t.name] || 0} 张</span>
-        <span class="ops">
-          <button data-sact="edit" title="${inLib ? "编辑 / 改名" : "加入标签库并整理"}">✎</button>
-          <button class="danger" data-sact="remove" title="删除（从引用图片移除）">×</button>
-        </span>
-      </div>`;
-    }).join("") + `</div>`;
+    // 分类工作台（v0.14.4）：左=图片小卡（点选可多选），右=分类槽，拖入即打标
+    html += `<div class="cw">
+      <div class="cw-left">
+        <div class="cw-head">
+          <span class="cw-title">图片 <span class="cnt" id="cwTotal"></span></span>
+          <span class="seg cw-filters" id="cwFilters" role="group">
+            <button class="seg-btn sm${cwFilter === "all" ? " on" : ""}" data-cwf="all">全部</button>
+            <button class="seg-btn sm${cwFilter === "loose" ? " on" : ""}" data-cwf="loose" title="只显示没有入库分类的图片">未分类</button>
+          </span>
+        </div>
+        <div class="cw-hint" id="cwHint"></div>
+        <div class="cw-cards" id="cwCards"></div>
+        <div class="cw-more" id="cwMoreWrap"><button class="btn ghost sm" id="cwMore" hidden></button></div>
+      </div>
+      <div class="cw-right">
+        <div class="uq-panel">
+          <div class="uq-panel-title">分类</div>
+          <div class="uq-panel-sub">拖左侧图片到分类槽 = 加上该标签；也可把图库卡片直接拖进来</div>
+          <div class="uq-panel-status" id="cwSelStatus"></div>
+          <div class="uq-slots" id="cwSlots"></div>
+          <div class="uq-new-slot">
+            <input type="text" id="cwNewSlotInput" placeholder="+ 新分类标签，回车创建" autocomplete="off">
+          </div>
+        </div>
+      </div>
+    </div>`;
   }
 
   html += `<div class="tag-mgr-actions">
@@ -2300,19 +2312,7 @@ function refreshTagManager() {
       });
     });
   }
-  if (view === "stat") {
-    root.querySelectorAll("[data-sact='edit']").forEach((b) => {
-      const nm = b.closest(".stat-item").dataset.tag;
-      b.addEventListener("click", () => {
-        if (tagByName(nm)) openTagModal("edit-tag", nm);
-        else openTagModal("new-tag", null, nm);
-      });
-    });
-    root.querySelectorAll("[data-sact='remove']").forEach((b) => {
-      const nm = b.closest(".stat-item").dataset.tag;
-      b.addEventListener("click", () => openTagModal("remove-tag", nm));
-    });
-  }
+  if (view === "classify") initCwView(root);
   root.querySelectorAll("[data-gact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-group", b.dataset.gid)));
   root.querySelectorAll("[data-tact='edit']").forEach((b) => b.addEventListener("click", () => {
     const nm = b.dataset.tname;
@@ -2320,16 +2320,165 @@ function refreshTagManager() {
     else openTagModal("new-tag", null, nm); // 游离标签：入库整理（预填名称，同名照片引用自动归属）
   }));
   root.querySelectorAll("[data-tact='remove']").forEach((b) => b.addEventListener("click", () => openTagModal("remove-tag", b.dataset.tname)));
-  bindTagDrops(root); // 拖拽分类目标
+  bindTagDrops(root); // 分组视图标签 pill 仍是拖放目标
 }
 function refreshTagUI() {
   refreshTagManager();
   renderTagMenuContent();
 }
 
-/* ---------- 拖拽分类（v0.14：把卡片拖到标签上打标） ---------- */
+/* ---------- 分类工作台视图（v0.14.4） ---------- */
+function initCwView(root) {
+  cwList = PHOTOS.filter((p) => cwFilter === "all" || !(p.tags || []).some((n) => tagByName(n)));
+  renderCwCards();
+  renderCwSlots();
+  updateCwSelStatus();
+  const q = (sel) => root.querySelector(sel);
+  q("#cwFilters").querySelectorAll("[data-cwf]").forEach((b) => b.addEventListener("click", () => {
+    cwFilter = b.dataset.cwf;
+    cwShown = 40;
+    cwSel.clear();
+    refreshTagManager();
+  }));
+  const more = q("#cwMore");
+  if (more) more.addEventListener("click", () => { cwShown += 40; renderCwCards(); });
+  const inp = q("#cwNewSlotInput");
+  if (inp) inp.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const v = inp.value.trim();
+    if (!v) return;
+    inp.value = "";
+    const libHit = TAGS.tags.find((t) => t.name === v);
+    if (libHit) { flashCwSlot(v); return; }
+    cwExtraSlots.add(v);
+    refreshTagManager();
+    flashCwSlot(v);
+  });
+  const cardsEl = q("#cwCards");
+  if (cardsEl) {
+    cardsEl.addEventListener("click", (e) => {
+      const card = e.target.closest(".cw-card");
+      if (!card) return;
+      const id = card.dataset.id;
+      if (cwSel.has(id)) cwSel.delete(id);
+      else cwSel.add(id);
+      card.classList.toggle("sel", cwSel.has(id));
+      updateCwSelStatus();
+    });
+    cardsEl.addEventListener("dragstart", (e) => {
+      const card = e.target.closest(".cw-card");
+      if (!card) return;
+      let ids = cwSel.has(card.dataset.id) ? [...cwSel] : [card.dataset.id];
+      window.__cwDrag = ids;
+      e.dataTransfer.effectAllowed = "copy";
+      try { e.dataTransfer.setData("text/plain", ids[0]); } catch (err) { /* ignore */ }
+      card.classList.add("dragging");
+      if (ids.length > 1) updateCwSelStatus(`已选 <span class="cnt">${ids.length}</span> 张 · 拖到分类槽即整批归类`);
+    });
+    cardsEl.addEventListener("dragend", (e) => {
+      const card = e.target.closest(".cw-card");
+      if (card) card.classList.remove("dragging");
+      window.__cwDrag = null;
+      document.querySelectorAll("#cwSlots .uq-slot.drop-over").forEach((s) => s.classList.remove("drop-over"));
+      updateCwSelStatus();
+    });
+  }
+  const slotsEl = q("#cwSlots");
+  if (slotsEl) {
+    slotsEl.addEventListener("dragover", (e) => {
+      const slot = e.target.closest(".uq-slot");
+      if (!slot) return;
+      if (!(e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes("text/plain"))) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      slotsEl.querySelectorAll(".uq-slot.drop-over").forEach((s) => { if (s !== slot) s.classList.remove("drop-over"); });
+      slot.classList.add("drop-over");
+    });
+    slotsEl.addEventListener("dragleave", (e) => {
+      const slot = e.target.closest(".uq-slot");
+      if (slot) slot.classList.remove("drop-over");
+    });
+    slotsEl.addEventListener("drop", async (e) => {
+      const slot = e.target.closest(".uq-slot");
+      if (!slot) return;
+      e.preventDefault();
+      slot.classList.remove("drop-over");
+      const tag = slot.dataset.tag;
+      if (!tag) return;
+      let ids = window.__cwDrag && window.__cwDrag.length ? [...window.__cwDrag] : [];
+      window.__cwDrag = null;
+      if (!ids.length) {
+        const id0 = e.dataTransfer.getData("text/plain");
+        if (id0 && PHOTOS.some((p) => p.id === id0)) ids = [id0]; // 图库卡片直接拖入
+      }
+      if (!ids.length) return;
+      const todo = ids.map((id) => PHOTOS.find((p) => p.id === id)).filter((p) => p && !(p.tags || []).includes(tag));
+      if (!todo.length) return;
+      try {
+        await Promise.all(todo.map((p) => apiFetch(`/api/photos/${p.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags: [...new Set([...(p.tags || []), tag])].slice(0, 10) }),
+        })));
+        await loadData();
+        cwSel.clear();
+        if (window.__refreshGallery) window.__refreshGallery(); // 内部含 refreshTagManager
+      } catch (err) { /* 静默 */ }
+    });
+  }
+}
+function updateCwSelStatus(msg) {
+  const el = document.getElementById("cwSelStatus");
+  if (!el) return;
+  if (msg) { el.innerHTML = msg; el.classList.add("show"); return; }
+  if (cwSel.size) {
+    el.innerHTML = `已选 <span class="cnt">${cwSel.size}</span> 张 · 拖任意一张到分类槽即整批归类（点卡片取消）`;
+    el.classList.add("show");
+  } else el.classList.remove("show");
+}
+function flashCwSlot(name) {
+  setTimeout(() => {
+    const s = [...document.querySelectorAll("#cwSlots .uq-slot")].find((el) => el.dataset.tag === name);
+    if (s) { s.classList.add("flash"); setTimeout(() => s.classList.remove("flash"), 1000); }
+  }, 30);
+}
+function renderCwSlots() {
+  const wrap = document.getElementById("cwSlots");
+  if (!wrap) return;
+  const counts = tagCounts();
+  wrap.innerHTML = slotSectionsHTML((n) => counts[n] || 0, cwExtraSlots,
+    "还没有分类。用下方输入框创建临时分类，或先到「分组」页建好标签库再回来。");
+}
+function renderCwCards() {
+  const wrap = document.getElementById("cwCards");
+  if (!wrap) return;
+  const total = document.getElementById("cwTotal");
+  if (total) total.textContent = cwList.length + " 张";
+  const hint = document.getElementById("cwHint");
+  if (hint) hint.textContent = cwFilter === "loose" ? "未分类 = 没有库里标签的图片（含游离标签）" : "点图片可多选，拖到右侧分类槽打标";
+  if (!cwList.length) {
+    wrap.innerHTML = `<div class="cw-empty">${cwFilter === "loose" ? "全部图片都已归类 🎉" : "图库暂无图片"}</div>`;
+    return;
+  }
+  wrap.innerHTML = cwList.slice(0, cwShown).map((p) => {
+    const n = (p.tags || []).length;
+    return `<div class="cw-card${cwSel.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true" title="${escAttr((p.tags || []).join(" · ") || "无标签")}">
+      <img loading="lazy" draggable="false" src="${cardImgSrc(p)}" alt="">
+      ${n ? `<span class="cw-badge">${n}</span>` : ""}
+    </div>`;
+  }).join("");
+  const more = document.getElementById("cwMore");
+  if (more) {
+    const rest = cwList.length - cwShown;
+    more.hidden = rest <= 0;
+    if (rest > 0) more.textContent = `再显示 ${Math.min(40, rest)} 张（已 ${Math.min(cwShown, cwList.length)}/${cwList.length}）`;
+  }
+}
+
+/* ---------- 拖拽分类（v0.14：把图库卡片拖到分组视图标签 pill 上打标） ---------- */
 function bindTagDrops(scope) {
-  const targets = scope ? scope.querySelectorAll(".tmgr-pill[data-tag], .stat-item[data-tag]") : document.querySelectorAll(".tmgr-pill[data-tag], .stat-item[data-tag]");
+  const targets = scope ? scope.querySelectorAll(".tmgr-pill[data-tag]") : document.querySelectorAll(".tmgr-pill[data-tag]");
   targets.forEach((el) => {
     el.classList.remove("drop-hover");
     el.addEventListener("dragover", (e) => {
@@ -2453,10 +2602,8 @@ function uqSlotCount(name) {
   });
   return n;
 }
-/* 渲染分类槽：标签库标签按组展示 + 临时自定义槽 */
-function refreshUqSlots() {
-  const wrap = document.getElementById("uqSlots");
-  if (!wrap) return;
+/* 槽列表 HTML（上传面板 / 标签分类工作台共用）：标签库按组 + 临时自定义槽 */
+function slotSectionsHTML(countOf, extraSet, emptyTip) {
   const gmap = new Map();
   (TAGS.groups || []).forEach((g) => gmap.set(g.id, g));
   const grouped = new Map();
@@ -2468,20 +2615,17 @@ function refreshUqSlots() {
   });
   const sections = [];
   grouped.forEach(({ g, items }) => sections.push({ title: g ? g.name : "", color: g ? g.color : null, items }));
-  if (uqExtraSlots.size) {
-    sections.push({ title: "", color: null, items: [...uqExtraSlots].map((n) => ({ name: n, extra: true })) });
+  if (extraSet && extraSet.size) {
+    sections.push({ title: "", color: null, items: [...extraSet].map((n) => ({ name: n, extra: true })) });
   }
-  if (!sections.length) {
-    wrap.innerHTML = `<div class="uq-empty-tip">还没有分类。用下方输入框创建临时分类，或先到「标签」页建好标签库再回来。</div>`;
-    return;
-  }
-  wrap.innerHTML = sections.map((sec) => {
+  if (!sections.length) return `<div class="uq-empty-tip">${emptyTip || "还没有分类。"}</div>`;
+  return sections.map((sec) => {
     const head = sec.title
       ? `<div class="uq-sec">${sec.color ? `<i class="dot" style="--tg:${sec.color}"></i>` : ""}${esc(sec.title)}</div>`
       : "";
     const slots = sec.items.map((t) => {
       const c = t.color || sec.color || "";
-      const ct = uqSlotCount(t.name);
+      const ct = countOf(t.name);
       return `<div class="uq-slot" data-tag="${escAttr(t.name)}">
         ${c ? `<i class="dot" style="--tg:${c}"></i>` : `<i class="dot"></i>`}
         <span class="nm">${esc(t.name)}</span>
@@ -2490,6 +2634,13 @@ function refreshUqSlots() {
     }).join("");
     return head + slots;
   }).join("");
+}
+/* 渲染分类槽：标签库标签按组展示 + 临时自定义槽 */
+function refreshUqSlots() {
+  const wrap = document.getElementById("uqSlots");
+  if (!wrap) return;
+  wrap.innerHTML = slotSectionsHTML(uqSlotCount, uqExtraSlots,
+    "还没有分类。用下方输入框创建临时分类，或先到「标签」页建好标签库再回来。");
 }
 function setUqStatus(msg) {
   const el = document.getElementById("uqSelStatus");

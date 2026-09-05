@@ -3287,43 +3287,58 @@ body.select-mode .card .pick { display: grid; }
 }
 .qp-toggle:hover { color: var(--accent); }
 
-/* 标签统计视图（管理窗口） */
+/* 标签分类工作台（v0.14.4：左=图片小卡，右=分类槽，替换原统计视图） */
 .tmgr-seg { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.stat-grid {
+.cw { display: flex; align-items: flex-start; gap: 20px; }
+.cw-left { flex: 1 1 58%; min-width: 0; }
+.cw-right { flex: 1 1 42%; min-width: 260px; position: sticky; top: 4px; }
+.cw-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.cw-title { font-size: 13px; color: var(--text-dim); }
+.cw-title .cnt { color: var(--accent); font-weight: 700; }
+.cw-filters .seg-btn { padding: 4px 11px; font-size: 11.5px; }
+.cw-hint { font-size: 11.5px; color: var(--text-faint); margin-bottom: 8px; line-height: 1.5; }
+.cw-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
   gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 2px;
 }
-.stat-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--w008);
-  border-radius: 10px;
-  background: var(--w005);
-  transition: all 0.18s;
+.cw-card {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--w010);
+  background: linear-gradient(160deg, var(--s26) 0%, var(--s08) 100%);
+  cursor: grab;
+  user-select: none;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
-.stat-item .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tg, #ff9f0a); flex: none; }
-.stat-item .nm { font-size: 12.5px; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stat-item .cnt { margin-left: auto; font-size: 11px; color: var(--text-faint); flex: none; }
-.stat-item .ops { display: flex; gap: 2px; flex: none; }
-.stat-item .ops button {
-  border: none;
-  background: none;
-  color: var(--text-faint);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 2px 3px;
-  border-radius: 5px;
+.cw-card:hover { border-color: var(--w022); box-shadow: 0 4px 14px rgba(0,0,0,0.28); transform: translateY(-1px); }
+.cw-card img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.cw-card.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cw-card.dragging { opacity: 0.45; transform: scale(0.97); }
+.cw-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 99px;
+  background: rgba(10,12,18,0.6);
+  color: #fff;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
-.stat-item .ops button:hover { color: var(--accent); background: var(--w008); }
-.stat-item .ops button.danger:hover { color: var(--danger); }
+.cw-empty { grid-column: 1 / -1; padding: 30px 8px; text-align: center; color: var(--text-faint); font-size: 13px; }
+.cw-more { display: flex; justify-content: center; margin-top: 10px; }
 
 /* 拖拽分类视觉 */
 .card.dragging { opacity: 0.45; transform: scale(0.98); }
-.tmgr-pill.drop-hover,
-.stat-item.drop-hover {
+.tmgr-pill.drop-hover {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(255,159,10,0.25);
   background: rgba(255,159,10,0.08);
@@ -3535,4 +3550,10 @@ body.select-mode .card .pick { display: grid; }
 @keyframes uq-flash {
   0%, 55% { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,159,10,0.25); background: rgba(255,159,10,0.14); }
   100% { border-color: var(--w014); box-shadow: none; }
+}
+/* 分类工作台窄屏：右栏下移为纵向 */
+@media (max-width: 860px) {
+  .cw { flex-direction: column; }
+  .cw-right { position: static; width: 100%; }
+  .cw-cards { max-height: 42vh; }
 }
