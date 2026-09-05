@@ -1064,6 +1064,7 @@ function initUpload() {
       queue.appendChild(row);
       const chk = row.querySelector(".uq-check input");
       if (chk) chk.addEventListener("change", () => toggleUqSelect(item));
+      row.__item = item;
       row.querySelector(".sub").textContent = "3 秒后自动上传，可先点 ✎ 编辑";
       // v0.13：逐张编辑 / 移除
       row.querySelector(".u-edit").onclick = () => openUqEdit(item);
@@ -1170,8 +1171,7 @@ function initUpload() {
             setSub("网络错误");
             reject(new Error("network"));
           };
-          const gTags = [...(window.__upTagList || document.getElementById("tagListUpload")).querySelectorAll(".t")].map((el) => el.childNodes[0].textContent.trim()).filter(Boolean);
-          const tags = it.tags !== undefined ? it.tags : gTags; // 逐张编辑优先（v0.13）
+          const tags = rowSendTags(it); // 全局 ∪ 行分类（v0.14.2）
           // 标题：逐张编辑优先，否则取文件名（去扩展名）
           const title = it.title || it.f.name.replace(/\.[^.]+$/, "").trim() || undefined;
           xhr.send(JSON.stringify({
@@ -1194,6 +1194,10 @@ function initUpload() {
   // 开始上传（v0.9.18 自动调用；v0.13 支持延迟后手动立即开始）
   function startUpload() {
     clearTimeout(window.__uqAutoTimer);
+    // 防丢：输入框还有未回车确认的文本时自动补为标签（v0.14.2）
+    const uqBox = window.__upTagList;
+    const uqInp = document.getElementById("tagInputUpload");
+    if (uqBox && uqInp && uqInp.value.trim()) addTagChip(uqBox, uqInp.value.trim());
     const items = files.filter((it) => it.status === "ready");
     if (!items.length) return;
     btnUpload.textContent = `处理中… (0/${items.length})`;
@@ -2322,16 +2326,32 @@ function refreshQuickPickAll() {
   renderQuickPick(document.getElementById("edTagBox"), document.getElementById("edQuickPick"));
   renderQuickPick(document.getElementById("tagListUpload"), document.getElementById("upQuickPick"));
   renderUqSelPills();
+  renderAllUqRowTags();
 }
 
 /* ---------- 上传队列批量分类（v0.14.2：勾选多张 → 点标签整批打上分类） ---------- */
 let uqSelSet = new Set();
+function uqGlobalTags() {
+  return [...(window.__upTagList || document.getElementById("tagListUpload")).querySelectorAll(".t")]
+    .map((el) => el.childNodes[0].textContent.trim()).filter(Boolean);
+}
+/* 行最终发送标签 = 全局标签 ∪ 行分类（v0.14.2 修正：不再互相覆盖） */
+function rowSendTags(it) {
+  return [...new Set([...uqGlobalTags(), ...(it.tags || [])])].slice(0, 10);
+}
+function renderAllUqRowTags() {
+  const queue = document.getElementById("queue");
+  if (!queue) return;
+  queue.querySelectorAll(".uq-item").forEach((rowEl) => {
+    if (rowEl.__item) renderUqRowTags(rowEl.__item);
+  });
+}
 function renderUqRowTags(it) {
   const row = it.row;
   if (!row) return;
   const el = row.querySelector(".uq-tags");
   if (!el) return;
-  const tags = Array.isArray(it.tags) ? it.tags : [];
+  const tags = rowSendTags(it); // 全局 ∪ 分类（v0.14.2）
   el.innerHTML = tags.length
     ? tags.map((n) => `<span class="cls">${esc(n)}</span>`).join("")
     : "";
