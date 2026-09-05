@@ -3202,3 +3202,41 @@ body.select-mode .card .pick { display: grid; }
 .lb-info-float:active { transform: scale(0.92); }
 .lb-info-float svg { width: 19px; height: 19px; }
 .lb-info-float.on { color: var(--accent); }
+/* ============================================================
+   灯箱控件 · 液态玻璃（v0.13.9：左右切换 / 信息开关 / 关闭）
+   亮半透明玻璃：高光边 + 顶部高光 + 下缘折射 + 大模糊
+   ============================================================ */
+.lb-btn,
+.lb-info-float,
+[data-theme="light"] .lightbox .lb-btn {
+  background: linear-gradient(
+    150deg,
+    rgba(255,255,255,0.24) 0%,
+    rgba(255,255,255,0.09) 36%,
+    rgba(255,255,255,0.15) 70%,
+    rgba(255,255,255,0.22) 100%
+  );
+  border-color: rgba(255,255,255,0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.5),
+    inset 1px 0 0 rgba(255,255,255,0.14),
+    inset -1px 0 0 rgba(255,255,255,0.14),
+    inset 0 -1px 1px rgba(255,255,255,0.12),
+    0 6px 18px rgba(0,0,0,0.35);
+  -webkit-backdrop-filter: blur(26px) saturate(190%);
+  backdrop-filter: blur(26px) saturate(190%);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.lb-btn:hover,
+.lb-info-float:hover,
+[data-theme="light"] .lightbox .lb-btn:hover {
+  background: linear-gradient(
+    150deg,
+    rgba(255,255,255,0.34) 0%,
+    rgba(255,255,255,0.16) 42%,
+    rgba(255,255,255,0.26) 100%
+  );
+  border-color: rgba(255,255,255,0.42);
+  color: #fff;
+}
