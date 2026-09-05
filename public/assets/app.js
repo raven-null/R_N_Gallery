@@ -1550,37 +1550,6 @@ async function aiSearchFromInput(q, btn) {
   }
 }
 
-/* 4.3 上传时标签建议（仅从标签库推荐，自动加入可删） */
-async function aiSuggestUploadTags(btn, hintEl) {
-  const ready = aiReady();
-  if (!ready.ok) { alert(ready.msg); return; }
-  if (!TAGS.tags.length) { alert("标签库为空：请先在设置 → 标签管理里建一些标签，AI 才能推荐。"); return; }
-  if (btn) { btn.disabled = true; btn.textContent = "AI 思考中…"; }
-  try {
-    const files = [...document.querySelectorAll("#queue .uq-item")].map((el) => el.querySelector(".name") ? el.querySelector(".name").textContent : "").slice(0, 5);
-    const obj = await aiJson(
-      `图库标签库：${tagListForAI()}。\n待上传文件名：${files.join("、") || "（未知）"}。\n为这些图片推荐最合适的标签（只能从标签库选）。\n只输出 JSON：标签名称数组，最多 5 个；拿不准就输出 []。`
-    );
-    const names = Array.isArray(obj) ? obj : (Array.isArray(obj.tags) ? obj.tags : []);
-    const valid = names.filter((n) => typeof n === "string" && tagByName(n)).slice(0, 5);
-    const box = document.getElementById("tagListUpload");
-    if (box && valid.length) {
-      valid.forEach((n) => {
-        const dup = [...box.querySelectorAll(".t")].some((el) => el.childNodes[0].textContent.trim() === n);
-        if (!dup) addTagChip(box, n);
-      });
-      if (hintEl) { hintEl.textContent = `已推荐：${valid.join("、")}`; hintEl.style.color = "var(--ok)"; }
-    } else if (hintEl) {
-      hintEl.textContent = "AI 未给出推荐（文件名可能无法对应标签）";
-      hintEl.style.color = "var(--text-faint)";
-    }
-  } catch (e) {
-    if (hintEl) { hintEl.textContent = "✗ " + e.message; hintEl.style.color = "var(--danger)"; }
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "✨ AI 推荐标签"; }
-  }
-}
-
 /* ---------- URL 导入（v0.12） ---------- */
 function initImportUrl() {
   const btn = document.getElementById("btnImportUrl");
@@ -2795,20 +2764,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initSlideSetting();
   initFabHold();
   initAiChat();
-  // 上传页 AI 推荐标签按钮
-  const aiSuggestBtn = document.getElementById("btnAiSuggest");
-  if (aiSuggestBtn) {
-    aiSuggestBtn.addEventListener("click", () => {
-      const hint = document.getElementById("aiSuggestHint");
-      const files = document.querySelectorAll("#queue .uq-item").length;
-      if (!files) {
-        hint.textContent = "请先拖入要上传的图片";
-        hint.style.color = "var(--text-faint)";
-        return;
-      }
-      aiSuggestUploadTags(aiSuggestBtn, hint);
-    });
-  }
+
   // 重试按钮
   const retry = document.getElementById("btnRetry");
   if (retry) {
