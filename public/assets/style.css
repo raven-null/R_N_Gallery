@@ -3178,3 +3178,27 @@ body.select-mode .card .pick { display: grid; }
 .fab-group.active {
   pointer-events: auto;
 }
+/* ---------- 信息开关浮动按钮（v0.13.9：信息面板收起后常驻灯箱右下角） ---------- */
+.lb-info-float {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 6;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.5);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  transition: all 0.25s var(--ease-out);
+}
+.lb-info-float:hover { background: rgba(0,0,0,0.72); transform: scale(1.06); }
+.lb-info-float:active { transform: scale(0.92); }
+.lb-info-float svg { width: 19px; height: 19px; }
+.lb-info-float.on { color: var(--accent); }
