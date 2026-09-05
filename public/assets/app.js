@@ -3372,15 +3372,15 @@ function initPageSwitch() {
     btnClose[id].addEventListener("click", () => closeWindow(id));
   });
 
-  // 黄点：窗口最大化 / 还原（v0.14.5）
+  // 黄点：窗口铺满整个页面 / 还原（v0.14.5）
   document.querySelectorAll(".page-panel .traffic .yellow").forEach((yel) => {
     yel.style.cursor = "pointer";
     yel.addEventListener("click", () => {
       const panel = yel.closest(".page-panel");
       if (!panel) return;
       const on = panel.classList.toggle("maximized");
-      yel.title = on ? "还原窗口大小" : "最大化窗口";
+      yel.title = on ? "退出全屏，还原窗口" : "铺满整个页面（全屏）";
     });
-    yel.title = "最大化窗口";
+    yel.title = "铺满整个页面（全屏）";
   });
 }

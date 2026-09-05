@@ -3565,8 +3565,12 @@ body.select-mode .card .pick { display: grid; }
     width 0.32s var(--ease-out), height 0.32s var(--ease-out);
 }
 .page-panel.maximized {
-  width: min(1440px, 97vw);
-  height: min(94vh, 1150px);
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  --win-x: 0px !important;
+  --win-y: 0px !important;
+  --win-r: 0deg !important;
 }
 .page-panel.maximized .traffic .yellow {
   filter: brightness(0.72);
