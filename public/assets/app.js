@@ -23,9 +23,19 @@ window.addEventListener("error", (e) => {
 let PHOTOS = [];
 let USE_API = false;
 
-/* ---------- 标签体系（v0.11）：配置状态（模块级，菜单/管理页共享） ---------- */
-let TAGS = { groups: [], tags: [] };
+/* ---------- 标签体系（v0.11 / v0.15 主分类）：配置状态（模块级，菜单/管理页共享） ---------- */
+/* 内置主分类：上传必选其一、单选互斥；照片 meta.category 存名称（名称即引用键） */
+const DEFAULT_CATEGORIES = [
+  { id: "cat-2d-girl", name: "次元女", color: "#ff6fa5", sort: 0 },
+  { id: "cat-2d-boy", name: "次元男", color: "#6aa5ff", sort: 1 },
+  { id: "cat-illust", name: "插画", color: "#b58cff", sort: 2 },
+  { id: "cat-scenery", name: "风景", color: "#4ec97b", sort: 3 },
+  { id: "cat-beauty", name: "美女", color: "#ffb340", sort: 4 },
+  { id: "cat-handsome", name: "帅哥", color: "#00c2b8", sort: 5 },
+];
+let TAGS = { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] };
 let activeTagName = null; // 图库墙当前筛选的标签名（"__fav" = 收藏）
+let activeCategory = null; // 图库墙当前筛选的主分类名（"__none" = 未分类）
 const collapsedGroups = new Set(); // 筛选菜单中折叠的组 id
 
 /* ---------- 收藏 / 排序 / 批量选择（v0.11.2） ---------- */
@@ -237,15 +247,65 @@ const tagChip = (name) => {
   return `<span class="tg"${c ? ` style="--tg:${c}"` : ""}>${esc(name)}</span>`;
 };
 
+/* ---------- 主分类 helpers（v0.15） ---------- */
+const catByName = (name) => (TAGS.categories || []).find((c) => c.name === name);
+const catColor = (name) => {
+  const c = catByName(name);
+  return c ? c.color : null;
+};
+function sortedCategories() {
+  return [...(TAGS.categories || [])].sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
+}
+/* 展示用主分类 chip（与标签 chip 同款胶囊，色随分类配置） */
+const catChip = (name) => {
+  if (!name) return "";
+  const c = catColor(name) || "#8e8e93";
+  return `<span class="tg cat" style="--tg:${c}" title="主分类">${esc(name)}</span>`;
+};
+/* 单选 chips 渲染：容器内渲染 .cat-pick 按钮，selName 高亮 */
+function renderCatPicks(container, selName) {
+  if (!container) return;
+  container.innerHTML = sortedCategories().map((c) =>
+    `<button type="button" class="cat-pick${c.name === selName ? " on" : ""}" data-cat="${escAttr(c.name)}" style="--tg:${c.color || "var(--accent)"}">
+      <i class="dot"></i>${esc(c.name)}</button>`).join("");
+}
+const selCatOf = (container) => {
+  if (!container) return null;
+  const el = container.querySelector(".cat-pick.on");
+  return el ? el.dataset.cat : null;
+};
+/* 绑定单选切换（事件委托，innerHTML 重建无需重绑）；data-allow-off="1" 时再点已选项 = 取消 */
+function bindCatPicks(container, onChange) {
+  if (!container) return;
+  container.addEventListener("click", (e) => {
+    const b = e.target.closest(".cat-pick");
+    if (!b) return;
+    const v = b.dataset.cat;
+    const wasOn = b.classList.contains("on");
+    const allowOff = container.dataset.allowOff === "1";
+    if (wasOn && allowOff) {
+      b.classList.remove("on");
+      if (onChange) onChange(null);
+      return;
+    }
+    container.querySelectorAll(".cat-pick.on").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    if (onChange) onChange(v);
+  });
+}
+
 /* ---------- 标签配置加载与保存 ---------- */
 async function loadTags() {
   try {
     const res = await apiFetch("/api/tags");
     const d = await res.json();
-    TAGS = (d && Array.isArray(d.groups) && Array.isArray(d.tags)) ? d : { groups: [], tags: [] };
+    TAGS = (d && Array.isArray(d.groups) && Array.isArray(d.tags))
+      ? { categories: Array.isArray(d.categories) ? d.categories : DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: d.groups, tags: d.tags }
+      : { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] };
     if (window.__refreshQuickPick) window.__refreshQuickPick();
+    if (window.__refreshUpCatPicks) window.__refreshUpCatPicks(); // v0.15 服务端主分类就绪后刷新上传面板
   } catch (e) {
-    TAGS = { groups: [], tags: [] }; // API 不可用时降级为纯自由标签
+    TAGS = { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] }; // API 不可用时降级为纯自由标签
   }
 }
 async function apiSaveTags() {
@@ -277,6 +337,29 @@ async function apiRemoveTag(name) {
   });
   const d = await res.json();
   if (!d.ok) throw new Error(d.error || "删除失败");
+  await loadTags();
+  return d;
+}
+/* ---------- 主分类管理 API（v0.15） ---------- */
+async function apiRenameCategory(from, to) {
+  const res = await apiFetch("/api/tags/category-rename", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to }),
+  });
+  const d = await res.json();
+  if (!d.ok) throw new Error(d.error || "主分类改名失败");
+  await loadTags();
+  return d;
+}
+async function apiRemoveCategory(name) {
+  const res = await apiFetch("/api/tags/category-remove", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const d = await res.json();
+  if (!d.ok) throw new Error(d.error || "删除主分类失败");
   await loadTags();
   return d;
 }
@@ -472,7 +555,9 @@ function openLightboxById(id, bustCache) {
   document.getElementById("lbSize").textContent = fmtSize(p.size);
   document.getElementById("lbDims").textContent = `${p.width} × ${p.height}`;
   document.getElementById("lbFormat").textContent = p.mime.replace("image/", "").toUpperCase();
-  document.getElementById("lbTags").innerHTML = p.tags.map(tagChip).join("");
+  document.getElementById("lbTags").innerHTML =
+    (p.category ? catChip(p.category) : `<span class="tg cat" style="--tg:#8e8e93" title="主分类未设置">${t("未分类", "Uncategorized")}</span>`)
+    + p.tags.map(tagChip).join("");
   const favBtn = document.getElementById("lbToolFav");
   if (favBtn) favBtn.classList.toggle("fav-on", isFav(id));
   const infoBtn = document.getElementById("lbToolInfo");
@@ -532,10 +617,30 @@ function renderTagMenuContent() {
   PHOTOS.forEach((p) => p.tags.forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
   const used = Object.keys(counts);
 
-  let html = `<button class="tag-menu-item${!activeTagName && !aiFilter ? " active" : ""}" data-tag="">
+  let html = `<button class="tag-menu-item${!activeTagName && !aiFilter && !activeCategory ? " active" : ""}" data-tag="">
       <span class="nm">${t("全部", "All")}</span><span class="cnt">${PHOTOS.length}</span></button>
     <button class="tag-menu-item${activeTagName === "__fav" ? " active" : ""}" data-tag="__fav">
       <span class="nm"><i class="dot" style="--tg:var(--accent)"></i>${t("收藏", "Favorites")}</span><span class="cnt">${favs.size}</span></button>`;
+
+  // 主分类区（v0.15）：上传必选单选的固定大类，独立于标签体系筛选（互斥单选）；搜索标签词时隐藏聚焦结果
+  const catCounts = { __none: 0 };
+  PHOTOS.forEach((p) => { const k = p.category || "__none"; catCounts[k] = (catCounts[k] || 0) + 1; });
+  const catLines = [];
+  if (!q) {
+    sortedCategories().forEach((c) => {
+      const n = catCounts[c.name] || 0;
+      if (!n) return;
+      catLines.push(`<button class="tag-menu-item${activeCategory === c.name ? " active" : ""}" data-catf="${escAttr(c.name)}" title="只看「${esc(c.name)}」">
+        <span class="nm"><i class="dot" style="--tg:${c.color || "var(--accent)"}"></i>${esc(c.name)}</span><span class="cnt">${n}</span></button>`);
+    });
+    if (catCounts.__none) {
+      catLines.push(`<button class="tag-menu-item${activeCategory === "__none" ? " active" : ""}" data-catf="__none" title="${t("还没有主分类的照片", "Photos without a category")}">
+        <span class="nm"><i class="dot" style="--tg:#8e8e93"></i>${t("未分类", "Uncategorized")}</span><span class="cnt">${catCounts.__none}</span></button>`);
+    }
+  }
+  if (catLines.length) {
+    html += `<div class="tag-group-head cat">${t("主分类", "Category")}</div>` + catLines.join("");
+  }
 
   // AI 语义筛选状态行（可点击清除）
   if (aiFilter && aiFilter.tags && aiFilter.tags.length) {
@@ -641,9 +746,19 @@ function initGallery() {
       if (tagFlyout) tagFlyout.close();
       return;
     }
+    const catf = e.target.closest("[data-catf]");
+    if (catf) {
+      const v = catf.dataset.catf;
+      setCategoryFilter(activeCategory === v ? null : v);
+      if (tagSearch) { tagSearch.value = ""; if (tagSearchClear) tagSearchClear.classList.remove("on"); }
+      renderTagMenuContent();
+      if (tagFlyout) tagFlyout.close();
+      return;
+    }
     const row = e.target.closest(".tag-menu-item");
     if (row) {
       const name = row.dataset.tag || null;
+      if (!name) activeCategory = null; // 点「全部」同时清主分类筛选
       setTagFilter(activeTagName === name ? null : name);
       if (tagSearch) { tagSearch.value = ""; if (tagSearchClear) tagSearchClear.classList.remove("on"); }
       renderTagMenuContent();
@@ -686,12 +801,26 @@ function initGallery() {
   function setTagFilter(name) {
     aiFilter = null; // 点具体标签/全部时清除 AI 语义筛选
     activeTagName = name;
-    fabDot.classList.toggle("on", !!name);
+    updateFabDot();
     applyFilter();
   }
+  // 主分类筛选（v0.15）：与标签 / 收藏 / AI 筛选叠加（AND）
+  function setCategoryFilter(v) {
+    activeCategory = v;
+    updateFabDot();
+    applyFilter();
+  }
+  function updateFabDot() {
+    fabDot.classList.toggle("on", !!(activeTagName || activeCategory));
+  }
 
-  // 标签筛选（v0.8.6 / v0.11.2 / v0.12：收藏 / 排序 / AI / 相册叠加）
+  // 标签筛选（v0.8.6 / v0.11.2 / v0.12 / v0.15：收藏 / 排序 / AI / 相册 / 主分类叠加）
   function basePred(p) {
+    // 主分类（单选互斥；空 = 未分类）
+    if (activeCategory) {
+      if (activeCategory === "__none") { if (p.category) return false; }
+      else if (p.category !== activeCategory) return false;
+    }
     if (aiFilter && aiFilter.tags && aiFilter.tags.length) {
       return aiFilter.match === "all"
         ? aiFilter.tags.every((t) => p.tags.includes(t))
@@ -723,7 +852,7 @@ function initGallery() {
       <button class="pick" title="选中">✓</button>
       <button class="fav-star${isFav(p.id) ? " on" : ""}" title="${isFav(p.id) ? "取消收藏" : "收藏"}">${favSVG}</button>
       <div class="card__content">
-        <div class="card__tags">${p.tags.slice(0, 3).map(tagChip).join("")}</div>
+        <div class="card__tags">${catChip(p.category)}${p.tags.slice(0, p.category ? 2 : 3).map(tagChip).join("")}</div>
         <p class="card__meta">${fmtDate(p.takenAt)} · ${fmtSize(p.size)}</p>
       </div>
     </div>`;
@@ -1204,6 +1333,7 @@ function initUpload() {
             reject(new Error("network"));
           };
           const tags = rowSendTags(it); // 全局 ∪ 行分类（v0.14.2）
+          const category = it.category || window.__upCat || ""; // 主分类（v0.15 必选，startUpload 已校验）
           // 标题：逐张编辑优先，否则取文件名（去扩展名）
           const title = it.title || it.f.name.replace(/\.[^.]+$/, "").trim() || undefined;
           xhr.send(JSON.stringify({
@@ -1212,6 +1342,7 @@ function initUpload() {
             mime,
             title,
             desc: it.desc || "",
+            category,
             tags,
           }));
         })
@@ -1223,7 +1354,7 @@ function initUpload() {
     });
   }
 
-  // 开始上传（v0.9.18 自动调用；v0.13 支持延迟后手动立即开始）
+  // 开始上传（v0.9.18 自动调用；v0.13 支持延迟后手动立即开始；v0.15 必选主分类校验）
   function startUpload() {
     clearTimeout(window.__uqAutoTimer);
     // 防丢：输入框还有未回车确认的文本时自动补为标签（v0.14.2）
@@ -1232,6 +1363,18 @@ function initUpload() {
     if (uqBox && uqInp && uqInp.value.trim()) addTagChip(uqBox, uqInp.value.trim());
     const items = files.filter((it) => it.status === "ready");
     if (!items.length) return;
+    // v0.15：每张必须有主分类（行内覆盖或全局选择）
+    const missing = items.filter((it) => !(it.category || window.__upCat));
+    if (missing.length) {
+      const upHintEl2 = document.getElementById("upHint");
+      if (upHintEl2) upHintEl2.innerHTML = `⚠️ 还有 ${missing.length} 张未选主分类 —— 请在上方<b>主分类（必选）</b>中选择，再点「开始上传」`;
+      const upCatsEl = document.getElementById("upCats");
+      if (upCatsEl) {
+        upCatsEl.classList.add("needs-attention");
+        setTimeout(() => upCatsEl.classList.remove("needs-attention"), 2600);
+      }
+      return; // 不开始；用户选择主分类后自动重新计时（bindCatPicks 回调里）
+    }
     const upHintEl = document.getElementById("upHint");
     if (upHintEl) upHintEl.innerHTML = "正在上传…请勿关闭窗口";
     btnUpload.textContent = `处理中… (0/${items.length})`;
@@ -1317,6 +1460,25 @@ function initUpload() {
     });
   }
   refreshUqSlots();
+
+  // v0.15：主分类（必选单选）—— 全局选择应用到全部新图片，行内可覆盖
+  const upCatsEl = document.getElementById("upCats");
+  renderCatPicks(upCatsEl, null);
+  window.__refreshUpCatPicks = () => {
+    const el = document.getElementById("upCats");
+    if (el) renderCatPicks(el, window.__upCat || null);
+  };
+  bindCatPicks(upCatsEl, (v) => {
+    window.__upCat = v || null;
+    renderAllUqRowTags(); // 全局主分类变化 → 每行最终主分类 chip 同步
+    // 有主分类后可自动开传：若此前被校验拦下（或新加文件后未计时），现在重新排 15 秒
+    if (v && files.some((it) => it.status === "ready")) {
+      clearTimeout(window.__uqAutoTimer);
+      window.__uqAutoTimer = setTimeout(() => startUpload(), 15000);
+      const upHintEl3 = document.getElementById("upHint");
+      if (upHintEl3) upHintEl3.innerHTML = "主分类已选 ✓ <b>15 秒</b>后自动上传，也可点按钮立即开始";
+    }
+  });
 }
 /* ---------- 批量选择模式（v0.11.2） ---------- */
 function updateBatchUI() {
@@ -1372,6 +1534,7 @@ let btMode = "add";
 function openBatchTag() {
   if (!selected.size) return;
   document.getElementById("batchTagTitle").textContent = `为选中的 ${selected.size} 张图片添加标签`;
+  renderCatPicks(document.getElementById("btCats"), null); // v0.15 批量主分类（默认不修改）
   const box = document.getElementById("btTagBox");
   box.querySelectorAll(".t").forEach((el) => el.remove());
   const err = document.getElementById("btErr");
@@ -1408,6 +1571,7 @@ async function applyBatchTag() {
   okBtn.disabled = true;
   try {
     const ids = [...selected];
+    const catSel = selCatOf(document.getElementById("btCats")); // null = 不改主分类（v0.15）
     await Promise.all(ids.map(async (id) => {
       const p = PHOTOS.find((x) => x.id === id);
       if (!p) return;
@@ -1418,7 +1582,7 @@ async function applyBatchTag() {
       await apiFetch(`/api/photos/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags: next }),
+        body: JSON.stringify({ tags: next, ...(catSel ? { category: catSel } : {}) }),
       });
     }));
     document.getElementById("batchTagModal").classList.remove("open");
@@ -1438,6 +1602,7 @@ function openEditModal(id) {
   if (!p) return;
   editTargetId = id;
   document.getElementById("edDesc").value = p.desc || "";
+  renderCatPicks(document.getElementById("edCats"), p.category || null); // v0.15 主分类
   const box = document.getElementById("edTagBox");
   box.querySelectorAll(".t").forEach((el) => el.remove());
   (p.tags || []).forEach((t) => addTagChip(box, t));
@@ -1458,6 +1623,7 @@ async function saveEditModal() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         desc: document.getElementById("edDesc").value.trim(),
+        category: selCatOf(document.getElementById("edCats")) || "", // v0.15 主分类
         tags: tagsOfBox(document.getElementById("edTagBox")),
       }),
     });
@@ -1503,9 +1669,11 @@ function initEditModal() {
   m.querySelector("form").appendChild(delBtn);
   m.querySelector("#edDelete").addEventListener("click", delFromEditModal);
   bindTagSuggest(document.getElementById("edTagInput"), document.getElementById("edTagSuggest"), document.getElementById("edTagBox"), refreshQuickPickAll);
+  bindCatPicks(document.getElementById("edCats")); // v0.15 主分类单选
   const btSeg = document.getElementById("btMode");
   if (btSeg) btSeg.querySelectorAll(".seg-btn").forEach((b) => b.addEventListener("click", () => setBtMode(b.dataset.mode)));
   bindTagSuggest(document.getElementById("btTagInput"), document.getElementById("btTagSuggest"), document.getElementById("btTagBox"));
+  bindCatPicks(document.getElementById("btCats")); // v0.15 批量主分类
   document.getElementById("btCancel").addEventListener("click", () => document.getElementById("batchTagModal").classList.remove("open"));
   document.getElementById("btOk").addEventListener("click", applyBatchTag);
 }
@@ -2059,6 +2227,7 @@ function openUqEdit(it) {
   const m = document.getElementById("uqModal");
   if (!m) return;
   document.getElementById("uqDesc").value = it.desc || "";
+  renderCatPicks(document.getElementById("uqCatPick"), it.category || null); // v0.15 行内主分类覆盖
   const box = document.getElementById("uqTagBox");
   box.querySelectorAll(".t").forEach((el) => el.remove());
   if (Array.isArray(it.tags)) it.tags.forEach((t) => addTagChip(box, t));
@@ -2071,11 +2240,13 @@ function saveUqEdit() {
   if (!it) return;
   const desc = document.getElementById("uqDesc").value.trim();
   const tags = tagsOfBox(document.getElementById("uqTagBox"));
+  const cat = selCatOf(document.getElementById("uqCatPick"));
   it.desc = desc || null;
   it.tags = tags.length ? tags : undefined; // undefined → 跟随全局标签
+  it.category = cat || undefined; // undefined → 跟随全局主分类（v0.15）
   const nameRow = it.row && it.row.querySelector(".uq-name-row");
   if (nameRow) {
-    const edited = !!(it.desc || it.tags);
+    const edited = !!(it.desc || it.tags || it.category);
     nameRow.innerHTML = `<span class="name">${esc(it.f.name)}</span>` + (edited ? `<span class="edited-mark">已编辑</span>` : "");
   }
   document.getElementById("uqModal").classList.remove("open");
@@ -2090,6 +2261,7 @@ function initUqModal() {
   if (uqC) uqC.onclick = () => m.classList.remove("open");
   if (uqS) uqS.onclick = saveUqEdit;
   bindTagSuggest(document.getElementById("uqTagInput"), document.getElementById("uqTagSuggest"), document.getElementById("uqTagBox"));
+  bindCatPicks(document.getElementById("uqCatPick")); // v0.15 行内主分类（保存时读取选中项）
 }
 
 /* ---------- FAB 展开保持（v0.13.3：hover 后保持展开便于点击分支按钮） ---------- */
@@ -2217,6 +2389,27 @@ function mgrPills(tagObjs, counts) {
   }).join("") + `</div>`;
 }
 
+/* ---------- 主分类管理块（v0.15：分组视图顶部） ---------- */
+function catMgrBlockHTML() {
+  const catUsed = {};
+  PHOTOS.forEach((p) => { const k = p.category || "__none"; catUsed[k] = (catUsed[k] || 0) + 1; });
+  const cats = sortedCategories();
+  return `<div class="tmgr-block">
+    <div class="tmgr-head">
+      <i class="dot" style="--tg:var(--accent)"></i>${t("主分类", "Category")} <span class="req-mark">${t("上传必选其一", "required, one per photo")}</span>
+      <span class="cnt">${cats.length} 个</span>
+    </div>
+    <div class="tmgr-pills">` + cats.map((c) => {
+      const n = catUsed[c.name] || 0;
+      return `<span class="tmgr-pill cat" style="--tg:${c.color || "var(--accent)"}">
+        <i class="dot"></i>${esc(c.name)}
+        <span class="cnt">${n} 张</span>
+        <button class="act" data-cact="edit" data-cname="${escAttr(c.name)}" title="编辑 / 改名">✎</button>
+        <button class="act danger" data-cact="remove" data-cname="${escAttr(c.name)}" title="删除">×</button>
+      </span>`;
+    }).join("") + `</div></div>`;
+}
+
 const TMGR_VIEW_KEY = "rn_tmgr_view";
 /* ---------- 分类工作台状态（v0.14.4：统计视图 → 两栏拖拽分类） ---------- */
 let cwFilter = "all";        // all | loose（只显示未入库分类的图片）
@@ -2239,7 +2432,9 @@ function refreshTagManager() {
     </div>`;
 
   if (view === "group") {
-    html += `<div class="tag-mgr-hint">分组与别名用于筛选菜单和上传建议；<b style="color:var(--text)">改名 / 删除</b>会同步所有图片。</div>`;
+    html += `<div class="tag-mgr-hint">${t("主分类 = 每张图必选一个的大类；标签组 = 作品 / 来源（如 原神），组内标签 = 该作品的角色。改名 / 删除会同步所有图片。",
+      "Category is required per photo; tag groups act as series/source (e.g. Genshin), with character tags inside them.")}</div>`;
+    html += catMgrBlockHTML(); // v0.15 主分类管理（顶部固定区）
     if (!used.length && !TAGS.tags.length) {
       html += `<div class="tag-mgr-empty" style="padding:4px 2px 2px">图库中还没有标签。上传图片时填写标签，即可在此分组管理。</div>`;
     } else {
@@ -2295,14 +2490,18 @@ function refreshTagManager() {
   }
 
   html += `<div class="tag-mgr-actions">
+    <button class="btn ghost sm" id="btnNewCategory">＋ ${t("新建主分类", "New category")}</button>
     <button class="btn ghost sm" id="btnNewTag">＋ 新建标签</button>
     <button class="btn ghost sm" id="btnNewGroup">＋ 新建标签组</button>
   </div>`;
   root.innerHTML = html;
 
   const q = (sel) => root.querySelector(sel);
+  if (q("#btnNewCategory")) q("#btnNewCategory").addEventListener("click", () => openCatModal("new-category"));
   if (q("#btnNewTag")) q("#btnNewTag").addEventListener("click", () => openTagModal("new-tag"));
   if (q("#btnNewGroup")) q("#btnNewGroup").addEventListener("click", () => openTagModal("new-group"));
+  root.querySelectorAll("[data-cact='edit']").forEach((b) => b.addEventListener("click", () => openCatModal("edit-category", b.dataset.cname)));
+  root.querySelectorAll("[data-cact='remove']").forEach((b) => b.addEventListener("click", () => openCatModal("remove-category", b.dataset.cname)));
   const seg = q("#tmgrViewSeg");
   if (seg) {
     seg.querySelectorAll(".seg-btn").forEach((b) => {
@@ -2570,17 +2769,30 @@ function renderAllUqRowTags() {
     if (rowEl.__item) renderUqRowTags(rowEl.__item);
   });
 }
-/* 行 chips = 该行专属分类（拖入的）；点 ✕ 移除。全局标签见右侧顶部输入 */
+/* 行最终主分类 = 行内覆盖 ?? 上传面板全局选择（v0.15 必选） */
+function uqRowCategory(it) {
+  return it.category || window.__upCat || null;
+}
+/* 行 chips = 该行专属分类（拖入的）+ 主分类（若有行内覆盖）；点 ✕ 移除。全局标签见右侧顶部输入 */
 function renderUqRowTags(it) {
   const row = it.row;
   if (!row) return;
   const el = row.querySelector(".uq-tags");
   if (!el) return;
   const tags = it.tags || [];
-  el.innerHTML = tags.map((n) => `<span class="cls" data-tag="${escAttr(n)}">${esc(n)}<i class="x" title="移除此分类">✕</i></span>`).join("");
+  const cat = uqRowCategory(it);
+  el.innerHTML =
+    (cat ? `<span class="cls cat" data-cat="${escAttr(cat)}" style="--tg:${catColor(cat) || "#8e8e93"}" title="主分类 · 点击 ✕ 取消单张覆盖，回到跟随全局">
+        <i class="dot"></i>${esc(cat)}<i class="x">✕</i></span>` : "")
+    + tags.map((n) => `<span class="cls" data-tag="${escAttr(n)}">${esc(n)}<i class="x" title="移除此分类">✕</i></span>`).join("");
   el.querySelectorAll(".cls").forEach((c) => {
     c.addEventListener("click", (e) => {
       e.stopPropagation();
+      if (c.dataset.cat !== undefined) {
+        it.category = undefined; // 取消行内覆盖 → 跟随全局主分类
+        renderUqRowTags(it);
+        return;
+      }
       const nm = c.dataset.tag;
       if (Array.isArray(it.tags)) {
         it.tags = it.tags.filter((x) => x !== nm);
@@ -2680,6 +2892,125 @@ window.__refreshQuickPick = refreshQuickPickAll;
 function closeTagModal() {
   const m = document.getElementById("tagModal");
   if (m) m.classList.remove("open");
+}
+
+/* ---------- 主分类弹窗（v0.15：新建 / 改名 / 删除，改名同步照片 category） ---------- */
+function openCatModal(mode, payload) {
+  const modal = document.getElementById("tagModal");
+  const body = document.getElementById("tagModalBody");
+  if (!modal || !body) return;
+
+  /* ---- 删除确认 ---- */
+  if (mode === "remove-category") {
+    const name = payload;
+    const n = PHOTOS.filter((p) => p.category === name).length;
+    body.innerHTML = `
+      <h3>删除主分类「${esc(name)}」？</h3>
+      <p>将把引用该分类的图片主分类<b>清空（变为未分类）</b>${n ? `（本次列表可见 ${n} 张）` : ""}。此操作不可恢复。</p>
+      <div class="m-actions">
+        <button class="btn ghost" id="fCancel">取消</button>
+        <button class="btn danger" id="fConfirm">确认删除</button>
+      </div>
+      <div class="hint" id="fErr" style="color:var(--danger);display:none;margin-top:12px"></div>`;
+    modal.classList.add("open");
+    body.querySelector("#fCancel").onclick = closeTagModal;
+    body.querySelector("#fConfirm").onclick = async () => {
+      const b = body.querySelector("#fConfirm");
+      b.disabled = true;
+      b.textContent = "删除中…";
+      try {
+        await apiRemoveCategory(name);
+        await loadData();
+        if (window.__refreshGallery) window.__refreshGallery();
+        refreshTagUI();
+        closeTagModal();
+      } catch (err) {
+        b.disabled = false;
+        b.textContent = "确认删除";
+        const el = body.querySelector("#fErr");
+        el.style.display = "block";
+        el.textContent = err.message;
+      }
+    };
+    return;
+  }
+
+  /* ---- 新建 / 改名表单 ---- */
+  const target = mode === "edit-category" ? catByName(payload) : null;
+  if (mode === "edit-category" && !target) return closeTagModal();
+  const title = target ? "编辑主分类" : "新建主分类";
+  const selColor = target ? target.color : null;
+  body.innerHTML = `
+    <h3>${title}</h3>
+    <form class="tag-form" id="fForm" onsubmit="return false">
+      <div class="field">
+        <label>名称</label>
+        <input type="text" id="fName" value="${escAttr(target ? target.name : "")}" maxlength="20" placeholder="如：像素 / 摄影">
+        <div class="hint">${target ? "改名会同步更新所有图片的主分类" : "主分类是上传时必选的大类（单选互斥）"}</div>
+      </div>
+      <div class="field">
+        <label>颜色</label>${swatchHTML(selColor)}
+      </div>
+      <div class="m-actions">
+        <button class="btn ghost" id="fCancel" type="button">取消</button>
+        <button class="btn primary" id="fSave" type="button">保存</button>
+      </div>
+    </form>
+    ${target ? `<div class="tag-modal-danger">
+      <button class="btn danger sm" id="fDel" type="button">删除主分类</button>
+    </div>` : ""}
+    <div class="hint" id="fErr" style="color:var(--danger);display:none;margin-top:12px"></div>`;
+  modal.classList.add("open");
+
+  let color = selColor;
+  body.querySelector("#fSwatches").addEventListener("click", (e) => {
+    const b = e.target.closest(".tag-swatch");
+    if (!b) return;
+    color = b.dataset.v || null;
+    body.querySelectorAll(".tag-swatch").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+  });
+
+  const fName = body.querySelector("#fName");
+  const fSave = body.querySelector("#fSave");
+  const fErr = body.querySelector("#fErr");
+  const showErr = (m) => { fErr.style.display = "block"; fErr.textContent = m; };
+  const busy = (b, text) => { b.disabled = !!text; if (text !== null) b.textContent = text || "保存"; };
+  fName.focus();
+  body.querySelector("#fCancel").onclick = closeTagModal;
+  const fDelEl = body.querySelector("#fDel");
+  if (fDelEl) fDelEl.onclick = () => openCatModal("remove-category", target.name);
+
+  fSave.onclick = async () => {
+    const name = fName.value.trim();
+    if (!name) return showErr("名称不能为空");
+    if (name === "未分类") return showErr("「未分类」是系统保留名，不能用作主分类");
+    busy(fSave, "保存中…");
+    try {
+      if (target) {
+        if (name !== target.name) {
+          if (catByName(name)) { busy(fSave, null); return showErr(`主分类「${name}」已存在`); }
+          await apiRenameCategory(target.name, name); // 后端同步照片
+          const nt = catByName(name);
+          if (nt) nt.color = color;
+        } else {
+          target.color = color;
+        }
+        await apiSaveTags();
+        await loadData(); // 改名后照片引用已同步 → 重载统一刷新
+        if (window.__refreshGallery) window.__refreshGallery();
+      } else {
+        if (catByName(name)) { busy(fSave, null); return showErr(`主分类「${name}」已存在`); }
+        TAGS.categories.push({ id: "", name, color, sort: TAGS.categories.length });
+        await apiSaveTags();
+        refreshTagUI();
+      }
+      closeTagModal();
+    } catch (err) {
+      busy(fSave, null);
+      showErr(err.message);
+    }
+  };
 }
 
 function swatchHTML(sel) {
@@ -3078,6 +3409,7 @@ function initSearch() {
       }
     }
     const list = PHOTOS.filter((p) => {
+      if (String(p.category || "").toLowerCase().includes(keyword)) return true; // 主分类可搜（v0.15）
       if ((p.title + " " + p.desc).toLowerCase().includes(keyword)) return true;
       return p.tags.some((t) => t.toLowerCase().includes(keyword) || aliasNames.has(t));
     });
@@ -3095,7 +3427,7 @@ function initSearch() {
     results.innerHTML = list.map((p) => `
       <div class="search-card" data-id="${p.id}">
         <img loading="lazy" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
-        <div class="t">${p.tags.length ? p.tags.slice(0, 2).map(tagChip).join(" / ") : ""}</div>
+        <div class="t">${catChip(p.category)}${p.tags.length ? p.tags.slice(0, 2).map(tagChip).join(" / ") : ""}</div>
       </div>`).join("");
     results.querySelectorAll(".search-card").forEach((c) => {
       c.onclick = () => openLightboxById(c.dataset.id);

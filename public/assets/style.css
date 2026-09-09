@@ -3382,6 +3382,66 @@ body.select-mode .card .pick { display: grid; }
   margin-bottom: 10px;
   line-height: 1.5;
 }
+/* ---------- 主分类 chips（v0.15：上传 / 编辑 / 批量必选单选） ---------- */
+.uq-panel-title .req {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-radius: 99px;
+  padding: 1px 8px;
+  margin-left: 6px;
+  vertical-align: 1px;
+  letter-spacing: 0.04em;
+}
+.uq-cats { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.uq-cats:empty::after {
+  content: "主分类配置为空，请到「标签」页添加";
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.cat-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  line-height: 1;
+  border: 1px solid var(--w016);
+  background: color-mix(in srgb, var(--tg, var(--accent)) 9%, transparent);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.18s var(--ease-out);
+  user-select: none;
+}
+.cat-pick .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tg, var(--accent));
+  flex: none;
+}
+.cat-pick:hover {
+  border-color: color-mix(in srgb, var(--tg, var(--accent)) 65%, transparent);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.cat-pick.on {
+  border-color: color-mix(in srgb, var(--tg, var(--accent)) 85%, transparent);
+  background: color-mix(in srgb, var(--tg, var(--accent)) 26%, transparent);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 2px 9px color-mix(in srgb, var(--tg, var(--accent)) 32%, transparent);
+}
+.cat-pick.needs-attention {
+  animation: catPulse 1.1s var(--ease-out) 2;
+}
+@keyframes catPulse {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent); }
+}
 .uq-panel .quick-pick { margin-top: 8px; }
 .uq-slots {
   display: flex;
@@ -3637,4 +3697,42 @@ body.select-mode .card .pick { display: grid; }
 .traffic .green:active { transform: scale(0.9); }
 @media (max-width: 720px) {
   .dock-item { padding: 6px 9px; font-size: 11.5px; }
+}
+/* ============================================================
+   主分类体系（v0.15）：筛选菜单 / 标签管理 / 行内 chip / tmgr
+   ============================================================ */
+.tag-group-head.cat { cursor: default; }
+.tag-group-head.cat:hover { color: var(--text-faint); }
+
+.tmgr-pill.cat .dot { background: var(--tg); }
+
+.tmgr-pill.cat {
+  border-color: color-mix(in srgb, var(--tg) 40%, transparent);
+  background: color-mix(in srgb, var(--tg) 9%, transparent);
+}
+.tmgr-head .req-mark {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-radius: 99px;
+  padding: 1px 7px;
+  letter-spacing: 0.04em;
+}
+.tmgr-block { margin-bottom: 4px; }
+.tmgr-block .tmgr-head { margin-top: 8px; }
+
+/* 上传队列行内的主分类 chip（带色描边与圆点） */
+.uq-tags span.cls.cat {
+  border-color: color-mix(in srgb, var(--tg, #8e8e93) 55%, transparent);
+  color: var(--tg, #8e8e93);
+  background: color-mix(in srgb, var(--tg, #8e8e93) 14%, transparent);
+}
+.uq-tags span.cls.cat .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tg, #8e8e93);
+  flex: none;
 }
