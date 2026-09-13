@@ -3739,3 +3739,57 @@ body.select-mode .card .pick { display: grid; }
   background: var(--tg, #8e8e93);
   flex: none;
 }
+
+/* ============================================================
+   访问密码门禁 + R18 保护（v0.16）
+   ============================================================ */
+.gate-page {
+  position: fixed; inset: 0; z-index: 4000;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+  background:
+    radial-gradient(ellipse 60% 50% at 50% 28%, rgba(90, 120, 255, 0.14), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 82% 84%, rgba(190, 90, 255, 0.1), transparent 70%),
+    var(--bg, #0b0b0e);
+}
+.gate-page.open { display: flex; }
+.gate-box {
+  width: min(360px, 92vw); padding: 28px 26px; border-radius: 20px; text-align: center;
+  background: var(--glass, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.12));
+  backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 30px 80px -24px rgba(0, 0, 0, 0.7);
+}
+.gate-box h1 { margin: 0 0 6px; font-size: 19px; color: var(--text, #fff); }
+.gate-sub { margin: 0 0 18px; font-size: 13px; color: var(--text-dim, rgba(255, 255, 255, 0.6)); }
+.gate-input {
+  width: 100%; box-sizing: border-box; padding: 11px 14px; border-radius: 12px;
+  font-size: 14px; font-family: inherit; color: var(--text, #fff); outline: none;
+  background: rgba(0, 0, 0, 0.32); border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.14));
+}
+.gate-input:focus { border-color: rgba(255, 159, 10, 0.55); }
+.gate-err { min-height: 18px; margin: 8px 0 10px; font-size: 12.5px; color: #ff6b6b; }
+.gate-btn { width: 100%; justify-content: center; }
+
+/* R18 锁定占位卡：不加载任何图片内容 */
+.card.card-r18-locked {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  min-height: 170px; cursor: pointer;
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 107, 107, 0.06) 0 10px, transparent 10px 20px),
+    var(--glass, rgba(255, 255, 255, 0.04));
+}
+.r18-badge {
+  font-size: 15px; font-weight: 700; letter-spacing: 1px; color: #ff8080;
+  padding: 4px 12px; border-radius: 999px;
+  border: 1px solid rgba(255, 107, 107, 0.45); background: rgba(255, 107, 107, 0.1);
+}
+.r18-lock-tip { font-size: 12px; color: var(--text-dim, rgba(255, 255, 255, 0.55)); }
+
+/* 设置页：访问与保护 */
+.settings-row-wrap.auth-col { flex-direction: column; align-items: stretch; gap: 8px; }
+.settings-input {
+  width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px;
+  font-size: 13.5px; font-family: inherit; color: var(--text, #fff); outline: none;
+  background: rgba(0, 0, 0, 0.28); border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.14));
+}
+.settings-input:focus { border-color: rgba(255, 159, 10, 0.5); }

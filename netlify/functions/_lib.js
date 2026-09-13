@@ -8,6 +8,7 @@
 const { getStore } = require("@netlify/blobs");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const STORE_NAME = "photos";
 const LOCAL_DIR = path.join(process.cwd(), ".local-data");
@@ -188,6 +189,74 @@ function sniffMime(buf) {
   return "application/octet-stream";
 }
 
+/* ============================================================
+   访问控制（v0.16）：访问密码 + R18 密钥
+   - 密码与密钥都只存 SHA-256 哈希，配置存 Blobs 的 auth-config
+   - 首次启动若环境变量 ADMIN_TOKEN 存在，用它初始化访问密码（之后可在设置页修改）
+   - 两者都未设置时：不启用门禁 / 不额外保护 R18（避免把自己锁在外面）
+   ============================================================ */
+const KEY_AUTH = "auth-config";
+const sha256hex = (v) => crypto.createHash("sha256").update(String(v)).digest("hex");
+
+async function authConfig() {
+  const s = store();
+  let cfg = null;
+  try {
+    cfg = await s.get(KEY_AUTH, { type: "json" });
+  } catch {
+    cfg = null;
+  }
+  if (!cfg || typeof cfg !== "object") cfg = {};
+  // 首次启动：用环境变量初始化访问密码
+  if (!cfg.accessHash && process.env.ADMIN_TOKEN) {
+    cfg.accessHash = sha256hex(process.env.ADMIN_TOKEN);
+    try {
+      await s.set(KEY_AUTH, JSON.stringify(cfg));
+    } catch {
+      /* 写失败也继续用内存里的值 */
+    }
+  }
+  return cfg;
+}
+
+async function saveAuthConfig(cfg) {
+  await store().set(KEY_AUTH, JSON.stringify(cfg || {}));
+}
+
+/* 凭证来源：请求头 X-Auth-Token 或 URL 参数 ?token=（<img> 无法带请求头） */
+function tokenFrom(req, url) {
+  const h = (req && req.headers && (req.headers.get("X-Auth-Token") || req.headers.get("x-auth-token"))) || "";
+  return String(h || (url ? url.searchParams.get("token") || "" : "")).trim();
+}
+function r18KeyFrom(req, url) {
+  const h = (req && req.headers && (req.headers.get("X-R18-Key") || req.headers.get("x-r18-key"))) || "";
+  return String(h || (url ? url.searchParams.get("r18Key") || "" : "")).trim();
+}
+
+/* 返回 { ok, gate }：gate 表示是否启用了门禁 */
+async function checkAuth(req, url) {
+  const cfg = await authConfig();
+  if (!cfg.accessHash) return { ok: true, gate: false };
+  const t = tokenFrom(req, url);
+  return { ok: !!t && sha256hex(t) === cfg.accessHash, gate: true };
+}
+
+/* R18 图片是否放行（未设置 R18 密钥时一律放行） */
+async function checkR18(req, url, cfg) {
+  const c = cfg || (await authConfig());
+  if (!c.r18Hash) return true;
+  const k = r18KeyFrom(req, url);
+  return !!k && sha256hex(k) === c.r18Hash;
+}
+
+/* R18 判定：独立字段 r18 === true，或标签含 r18，或主分类为 r18 */
+function isR18Photo(p) {
+  if (!p) return false;
+  if (p.r18 === true) return true;
+  if (Array.isArray(p.tags) && p.tags.some((t) => String(t).trim().toLowerCase() === "r18")) return true;
+  return String(p.category || "").trim().toLowerCase() === "r18";
+}
+
 module.exports = {
   store,
   json,
@@ -198,4 +267,12 @@ module.exports = {
   nanoid,
   imageSize,
   sniffMime,
+  authConfig,
+  saveAuthConfig,
+  checkAuth,
+  checkR18,
+  isR18Photo,
+  tokenFrom,
+  r18KeyFrom,
+  sha256hex,
 };

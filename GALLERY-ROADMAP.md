@@ -465,3 +465,16 @@ async function aiTagSearch(query) {
 - 修复：服务端本就记录了照片宽高（p.width / p.height），`cardHTML()` 渲染时直接写 `style="aspect-ratio:w / h"` 作为占位；`.card img` 由 `height:auto` 改为 `height:100%` + `object-fit:cover`，图片填满卡片而不再撑开容器 → 图片加载前后卡片高度完全一致，瀑布流不再重排（首次渲染与「加载更多」追加的卡片都受益）
 - 兼容：老数据缺少宽高时不写 aspect-ratio，退回原来的自然高度行为
 - 涉及文件：`public/assets/app.js`（cardHTML）、`public/assets/style.css`（.card img）、`public/index.html`（资源版本号 → ?v=20261021）
+
+### 批次 9 · 访问密码门禁 + R18 分级保护（v0.16，2026-09-13）✅
+- 访问密码：除 `/api/auth/state`、`/api/auth/login` 外的所有 API 都要校验 `X-Auth-Token` 或 `?token=`；密码只存 SHA-256 哈希（Blobs 的 `auth-config`），首次启动用环境变量 `ADMIN_TOKEN` 初始化；**未设置密码时自动放行**，不会把自己锁在外面
+- 图片是 `<img>` 直接加载、带不了请求头，所以凭证走 URL 参数：列表返回的 `url` / `thumbUrl` 已自动拼接 `?token=`
+- 前端门禁页：启动时先请求 `/api/auth/state`，启用密码且本机无凭证时只显示登录框（不加载任何数据），登录成功写入 localStorage 后重载
+- R18 分级保护：判定方式三者任一命中——独立字段 `r18 === true`、标签含 `r18`、主分类为 `r18`（后端统一计算，随列表返回 `r18` 标记）
+  - 未解锁时：普通筛选（含「全部」）下 R18 图片**根本不进列表**；正在筛选 R18 相关内容时渲染**锁定占位卡**（不加载任何图片字节）
+  - 解锁：点锁定卡输入 R18 密钥 → `POST /api/auth/r18/verify` → 通过后本机记住，图片 URL 追加 `?r18Key=`
+  - 后端 `raw` / `thumb` 对 R18 图片校验密钥，未通过返回 401（即使已通过访问密码也拿不到字节）
+- 设置页新增「访问与保护」：修改访问密码、设置/清除 R18 密钥、退出登录（清除本机凭据）；忘记密码可在 Netlify 改 `ADMIN_TOKEN` 并清空 Blobs 的 `auth-config` 重新初始化
+- 新增端点：`GET /api/auth/state`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/r18`、`POST /api/auth/r18/verify`
+- 涉及文件：`netlify/functions/_lib.js`、`netlify/functions/photos.js`、`public/index.html`、`public/assets/app.js`、`public/assets/style.css`（资源版本号 → ?v=20261022）
+- 待办：本地 `scripts/dev-server.js` 尚未实现 `/api/auth/*`，本地开发时门禁不生效、设置页相关按钮会失败（生产环境正常）

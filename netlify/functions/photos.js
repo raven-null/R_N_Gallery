@@ -20,8 +20,9 @@
      POST   /api/photos/:id/image      覆盖原图字节（旋转等编辑后保存）
    ============================================================ */
 const {
-  store, json, notFound, badRequest, serverError,
+  store, json, notFound, badRequest, serverError, unauthorized,
   nanoid, imageSize, sniffMime,
+  authConfig, saveAuthConfig, checkAuth, checkR18, isR18Photo, sha256hex,
 } = require("./_lib");
 const crypto = require("crypto");
 const sharp = require("sharp"); // v0.13.8：服务端缩略图（列表秒开）
@@ -110,6 +111,18 @@ exports.default = async (req) => {
 
 
 
+    /* ---- 访问控制端点（无需登录） ---- */
+    if (method === "GET" && path.endsWith("/api/auth/state")) return authState();
+    if (method === "POST" && path.endsWith("/api/auth/login")) return authLogin(req);
+
+    /* ---- 其余全部端点都需要访问密码（未设置密码时自动放行） ---- */
+    const auth = await checkAuth(req, url);
+    if (!auth.ok) return unauthorized("需要访问密码，或密码已失效");
+
+    if (method === "POST" && path.endsWith("/api/auth/password")) return authPassword(req);
+    if (method === "POST" && path.endsWith("/api/auth/r18")) return authR18(req);
+    if (method === "POST" && path.endsWith("/api/auth/r18/verify")) return authR18Verify(req);
+
     if (method === "GET" && path.endsWith("/api/photos")) return list(url);
     if (method === "GET" && path.endsWith("/api/tags")) return tagsGet();
     if (method === "PUT" && path.endsWith("/api/tags")) return tagsPut(req);
@@ -125,8 +138,8 @@ exports.default = async (req) => {
     if (method === "DELETE" && path.endsWith("/api/meta/logs")) {
       return logsClear();
     }
-    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(rest[0]);
-    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "thumb") return thumb(rest[0]);
+    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(rest[0], req, url);
+    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "thumb") return thumb(rest[0], req, url);
     if (method === "GET" && path.endsWith("/api/photos/check")) return checkHash(url);
     if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 1) return getMeta(rest[0]);
     if (method === "POST" && path.endsWith("/api/photos")) return upload(req);
@@ -162,8 +175,70 @@ exports.config = {
     "/api/tags/category-remove",
     "/api/albums",
     "/api/meta/logs",
+    "/api/auth/state",
+    "/api/auth/login",
+    "/api/auth/password",
+    "/api/auth/r18",
+    "/api/auth/r18/verify",
   ],
 };
+
+/* ============================================================
+   访问控制（v0.16）
+   ============================================================ */
+async function authState() {
+  const cfg = await authConfig();
+  return json({ gate: !!cfg.accessHash, hasR18: !!cfg.r18Hash });
+}
+
+async function authLogin(req) {
+  const body = await req.json().catch(() => ({}));
+  const cfg = await authConfig();
+  if (!cfg.accessHash) return json({ ok: true, gate: false }); // 未设置密码：直接通过
+  const t = String(body.token || "").trim();
+  if (!t || sha256hex(t) !== cfg.accessHash) return unauthorized("密码错误");
+  return json({ ok: true, gate: true });
+}
+
+/* 修改访问密码（调用方必须是已登录状态，路由层已校验） */
+async function authPassword(req) {
+  const body = await req.json().catch(() => ({}));
+  const next = String(body.next || "").trim();
+  if (next.length < 4) return badRequest("密码至少 4 位");
+  const cfg = await authConfig();
+  cfg.accessHash = sha256hex(next);
+  await saveAuthConfig(cfg);
+  logAction(req, "修改访问密码", "");
+  return json({ ok: true });
+}
+
+/* 设置 / 清除 R18 密钥（r18Key 传空串即清除，清除后 R18 不再额外保护） */
+async function authR18(req) {
+  const body = await req.json().catch(() => ({}));
+  const k = String(body.r18Key || "").trim();
+  const cfg = await authConfig();
+  if (!k) {
+    delete cfg.r18Hash;
+    await saveAuthConfig(cfg);
+    logAction(req, "清除 R18 密钥", "");
+    return json({ ok: true, hasR18: false });
+  }
+  if (k.length < 4) return badRequest("R18 密钥至少 4 位");
+  cfg.r18Hash = sha256hex(k);
+  await saveAuthConfig(cfg);
+  logAction(req, "设置 R18 密钥", "");
+  return json({ ok: true, hasR18: true });
+}
+
+/* 校验 R18 密钥（前端输入后调用，通过则本地记住用于图片 URL） */
+async function authR18Verify(req) {
+  const body = await req.json().catch(() => ({}));
+  const cfg = await authConfig();
+  if (!cfg.r18Hash) return json({ ok: true, hasR18: false });
+  const k = String(body.r18Key || "").trim();
+  if (!k || sha256hex(k) !== cfg.r18Hash) return unauthorized("R18 密钥错误");
+  return json({ ok: true, hasR18: true });
+}
 
 /* ---------- 操作日志（v0.12） ---------- */
 async function logAction(req, action, detail) {
@@ -248,7 +323,7 @@ async function list(url) {
   const photos = [];
   for (const item of res.blobs) {
     const m = await s.get(item.key, { type: "json" });
-    if (m) photos.push(m);
+    if (m) photos.push({ ...m, r18: isR18Photo(m) }); // r18 标记由后端统一判定（标签 / 主分类 / 独立字段）
   }
   photos.sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""));
   return json({ photos, cursor: res.nextCursor || null, hasMore: !!res.nextCursor });
@@ -258,14 +333,16 @@ async function list(url) {
 async function getMeta(id) {
   const m = await store().get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
-  return json({ photo: m });
+  return json({ photo: { ...m, r18: isR18Photo(m) } });
 }
 
 /* ---------- 图片字节输出（v0.9.20：必须用 arrayBuffer 读，v8 默认返回字符串会损坏二进制） ---------- */
-async function raw(id) {
+async function raw(id, req, url) {
   const s = store();
   const m = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
+  // R18 图片：即使已通过访问密码，也需要 R18 密钥才能读取字节
+  if (isR18Photo(m) && !(await checkR18(req, url))) return unauthorized("R18 内容需要密钥");
   const buf = await s.get(m.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" });
   if (!buf) return notFound("Image data not found");
   return new Response(buf, {
@@ -314,10 +391,11 @@ async function replaceImage(req, id) {
 }
 
 /* ---------- 缩略图输出（v0.12/0.13.8：无缩略图时服务端即时生成并缓存，旧图自动补齐） ---------- */
-async function thumb(id) {
+async function thumb(id, req, url) {
   const s = store();
   const meta = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!meta) return notFound("Photo not found");
+  if (isR18Photo(meta) && !(await checkR18(req, url))) return unauthorized("R18 内容需要密钥");
   let buf = null;
   if (meta.thumbKey) buf = await s.get(meta.thumbKey, { type: "arrayBuffer" });
   if (!buf) {
@@ -424,6 +502,7 @@ async function patch(req, id) {
   if (body.desc !== undefined) meta.desc = String(body.desc).trim();
   if (body.tags !== undefined) meta.tags = Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [];
   if (body.category !== undefined) meta.category = sanitizeCat(body.category); // 主分类（空串 = 清除）
+  if (body.r18 !== undefined) meta.r18 = body.r18 === true || body.r18 === "true" || body.r18 === 1; // R18 独立开关
   if (body.takenAt !== undefined) meta.takenAt = body.takenAt;
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
   logAction(req, "编辑图片", meta.title || id);
