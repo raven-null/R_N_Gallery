@@ -900,7 +900,10 @@ body[data-page="gallery"] .page {
 }
 .card img { 
   width: 100%; 
-  height: auto; 
+  /* 卡片高度由服务端的宽高比决定（见 app.js cardHTML 的 aspect-ratio），图片填满即可，
+     不再用 height:auto 让图片把卡片撑开——那是瀑布流在懒加载时不停重排的原因 */
+  height: 100%; 
+  object-fit: cover;
   display: block;
   transition: transform 0.5s var(--ease-out); 
 }

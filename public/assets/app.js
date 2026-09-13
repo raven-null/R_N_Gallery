@@ -847,7 +847,10 @@ function initGallery() {
 
   const favSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`;
   function cardHTML(p) {
-    return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true">
+    // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
+    // 老数据缺尺寸时不写，退回原来的自然高度
+    const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";
+    return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true"${ratio}>
       <img loading="lazy" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
       <button class="pick" title="选中">✓</button>
       <button class="fav-star${isFav(p.id) ? " on" : ""}" title="${isFav(p.id) ? "取消收藏" : "收藏"}">${favSVG}</button>

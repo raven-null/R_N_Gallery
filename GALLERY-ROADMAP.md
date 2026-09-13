@@ -460,3 +460,8 @@ async function aiTagSearch(query) {
 - 标签管理：分组视图顶部主分类管理块（计数 + 改名/删除/新建，走色板）；改名/删除同步全部照片的 category（新增 `POST /api/tags/category-rename`、`category-remove`；PUT /api/tags 删除分类也同步置空照片）
 - 涉及文件：`photos.js`（结构 + 3 端点 + 同步遍历）、`app.js`（上传/编辑/筛选/管理）、`index.html`（4 处面板）、`style.css`（chips/管理块样式）
 - 语义建议：标签组 = 作品/来源（如 原神、绝区零），组内标签 = 角色小标签 → 原「游戏角色」组可改为按作品分组建组
+### 批次 8 · 瀑布流图片防重排（2026-09-13）✅
+- 现象：卡片图片是 loading="lazy"，加载完成前卡片矮、完成后被图片撑高；而 `.masonry` 是 CSS 多列布局（columns），任一卡片高度变化都会让整列重新分配，于是滚动时卡片不停位移
+- 修复：服务端本就记录了照片宽高（p.width / p.height），`cardHTML()` 渲染时直接写 `style="aspect-ratio:w / h"` 作为占位；`.card img` 由 `height:auto` 改为 `height:100%` + `object-fit:cover`，图片填满卡片而不再撑开容器 → 图片加载前后卡片高度完全一致，瀑布流不再重排（首次渲染与「加载更多」追加的卡片都受益）
+- 兼容：老数据缺少宽高时不写 aspect-ratio，退回原来的自然高度行为
+- 涉及文件：`public/assets/app.js`（cardHTML）、`public/assets/style.css`（.card img）、`public/index.html`（资源版本号 → ?v=20261021）
