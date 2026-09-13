@@ -1783,6 +1783,8 @@ function openEditModal(id) {
   const box = document.getElementById("edTagBox");
   box.querySelectorAll(".t").forEach((el) => el.remove());
   (p.tags || []).forEach((t) => addTagChip(box, t));
+  const r18Box = document.getElementById("edR18");
+  if (r18Box) r18Box.checked = isR18(p); // v0.16：标签 / 主分类命中时也勾上
   const err = document.getElementById("edErr");
   err.style.display = "none";
   document.getElementById("editModal").classList.add("open");
@@ -1802,6 +1804,7 @@ async function saveEditModal() {
         desc: document.getElementById("edDesc").value.trim(),
         category: selCatOf(document.getElementById("edCats")) || "", // v0.15 主分类
         tags: tagsOfBox(document.getElementById("edTagBox")),
+        r18: !!(document.getElementById("edR18") && document.getElementById("edR18").checked), // v0.16 R18 独立开关
       }),
     });
     const d = await r.json();

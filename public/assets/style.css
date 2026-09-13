@@ -3793,3 +3793,7 @@ body.select-mode .card .pick { display: grid; }
   background: rgba(0, 0, 0, 0.28); border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.14));
 }
 .settings-input:focus { border-color: rgba(255, 159, 10, 0.5); }
+
+/* 编辑弹窗：R18 开关 */
+.r18-toggle { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; cursor: pointer; line-height: 1.55; color: var(--text-dim, rgba(255,255,255,.7)); }
+.r18-toggle input { width: 16px; height: 16px; margin-top: 2px; flex: none; accent-color: #ff8080; cursor: pointer; }
