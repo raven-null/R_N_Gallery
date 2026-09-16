@@ -24,7 +24,7 @@ let PHOTOS = [];
 let USE_API = false;
 
 /* ---------- 标签体系（v0.11 / v0.15 主分类）：配置状态（模块级，菜单/管理页共享） ---------- */
-/* 内置主分类：上传必选其一、单选互斥；照片 meta.category 存名称（名称即引用键） */
+/* 内置主分类（v0.19 上传必选、可多选）；照片 meta.categories 存名称数组（名称即引用键） */
 const DEFAULT_CATEGORIES = [
   { id: "cat-2d-girl", name: "次元女", color: "#ff6fa5", sort: 0 },
   { id: "cat-2d-boy", name: "次元男", color: "#6aa5ff", sort: 1 },
@@ -248,7 +248,7 @@ const tagChip = (name) => {
   return `<span class="tg"${c ? ` style="--tg:${c}"` : ""}>${esc(name)}</span>`;
 };
 
-/* ---------- 主分类 helpers（v0.15） ---------- */
+/* ---------- 主分类 helpers（v0.15 单选 → v0.19 多选） ---------- */
 const catByName = (name) => (TAGS.categories || []).find((c) => c.name === name);
 const catColor = (name) => {
   const c = catByName(name);
@@ -257,32 +257,50 @@ const catColor = (name) => {
 function sortedCategories() {
   return [...(TAGS.categories || [])].sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
 }
+/* 照片的主分类数组（兼容旧的单值 category 字段） */
+const catsOf = (p) => (Array.isArray(p.categories) ? p.categories.filter(Boolean) : (p.category ? [p.category] : []));
 /* 展示用主分类 chip（与标签 chip 同款胶囊，色随分类配置） */
 const catChip = (name) => {
   if (!name) return "";
   const c = catColor(name) || "#8e8e93";
   return `<span class="tg cat" style="--tg:${c}" title="主分类">${esc(name)}</span>`;
 };
-/* 单选 chips 渲染：容器内渲染 .cat-pick 按钮，selName 高亮 */
-function renderCatPicks(container, selName) {
+/* 多分类 chip 串：最多显示 max 个，其余折成 +N */
+function catChipsOf(p, max = 2) {
+  const cats = catsOf(p);
+  if (!cats.length) return "";
+  return cats.slice(0, max).map(catChip).join("")
+    + (cats.length > max ? `<span class="tg cat" style="--tg:#8e8e93" title="${escAttr(cats.join("、"))}">+${cats.length - max}</span>` : "");
+}
+/* 主分类 chips 渲染（sel 可为字符串或数组）；容器 data-multi="1" 时多选 */
+function renderCatPicks(container, sel) {
   if (!container) return;
+  const set = new Set(Array.isArray(sel) ? sel : (sel ? [sel] : []));
   container.innerHTML = sortedCategories().map((c) =>
-    `<button type="button" class="cat-pick${c.name === selName ? " on" : ""}" data-cat="${escAttr(c.name)}" style="--tg:${c.color || "var(--accent)"}">
+    `<button type="button" class="cat-pick${set.has(c.name) ? " on" : ""}" data-cat="${escAttr(c.name)}" style="--tg:${c.color || "var(--accent)"}">
       <i class="dot"></i>${esc(c.name)}</button>`).join("");
 }
-const selCatOf = (container) => {
-  if (!container) return null;
-  const el = container.querySelector(".cat-pick.on");
-  return el ? el.dataset.cat : null;
+/* 读取容器里已选的主分类（数组） */
+const selCatsOf = (container) => {
+  if (!container) return [];
+  return [...container.querySelectorAll(".cat-pick.on")].map((el) => el.dataset.cat);
 };
-/* 绑定单选切换（事件委托，innerHTML 重建无需重绑）；data-allow-off="1" 时再点已选项 = 取消 */
+const selCatOf = (container) => selCatsOf(container)[0] || null;
+/* 绑定选择（事件委托，innerHTML 重建无需重绑）
+   多选容器（data-multi="1"）：点一下开关一项；
+   单选容器：data-allow-off="1" 时再点已选项 = 取消 */
 function bindCatPicks(container, onChange) {
   if (!container) return;
   container.addEventListener("click", (e) => {
     const b = e.target.closest(".cat-pick");
     if (!b) return;
-    const v = b.dataset.cat;
+    const multi = container.dataset.multi === "1";
     const wasOn = b.classList.contains("on");
+    if (multi) {
+      b.classList.toggle("on", !wasOn);
+      if (onChange) onChange(selCatsOf(container));
+      return;
+    }
     const allowOff = container.dataset.allowOff === "1";
     if (wasOn && allowOff) {
       b.classList.remove("on");
@@ -291,7 +309,7 @@ function bindCatPicks(container, onChange) {
     }
     container.querySelectorAll(".cat-pick.on").forEach((x) => x.classList.remove("on"));
     b.classList.add("on");
-    if (onChange) onChange(v);
+    if (onChange) onChange(b.dataset.cat);
   });
 }
 
@@ -455,7 +473,7 @@ function isR18(p) {
   if (!p) return false;
   if (p.r18 === true) return true;
   if (Array.isArray(p.tags) && p.tags.some((t) => String(t).trim().toLowerCase() === "r18")) return true;
-  return String(p.category || "").trim().toLowerCase() === "r18";
+  return catsOf(p).some((c) => String(c).trim().toLowerCase() === "r18");
 }
 /* R18 是否已解锁：后端没设 R18 密钥时视为不限制 */
 function r18Unlocked() { return !authState().hasR18 || !!r18Key(); }
@@ -716,8 +734,9 @@ function openLightboxById(id, bustCache) {
   document.getElementById("lbSize").textContent = fmtSize(p.size);
   document.getElementById("lbDims").textContent = `${p.width} × ${p.height}`;
   document.getElementById("lbFormat").textContent = p.mime.replace("image/", "").toUpperCase();
+  const lbCats = catsOf(p);
   document.getElementById("lbTags").innerHTML =
-    (p.category ? catChip(p.category) : `<span class="tg cat" style="--tg:#8e8e93" title="主分类未设置">${t("未分类", "Uncategorized")}</span>`)
+    (lbCats.length ? lbCats.map(catChip).join("") : `<span class="tg cat" style="--tg:#8e8e93" title="主分类未设置">${t("未分类", "Uncategorized")}</span>`)
     + p.tags.map(tagChip).join("");
   const favBtn = document.getElementById("lbToolFav");
   if (favBtn) favBtn.classList.toggle("fav-on", isFav(id));
@@ -795,7 +814,11 @@ function renderTagMenuContent() {
 
   // 主分类区（v0.15）：上传必选单选的固定大类，独立于标签体系筛选（互斥单选）；搜索标签词时隐藏聚焦结果
   const catCounts = { __none: 0 };
-  PHOTOS.forEach((p) => { const k = p.category || "__none"; catCounts[k] = (catCounts[k] || 0) + 1; });
+  PHOTOS.forEach((p) => {
+    const cs = catsOf(p);
+    if (!cs.length) catCounts.__none = (catCounts.__none || 0) + 1;
+    cs.forEach((c) => { catCounts[c] = (catCounts[c] || 0) + 1; }); // 多选：一张图计入多个分类
+  });
   const catLines = [];
   if (!q) {
     sortedCategories().forEach((c) => {
@@ -1016,10 +1039,11 @@ function initGallery() {
   }
   function basePred(p) {
     if (isR18(p) && !r18Unlocked() && !filterHitsR18()) return false;
-    // 主分类（单选互斥；空 = 未分类）
+    // 主分类（v0.19 多选数组：命中任一所选分类即可；空 = 未分类）
     if (activeCategory) {
-      if (activeCategory === "__none") { if (p.category) return false; }
-      else if (p.category !== activeCategory) return false;
+      const cats = catsOf(p);
+      if (activeCategory === "__none") { if (cats.length) return false; }
+      else if (!cats.includes(activeCategory)) return false;
     }
     // 整组筛选：组内任一标签命中即可（v0.16）
     if (activeGroupId) {
@@ -1067,7 +1091,7 @@ function initGallery() {
       <button class="pick" title="选中">✓</button>
       <button class="fav-star${isFav(p.id) ? " on" : ""}" title="${isFav(p.id) ? "取消收藏" : "收藏"}">${favSVG}</button>
       <div class="card__content">
-        <div class="card__tags">${catChip(p.category)}${p.tags.slice(0, p.category ? 2 : 3).map(tagChip).join("")}</div>
+        <div class="card__tags">${catChipsOf(p, 2)}${p.tags.slice(0, catsOf(p).length ? 2 : 3).map(tagChip).join("")}</div>
         <p class="card__meta">${fmtDate(p.takenAt)} · ${fmtSize(p.size)}</p>
       </div>
     </div>`;
@@ -1549,7 +1573,7 @@ function initUpload() {
             reject(new Error("network"));
           };
           const tags = rowSendTags(it); // 全局 ∪ 行分类（v0.14.2）
-          const category = it.category || window.__upCat || ""; // 主分类（v0.15 必选，startUpload 已校验）
+          const categories = rowSendCats(it); // 主分类数组（v0.19 必选、可多选，startUpload 已校验）
           // 标题：逐张编辑优先，否则取文件名（去扩展名）
           const title = it.title || it.f.name.replace(/\.[^.]+$/, "").trim() || undefined;
           xhr.send(JSON.stringify({
@@ -1558,7 +1582,7 @@ function initUpload() {
             mime,
             title,
             desc: it.desc || "",
-            category,
+            categories,
             tags,
           }));
         })
@@ -1579,11 +1603,11 @@ function initUpload() {
     if (uqBox && uqInp && uqInp.value.trim()) addTagChip(uqBox, uqInp.value.trim());
     const items = files.filter((it) => it.status === "ready");
     if (!items.length) return;
-    // v0.15：每张必须有主分类（行内覆盖或全局选择）
-    const missing = items.filter((it) => !(it.category || window.__upCat));
+    // v0.19：每张至少要有一个主分类（行内覆盖或全局选择，均可多选）
+    const missing = items.filter((it) => !rowSendCats(it).length);
     if (missing.length) {
       const upHintEl2 = document.getElementById("upHint");
-      if (upHintEl2) upHintEl2.innerHTML = `⚠️ 还有 ${missing.length} 张未选主分类 —— 请在上方<b>主分类（必选）</b>中选择，再点「开始上传」`;
+      if (upHintEl2) upHintEl2.innerHTML = `⚠️ 还有 ${missing.length} 张未选主分类 —— 请在上方<b>主分类（必选）</b>中选至少一个，再点「开始上传」`;
       const upCatsEl = document.getElementById("upCats");
       if (upCatsEl) {
         upCatsEl.classList.add("needs-attention");
@@ -1697,18 +1721,19 @@ function initUpload() {
   }
   refreshUqSlots();
 
-  // v0.15：主分类（必选单选）—— 全局选择应用到全部新图片，行内可覆盖
+  // v0.15 引入 / v0.19 改为多选：主分类（必选至少一个）—— 全局选择应用到全部新图片，行内可覆盖
   const upCatsEl = document.getElementById("upCats");
-  renderCatPicks(upCatsEl, null);
+  window.__upCats = [];
+  renderCatPicks(upCatsEl, window.__upCats);
   window.__refreshUpCatPicks = () => {
     const el = document.getElementById("upCats");
-    if (el) renderCatPicks(el, window.__upCat || null);
+    if (el) renderCatPicks(el, window.__upCats || []);
   };
-  bindCatPicks(upCatsEl, (v) => {
-    window.__upCat = v || null;
+  bindCatPicks(upCatsEl, (list) => {
+    window.__upCats = Array.isArray(list) ? list : [];
     renderAllUqRowTags(); // 全局主分类变化 → 每行最终主分类 chip 同步
-    // 有主分类后可自动开传：若此前被校验拦下（或新加文件后未计时），现在重新排 15 秒
-    if (v && files.some((it) => it.status === "ready")) {
+    // 选了主分类后可自动开传：若此前被校验拦下（或新加文件后未计时），现在重新排 15 秒
+    if (window.__upCats.length && files.some((it) => it.status === "ready")) {
       clearTimeout(window.__uqAutoTimer);
       window.__uqAutoTimer = setTimeout(() => startUpload(), 15000);
       const upHintEl3 = document.getElementById("upHint");
@@ -1807,7 +1832,7 @@ async function applyBatchTag() {
   okBtn.disabled = true;
   try {
     const ids = [...selected];
-    const catSel = selCatOf(document.getElementById("btCats")); // null = 不改主分类（v0.15）
+    const catSel = selCatsOf(document.getElementById("btCats")); // [] = 不改主分类（v0.19 多选）
     await Promise.all(ids.map(async (id) => {
       const p = PHOTOS.find((x) => x.id === id);
       if (!p) return;
@@ -1818,7 +1843,7 @@ async function applyBatchTag() {
       await apiFetch(`/api/photos/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags: next, ...(catSel ? { category: catSel } : {}) }),
+        body: JSON.stringify({ tags: next, ...(catSel.length ? { categories: catSel } : {}) }),
       });
     }));
     document.getElementById("batchTagModal").classList.remove("open");
@@ -1838,7 +1863,7 @@ function openEditModal(id) {
   if (!p) return;
   editTargetId = id;
   document.getElementById("edDesc").value = p.desc || "";
-  renderCatPicks(document.getElementById("edCats"), p.category || null); // v0.15 主分类
+  renderCatPicks(document.getElementById("edCats"), catsOf(p)); // v0.19 主分类（多选）
   const box = document.getElementById("edTagBox");
   box.querySelectorAll(".t").forEach((el) => el.remove());
   (p.tags || []).forEach((t) => addTagChip(box, t));
@@ -1861,7 +1886,7 @@ async function saveEditModal() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         desc: document.getElementById("edDesc").value.trim(),
-        category: selCatOf(document.getElementById("edCats")) || "", // v0.15 主分类
+        categories: selCatsOf(document.getElementById("edCats")), // v0.19 主分类（多选数组）
         tags: tagsOfBox(document.getElementById("edTagBox")),
         r18: !!(document.getElementById("edR18") && document.getElementById("edR18").checked), // v0.16 R18 独立开关
       }),
@@ -2466,7 +2491,7 @@ function openUqEdit(it) {
   const m = document.getElementById("uqModal");
   if (!m) return;
   document.getElementById("uqDesc").value = it.desc || "";
-  renderCatPicks(document.getElementById("uqCatPick"), it.category || null); // v0.15 行内主分类覆盖
+  renderCatPicks(document.getElementById("uqCatPick"), Array.isArray(it.categories) ? it.categories : []); // v0.19 行内主分类覆盖（多选）
   const box = document.getElementById("uqTagBox");
   box.querySelectorAll(".t").forEach((el) => el.remove());
   if (Array.isArray(it.tags)) it.tags.forEach((t) => addTagChip(box, t));
@@ -2479,13 +2504,13 @@ function saveUqEdit() {
   if (!it) return;
   const desc = document.getElementById("uqDesc").value.trim();
   const tags = tagsOfBox(document.getElementById("uqTagBox"));
-  const cat = selCatOf(document.getElementById("uqCatPick"));
+  const cats = selCatsOf(document.getElementById("uqCatPick"));
   it.desc = desc || null;
   it.tags = tags.length ? tags : undefined; // undefined → 跟随全局标签
-  it.category = cat || undefined; // undefined → 跟随全局主分类（v0.15）
+  it.categories = cats.length ? cats : undefined; // undefined → 跟随全局主分类（v0.19 多选）
   const nameRow = it.row && it.row.querySelector(".uq-name-row");
   if (nameRow) {
-    const edited = !!(it.desc || it.tags || it.category);
+    const edited = !!(it.desc || it.tags || it.categories);
     nameRow.innerHTML = `<span class="name">${esc(it.f.name)}</span>` + (edited ? `<span class="edited-mark">已编辑</span>` : "");
   }
   document.getElementById("uqModal").classList.remove("open");
@@ -2631,7 +2656,10 @@ function mgrPills(tagObjs, counts) {
 /* ---------- 主分类管理块（v0.15：分组视图顶部） ---------- */
 function catMgrBlockHTML() {
   const catUsed = {};
-  PHOTOS.forEach((p) => { const k = p.category || "__none"; catUsed[k] = (catUsed[k] || 0) + 1; });
+  PHOTOS.forEach((p) => {
+    const cs = catsOf(p);
+    cs.forEach((c) => { catUsed[c] = (catUsed[c] || 0) + 1; }); // 多选：一张图计入多个分类
+  });
   const cats = sortedCategories();
   return `<div class="tmgr-block">
     <div class="tmgr-head">
@@ -3010,27 +3038,36 @@ function renderAllUqRowTags() {
     if (rowEl.__item) renderUqRowTags(rowEl.__item);
   });
 }
-/* 行最终主分类 = 行内覆盖 ?? 上传面板全局选择（v0.15 必选） */
-function uqRowCategory(it) {
-  return it.category || window.__upCat || null;
+/* 行最终主分类数组 = 行内覆盖 ?? 上传面板全局选择（v0.19 必选、可多选） */
+function uqRowCats(it) {
+  const own = Array.isArray(it.categories) ? it.categories : [];
+  return own.length ? own : (window.__upCats || []);
 }
-/* 行 chips = 该行专属分类（拖入的）+ 主分类（若有行内覆盖）；点 ✕ 移除。全局标签见右侧顶部输入 */
+/* 行发送用的主分类（与 uqRowCats 同义，语义更明确） */
+function rowSendCats(it) {
+  return uqRowCats(it);
+}
+/* 行 chips = 主分类（行内覆盖时带 ✕ 可取消）+ 该行专属标签；全局标签见右侧顶部输入 */
 function renderUqRowTags(it) {
   const row = it.row;
   if (!row) return;
   const el = row.querySelector(".uq-tags");
   if (!el) return;
   const tags = it.tags || [];
-  const cat = uqRowCategory(it);
+  const cats = uqRowCats(it);
+  const own = Array.isArray(it.categories) && it.categories.length;
   el.innerHTML =
-    (cat ? `<span class="cls cat" data-cat="${escAttr(cat)}" style="--tg:${catColor(cat) || "#8e8e93"}" title="主分类 · 点击 ✕ 取消单张覆盖，回到跟随全局">
-        <i class="dot"></i>${esc(cat)}<i class="x">✕</i></span>` : "")
+    cats.map((cat) => `<span class="cls cat" data-cat="${escAttr(cat)}" style="--tg:${catColor(cat) || "#8e8e93"}"
+        title="主分类${own ? "（单张覆盖）· 点 ✕ 取消覆盖，回到跟随全局" : ""}">
+        <i class="dot"></i>${esc(cat)}${own ? `<i class="x">✕</i>` : ""}</span>`).join("")
     + tags.map((n) => `<span class="cls" data-tag="${escAttr(n)}">${esc(n)}<i class="x" title="移除此分类">✕</i></span>`).join("");
   el.querySelectorAll(".cls").forEach((c) => {
     c.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (c.dataset.cat !== undefined) {
-        it.category = undefined; // 取消行内覆盖 → 跟随全局主分类
+      if (c.dataset.cat !== undefined && Array.isArray(it.categories)) {
+        // 取消行内覆盖 → 跟随全局主分类（只保留其余行内分类；全取消则跟随全局）
+        it.categories = it.categories.filter((x) => x !== c.dataset.cat);
+        if (!it.categories.length) it.categories = undefined;
         renderUqRowTags(it);
         return;
       }
@@ -3204,7 +3241,7 @@ function openCatModal(mode, payload) {
   /* ---- 删除确认 ---- */
   if (mode === "remove-category") {
     const name = payload;
-    const n = PHOTOS.filter((p) => p.category === name).length;
+    const n = PHOTOS.filter((p) => catsOf(p).includes(name)).length;
     body.innerHTML = `
       <h3>删除主分类「${esc(name)}」？</h3>
       <p>将把引用该分类的图片主分类<b>清空（变为未分类）</b>${n ? `（本次列表可见 ${n} 张）` : ""}。此操作不可恢复。</p>
@@ -3796,7 +3833,7 @@ function initSearch() {
       }
     }
     const list = PHOTOS.filter((p) => {
-      if (String(p.category || "").toLowerCase().includes(keyword)) return true; // 主分类可搜（v0.15）
+      if (catsOf(p).some((c) => String(c).toLowerCase().includes(keyword))) return true; // 主分类可搜（v0.15 / v0.19 多选）
       if ((p.title + " " + p.desc).toLowerCase().includes(keyword)) return true;
       return p.tags.some((t) => t.toLowerCase().includes(keyword) || aliasNames.has(t));
     });
@@ -3814,7 +3851,7 @@ function initSearch() {
     results.innerHTML = list.map((p) => `
       <div class="search-card" data-id="${p.id}">
         <img loading="lazy" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
-        <div class="t">${catChip(p.category)}${p.tags.length ? p.tags.slice(0, 2).map(tagChip).join(" / ") : ""}</div>
+        <div class="t">${catChipsOf(p, 2)}${p.tags.length ? p.tags.slice(0, 2).map(tagChip).join(" / ") : ""}</div>
       </div>`).join("");
     results.querySelectorAll(".search-card").forEach((c) => {
       c.onclick = () => openLightboxById(c.dataset.id);

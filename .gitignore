@@ -6,5 +6,6 @@ node_modules/
 .netlify/
 .ntl
 netlify/.netlify/
-# 角色标签导入脚本自动生成的配置备份
+# 脚本自动生成的配置 / 照片元数据备份
 scripts/data/backup-tags-config-*.json
+scripts/data/backup-photos-*.json

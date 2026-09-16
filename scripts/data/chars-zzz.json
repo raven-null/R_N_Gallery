@@ -65,6 +65,10 @@
     { "name": "佩洛伊斯", "aliases": [] },
     { "name": "蕾米埃尔·丹", "aliases": ["蕾米埃尔", "Remielle"] },
     { "name": "希格莉德", "aliases": ["希格莉德·德拉叙尔"] },
-    { "name": "克拉蕾", "aliases": ["克拉蕾·弗林特", "Claret"] }
+    { "name": "克拉蕾", "aliases": ["克拉蕾·弗林特", "Claret"] },
+    { "name": "露西", "aliases": ["Lucy", "露西·德玛拉"] },
+    { "name": "派派", "aliases": ["Piper", "派派·维尔"] },
+    { "name": "伊芙琳", "aliases": ["Evelyn", "伊芙琳·舒瓦莉"] },
+    { "name": "波可娜", "aliases": ["Pulchra"] }
   ]
 }

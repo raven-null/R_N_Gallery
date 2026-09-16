@@ -68,6 +68,9 @@
     { "name": "桂乃芬", "aliases": ["Guinaifen"] },
     { "name": "加拉赫", "aliases": ["Gallagher"] },
     { "name": "米沙", "aliases": ["Misha"] },
-    { "name": "貊泽", "aliases": ["Moze"] }
+    { "name": "貊泽", "aliases": ["Moze"] },
+    { "name": "希露瓦", "aliases": ["Serval"] },
+    { "name": "银枝", "aliases": ["Argenti"] },
+    { "name": "真理医生", "aliases": ["Dr. Ratio", "拉帝奥"] }
   ]
 }

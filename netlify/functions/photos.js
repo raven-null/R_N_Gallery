@@ -15,8 +15,8 @@
      PUT    /api/tags                  整体保存标签配置（删除主分类会同步清空照片引用）
      POST   /api/tags/rename           标签改名/合并（同步所有照片）
      POST   /api/tags/remove           删除标签（同步从照片移除）
-     POST   /api/tags/category-rename  主分类改名（同步所有照片的 category）
-     POST   /api/tags/category-remove  删除主分类（同步清空所有照片的 category）
+     POST   /api/tags/category-rename  主分类改名（同步所有照片的 categories）
+     POST   /api/tags/category-remove  删除主分类（同步从照片的 categories 移除）
      POST   /api/photos/:id/image      覆盖原图字节（旋转等编辑后保存）
    ============================================================ */
 const {
@@ -33,7 +33,7 @@ const KEY_TAGS = "tags-config"; // 标签分组配置（v0.11 / v0.15 主分类�
 const KEY_ALBUMS = "albums-config"; // 相册配置（v0.12）
 const KEY_LOGS = "logs"; // 操作日志（v0.12）
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
-/* 内置主分类（上传必选其一；照片 meta.category 存名称，名称即引用键）
+/* 内置主分类（上传必选、可多选；照片 meta.categories 存名称数组，名称即引用键）
    首次读写配置时若 categories 缺失则自动补这份默认值 */
 const DEFAULT_CATEGORIES = [
   { name: "次元女", color: "#ff6fa5" },
@@ -45,7 +45,12 @@ const DEFAULT_CATEGORIES = [
 ];
 const sha1hex = (buf) => crypto.createHash("sha1").update(buf).digest("hex");
 const thumbKeyOf = (id) => `thumb-${id}`;
-const sanitizeCat = (v) => String(v || "").trim().slice(0, 20); // 主分类清洗（无白名单校验，宽松向前兼容）
+const sanitizeCat = (v) => String(v || "").trim().slice(0, 20); // 单个主分类名清洗（配置增删改时用）
+/* 照片主分类数组清洗：字符串 / 数组都接受，去重、去空、上限 6（v0.19 主分类改为多选） */
+function sanitizeCats(v) {
+  const arr = Array.isArray(v) ? v : (v ? [v] : []);
+  return [...new Set(arr.map((x) => sanitizeCat(x)).filter(Boolean))].slice(0, 6);
+}
 /* 主分类列表归一化：无/空 → 默认六类；补 id/color/sort，名称去重 */
 function normCategories(list) {
   const out = [];
@@ -467,7 +472,7 @@ async function upload(req) {
     id,
     title: (body.title || "").trim() || "未命名",
     desc: (body.desc || "").trim(),
-    category: sanitizeCat(body.category), // 主分类（v0.15：上传必选其一，前端强校验）
+    categories: sanitizeCats(body.categories !== undefined ? body.categories : body.category), // 主分类（v0.19 必选、可多选）
     tags: Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [],
     takenAt: body.takenAt || new Date().toISOString(),
     uploadedAt: new Date().toISOString(),
@@ -501,7 +506,11 @@ async function patch(req, id) {
   if (body.title !== undefined) meta.title = String(body.title).trim() || "未命名";
   if (body.desc !== undefined) meta.desc = String(body.desc).trim();
   if (body.tags !== undefined) meta.tags = Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [];
-  if (body.category !== undefined) meta.category = sanitizeCat(body.category); // 主分类（空串 = 清除）
+  if (body.categories !== undefined || body.category !== undefined) {
+    // 主分类（v0.19 多选数组；同时接受旧的单值 category 字段）
+    meta.categories = sanitizeCats(body.categories !== undefined ? body.categories : body.category);
+    delete meta.category; // 迁移旧字段
+  }
   if (body.r18 !== undefined) meta.r18 = body.r18 === true || body.r18 === "true" || body.r18 === 1; // R18 独立开关
   if (body.takenAt !== undefined) meta.takenAt = body.takenAt;
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
@@ -616,7 +625,7 @@ async function importStatic(req) {
         id,
         title: (title || "").trim() || "未命名",
         desc: "",
-        category: sanitizeCat(item && item.category),
+        categories: sanitizeCats(item && (item.categories !== undefined ? item.categories : item.category)),
         tags,
         takenAt: new Date().toISOString(),
         uploadedAt: new Date().toISOString(),
@@ -643,8 +652,8 @@ async function importStatic(req) {
 /* ============================================================
    标签体系（v0.11 / v0.15 主分类）：Blob key: tags-config
    - 照片 meta.tags 仍存「标签名」数组（旧数据零迁移，名称即引用键）
-   - meta.category 存主分类名（v0.15：上传必选其一，单值互斥）
-   - 配置描述：categories（主分类）/ groups（作品等分组）/ tags（组内标签、别名、颜色）
+   - meta.categories 存主分类名数组（v0.19：上传必选、可多选；旧 meta.category 单值字段自动迁移）
+   - 配置描述：categories（主分类字典）/ groups（作品等分组）/ tags（组内标签、别名、颜色）
    ============================================================ */
 
 async function loadConfig(s) {
@@ -675,7 +684,14 @@ async function rewritePhotos(s, fn) {
   return changed;
 }
 
-/* 遍历全部照片元数据按主分类改写：fn(category) 返回字符串则写回（"" 即清除），返回 null 跳过 */
+/* 读取照片的主分类数组（兼容旧单值 category 字段） */
+function catsOfMeta(m) {
+  if (Array.isArray(m.categories)) return sanitizeCats(m.categories);
+  return m.category ? sanitizeCats([m.category]) : [];
+}
+
+/* 遍历全部照片元数据改写主分类：fn(cats 数组) 返回新数组则写回（[] = 清空），返回 null 跳过；
+   顺带把旧的单值 category 字段迁移掉（v0.19：主分类改为多选数组） */
 async function rewriteByCategory(s, fn) {
   let cursor;
   let changed = 0;
@@ -683,11 +699,25 @@ async function rewriteByCategory(s, fn) {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
     for (const item of res.blobs) {
       const m = await s.get(item.key, { type: "json" });
-      if (!m || typeof m.category !== "string") continue;
-      const next = fn(m.category);
-      if (next === null || next === undefined) continue;
-      if (String(next) === m.category) continue;
-      m.category = String(next);
+      if (!m) continue;
+      const cur = catsOfMeta(m);
+      const hasOldField = m.category !== undefined;
+      if (!cur.length && !hasOldField) continue;
+      const next = fn(cur);
+      if (next === null || next === undefined) {
+        if (hasOldField) { // 只迁移字段：把 category 归一为 categories
+          m.categories = cur;
+          delete m.category;
+          await s.set(item.key, JSON.stringify(m));
+          changed++;
+        }
+        continue;
+      }
+      const norm = sanitizeCats(next);
+      const same = norm.length === cur.length && norm.every((x, i) => x === cur[i]);
+      if (same && !hasOldField) continue;
+      m.categories = norm;
+      delete m.category;
       await s.set(item.key, JSON.stringify(m));
       changed++;
     }
@@ -759,9 +789,14 @@ async function tagsPut(req) {
   const cfg = { categories, groups, tags };
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
-  // 本次提交删除了某主分类 → 同步清空引用照片的 category（v0.15）
+  // 本次提交删除了某主分类 → 同步从引用照片的 categories 数组里移除（v0.15 / v0.19 多选）
   const del = new Set((oldCfg.categories || []).filter((o) => !categories.some((n) => n.name === o.name)).map((c) => c.name));
-  const cleared = del.size ? await rewriteByCategory(s, (cat) => (del.has(cat) ? "" : null)) : 0;
+  const cleared = del.size
+    ? await rewriteByCategory(s, (cats) => {
+        const next = cats.filter((c) => !del.has(c));
+        return next.length === cats.length ? null : next;
+      })
+    : 0;
 
   logAction(req, "保存标签配置", `${categories.length} 主分类 / ${groups.length} 组 / ${tags.length} 标签` + (cleared ? `（清空 ${cleared} 张引用已删主分类）` : ""));
   return json({ ok: true, config: cfg, clearedPhotos: cleared });
@@ -863,7 +898,7 @@ async function categoryRename(req) {
   cfg.categories = cats;
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
-  const photos = await rewriteByCategory(s, (cat) => (cat === from ? to : null));
+  const photos = await rewriteByCategory(s, (cats) => (cats.includes(from) ? cats.map((c) => (c === from ? to : c)) : null));
   logAction(req, "主分类改名", `${from} → ${to}（${photos} 张照片）`);
   return json({ ok: true, photos });
 }
@@ -886,7 +921,7 @@ async function categoryRemove(req) {
   if (cfg.categories.length === before) return notFound(`主分类不存在: ${name}`);
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
-  const photos = await rewriteByCategory(s, (cat) => (cat === name ? "" : null));
+  const photos = await rewriteByCategory(s, (cats) => (cats.includes(name) ? cats.filter((c) => c !== name) : null));
   logAction(req, "删除主分类", `${name}（清空 ${photos} 张照片的分类）`);
   return json({ ok: true, photos });
 }

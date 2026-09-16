@@ -14,6 +14,8 @@
      node scripts/import-chars.js --pending                         # 连「待核对候选角色」一起导入
      node scripts/import-chars.js --only=genshin,zzz                # 只导部分游戏
      node scripts/import-chars.js --no-work-tag                     # 不补作品级同名标签
+     node scripts/import-chars.js --reset                           # 先清空现有组与标签，再导入（保留主分类）
+   也支持环境变量：GALLERY_URL / GALLERY_TOKEN（避免密码进命令历史）
    ============================================================ */
 "use strict";
 
@@ -31,12 +33,15 @@ const WORK_TAG_ALIASES = {
 
 function parseArgs(argv) {
   const a = {
-    url: "http://localhost:8787", token: "", pending: false, dryRun: false,
+    url: process.env.GALLERY_URL || "http://localhost:8787",
+    token: process.env.GALLERY_TOKEN || "",
+    pending: false, dryRun: false, reset: false,
     only: null, workTag: true, help: false,
   };
   for (const s of argv.slice(2)) {
     if (s === "--pending") a.pending = true;
     else if (s === "--dry-run") a.dryRun = true;
+    else if (s === "--reset") a.reset = true;
     else if (s === "--no-work-tag") a.workTag = false;
     else if (s === "--help" || s === "-h") a.help = true;
     else if (s.startsWith("--url=")) a.url = s.slice(6).replace(/\/+$/, "");
@@ -44,6 +49,7 @@ function parseArgs(argv) {
     else if (s.startsWith("--only=")) a.only = s.slice(7).split(",").map((x) => x.trim()).filter(Boolean);
     else console.warn(`忽略未知参数：${s}`);
   }
+  a.url = a.url.replace(/\/+$/, "");
   return a;
 }
 
@@ -51,10 +57,10 @@ function usage() {
   console.log(`
 角色标签导入 · 用法
   node scripts/import-chars.js [--url=...] [--token=...] [--dry-run] [--pending]
-                              [--only=genshin,starrail,zzz] [--no-work-tag]
+                              [--only=genshin,starrail,zzz] [--no-work-tag] [--reset]
 
-  --url    图库地址（默认 http://localhost:8787）
-  --token  访问密码（线上启用门禁后必填，就是设置页里那个访问密码）
+  --url    图库地址（默认 http://localhost:8787，可用环境变量 GALLERY_URL）
+  --token  访问密码（启用门禁后必填，可用环境变量 GALLERY_TOKEN）
   --dry-run  只预览将要新增的内容，不写入
   --pending  一并导入 chars-pending.json 里「待核对」的候选角色
   --only     只导入指定游戏
@@ -171,6 +177,13 @@ async function main() {
   }
   const before = { groups: cfg.groups.length, tags: cfg.tags.length };
   console.log(`现有配置：${before.groups} 组 / ${before.tags} 标签`);
+  const original = JSON.parse(JSON.stringify(cfg)); // 导入前快照（备份用）
+
+  if (args.reset) {
+    console.log(`--reset：清空原有 ${before.groups} 组 / ${before.tags} 标签（照片数据与主分类保留）`);
+    cfg.groups = [];
+    cfg.tags = [];
+  }
 
   const report = merge(cfg, groups, args);
   console.log("\n── 导入预览 ──");
@@ -186,12 +199,12 @@ async function main() {
 
   if (args.dryRun) { console.log("\n（dry-run：未写入任何数据）\n"); return; }
 
-  // 备份现有配置
+  // 备份「导入前」的配置
   try {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backup = path.join(DATA_DIR, `backup-tags-config-${stamp}.json`);
-    fs.writeFileSync(backup, JSON.stringify(cfg, null, 2), "utf8");
-    console.log(`\n已备份现有配置 → ${path.relative(process.cwd(), backup)}`);
+    fs.writeFileSync(backup, JSON.stringify(original, null, 2), "utf8");
+    console.log(`\n已备份导入前的配置 → ${path.relative(process.cwd(), backup)}`);
   } catch (e) { console.warn(`备份失败（不影响导入）：${e.message}`); }
 
   // 注意：必须原样回传 categories，否则自定义主分类会被默认值覆盖

@@ -249,12 +249,13 @@ async function checkR18(req, url, cfg) {
   return !!k && sha256hex(k) === c.r18Hash;
 }
 
-/* R18 判定：独立字段 r18 === true，或标签含 r18，或主分类为 r18 */
+/* R18 判定：独立字段 r18 === true，或标签含 r18，或主分类含 r18（v0.19 主分类为多选数组） */
 function isR18Photo(p) {
   if (!p) return false;
   if (p.r18 === true) return true;
   if (Array.isArray(p.tags) && p.tags.some((t) => String(t).trim().toLowerCase() === "r18")) return true;
-  return String(p.category || "").trim().toLowerCase() === "r18";
+  const cats = Array.isArray(p.categories) ? p.categories : (p.category ? [p.category] : []);
+  return cats.some((c) => String(c).trim().toLowerCase() === "r18");
 }
 
 module.exports = {

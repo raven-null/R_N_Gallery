@@ -504,3 +504,12 @@ async function aiTagSearch(query) {
   - 参数：`--url` `--token`（线上门禁密码）`--dry-run`（只预览）`--pending`（含候选）`--only=` `--no-work-tag`；写入前自动备份到 `scripts/data/backup-tags-config-*.json`（已在 .gitignore）
   - 用法：`node scripts/import-chars.js --url=https://<站点> --token=<访问密码>`（本地 dev 直接 `node scripts/import-chars.js`）
 - 实测：dry-run / 首次导入（3 组 217 标签，别名如 胡桃→核桃·Hu Tao）/ 复跑幂等（新增 0）/ 主分类保留，全部通过
+
+### 批次 12 · 主分类改为多选 + 历史数据迁移（v0.19，2026-09-16）✅
+> 起因：历史数据里 85 张照片同时打了多个分类名（插画+次元女 58、插画+风景 26、三者 1），实际用法是「插画=画风、次元女=人物向」的叠加，与单选互斥的模型不符。
+- 数据模型：照片主分类由单值 `meta.category` 改为数组 `meta.categories`（去重、上限 6）；后端全部读写路径兼容旧单值字段（`catsOfMeta()` 归一 + 写入时 `delete meta.category` 自动迁移）
+- 后端：上传 / PATCH / URL 导入 / category-rename / category-remove / PUT 删除分类，全部改为数组语义；`_lib.isR18Photo()` 支持「主分类数组含 r18」判定
+- 前端：主分类 chips 改为多选（容器 `data-multi="1"`），上传（必选至少一个）、队列行内覆盖（可逐个取消）、图片编辑、批量设置全部支持多选；卡片显示前 2 个 +N 折叠，灯箱显示全部；筛选按「包含任一分类」匹配，未分类 = 数组为空；搜索与主分类计数按数组
+- 迁移脚本 `scripts/migrate-photos.js`：把照片标签里的主分类名搬进 `categories`（默认从 tags 移除，避免同一信息重复），并把旧作品名合并到新名（星穹铁道 / 崩坏·星穹铁道 → 崩坏：星穹铁道）；支持 `--dry-run` `--keep-tags` `--no-merge` `--merge "旧=新"` `--r18key`
+- 线上执行：迁移前备份 104 张照片元数据与标签配置到 `scripts/data/backup-*.json`（已 gitignore）；迁移 92 张（91 张分类迁移 + 1 张作品名合并）
+- 教训：**先部署后端再跑数据迁移**。首次迁移时线上仍是旧版函数，`categories` 字段被旧代码忽略，导致分类名已从 tags 移除却没写进新字段；已用备份 + 重新计算恢复，未造成数据丢失
