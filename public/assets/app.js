@@ -1119,6 +1119,7 @@ function initGallery() {
   const grid = document.getElementById("grid");
   const lightbox = document.getElementById("lightbox");
   const lbImg = document.getElementById("lbImg");
+  let sentinel = null; // 滚动加载哨兵（v0.25 引入；v0.26 修复：声明提前，避免渲染时未初始化）
 
   // 标签筛选菜单（v0.11：分组视图 + 搜索，内容由 renderTagMenuContent 渲染）
   const fabBtn = document.getElementById("fabBtn");
@@ -1338,6 +1339,7 @@ function initGallery() {
     // 视口出现动画（仅首次整批；滚动加载的新卡直接可见，避免闪屏）
     initReveal(grid, ".card");
     initImgRelease(); // v0.25：性能模式下回收屏外卡片图片
+    scheduleFill(); // v0.26：渲染后补足视口（首屏一次没填满就继续追加）
   }
   window.__renderGallery = () => render();
   // v0.24：后台补齐照片后，把新数据纳入当前筛选；显示数量不多时直接重建列表（保留已显示张数）
@@ -1364,24 +1366,52 @@ function initGallery() {
     }
     updateLoadMore();
     scrollBusy = false;
+    scheduleFill(); // 追加后继续补足视口（可能一次追加还不够填满）
   }
   window.__appendMore = appendMore; // 调试/测试钩子：手动触发追加
-  window.__galleryState = () => ({ shown, filtered: filtered.length, total: PHOTOS.length, busy: scrollBusy });
+  window.__galleryState = () => ({
+    shown, filtered: filtered.length, total: PHOTOS.length, busy: scrollBusy,
+    sentinel: sentinel ? { connected: sentinel.isConnected, top: Math.round(sentinel.getBoundingClientRect().top) } : null,
+  });
+
+  /* v0.26 修复滚动加载失效：
+     IntersectionObserver 只在「交叉状态变化」时回调，而首屏 observe 时数据还没加载
+     （appendMore 空转返回），哨兵此后一直停在"已交叉"状态 —— 于是滚动再也不触发回调。
+     因此增加「主动补足」：只要哨兵还在视口 + 800px 缓冲范围内，就继续追加，
+     直到填满视口或数据加载完；滚动时也用 rAF 节流兜底一次。 */
+  function maybeFillViewport() {
+    if (!sentinel || !sentinel.isConnected) return;
+    if (scrollBusy || shown >= filtered.length) return;
+    const r = sentinel.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (r.top - 800 < vh) appendMore(); // 800 与观察器 rootMargin 保持一致
+  }
+  function scheduleFill() {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(maybeFillViewport);
+    else setTimeout(maybeFillViewport, 16);
+  }
+  let fillQueued = false;
+  window.addEventListener("scroll", () => {
+    if (fillQueued) return;
+    fillQueued = true;
+    requestAnimationFrame(() => { fillQueued = false; maybeFillViewport(); });
+  }, { passive: true });
 
   /* 无限滚动（v0.25：改用 IntersectionObserver 哨兵。
      原先监听 scroll 事件并每次读 document.body.offsetHeight，会强制同步布局，
      卡片多时滚动明显掉帧；哨兵方案的判断成本几乎为零 */
-  const sentinel = document.createElement("div");
-  sentinel.id = "gridSentinel";
-  sentinel.setAttribute("aria-hidden", "true");
-  sentinel.style.cssText = "height:1px;width:100%;pointer-events:none";
+  const sentinelEl = document.createElement("div");
+  sentinelEl.id = "gridSentinel";
+  sentinelEl.setAttribute("aria-hidden", "true");
+  sentinelEl.style.cssText = "height:1px;width:100%;pointer-events:none";
   const oldSentinel = document.getElementById("gridSentinel"); // 幂等：重复初始化时先移除旧的
-  if (oldSentinel && oldSentinel !== sentinel) oldSentinel.remove();
-  grid.parentNode.insertBefore(sentinel, grid.nextSibling);
+  if (oldSentinel && oldSentinel !== sentinelEl) oldSentinel.remove();
+  grid.parentNode.insertBefore(sentinelEl, grid.nextSibling);
+  sentinel = sentinelEl; // v0.26：观察器只负责"滚动时触发"，首屏补足交给 maybeFillViewport()
   if ("IntersectionObserver" in window) {
     new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) appendMore();
-    }, { rootMargin: "800px 0px" }).observe(sentinel);
+    }, { rootMargin: "800px 0px" }).observe(sentinelEl);
   }
 
   /* 卡片拖拽（v0.14：拖到标签管理窗口的标签上打标） */

@@ -42,6 +42,16 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   };
   window.matchMedia = window.matchMedia || (() => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
+
+  /* v0.26：模拟布局 —— jsdom 没有真实排版，这里给哨兵一个可控的"距视口顶部"位置，
+     以便复现"滚动到底应当加载更多"的场景（innerHeight 固定 800，与代码里的 800px 缓冲对应） */
+  Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+  let sentinelTop = 2000; // 初始：远在视口下方（800 + 800 缓冲之外）
+  window.Element.prototype.getBoundingClientRect = function () {
+    const isSentinel = this && this.id === "gridSentinel";
+    const top = isSentinel ? sentinelTop : 0;
+    return { top, bottom: top + 1, left: 0, right: 0, width: isSentinel ? 100 : 0, height: 1, x: 0, y: top, toJSON() { return this; } };
+  };
   window.fetch = (url, opts) => {
     const abs = String(url).startsWith("http") ? String(url) : BASE + String(url);
     const o = Object.assign({}, opts);
@@ -84,29 +94,25 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   check("滚动加载哨兵已创建", !!sentinel);
   const sentObserver = observers.find((o) => o.targets.has(sentinel));
   check("哨兵已被观察", !!sentObserver);
+
+  /* v0.26 回归验证：哨兵在视口外时不该继续加载；滚动到视口附近必须触发追加 */
+  await wait(500);
+  const stillCards = doc.querySelectorAll("#grid .card").length;
+  check("哨兵在视口外时不会乱加载", stillCards === cards0, `${stillCards} 张`);
+
+  sentinelTop = 300; // 模拟滚动：哨兵进入视口 + 800px 缓冲范围
+  window.dispatchEvent(new window.Event("scroll"));
+  await wait(600);
+  const afterScroll = doc.querySelectorAll("#grid .card").length;
+  check("滚动到底触发追加", afterScroll > cards0, `${cards0} → ${afterScroll}`);
+  if (window.__galleryState) console.log(`   内部状态：${JSON.stringify(window.__galleryState())}`);
+
   if (sentObserver) {
     const loadMoreText = () => {
       const lm = doc.getElementById("loadMore");
       return lm && lm.querySelector("span") ? lm.querySelector("span").textContent.trim() : "(无 loadMore)";
     };
-    console.log(`   追加前进度提示：${loadMoreText()}`);
-    if (window.__galleryState) console.log(`   内部状态：${JSON.stringify(window.__galleryState())}`);
-    console.log(`   观察器：${observers.map((o) => `[${String(o.opts.rootMargin || "默认")}]×${o.targets.size}`).join(" ")}`);
-    if (window.__appendMore) {
-      window.__appendMore();
-      await new Promise((r) => setTimeout(r, 300));
-      console.log(`   直接调用 __appendMore 后卡片：${doc.querySelectorAll("#grid .card").length}`);
-    }
-    try {
-      sentObserver.cb([{ target: sentinel, isIntersecting: true }]);
-    } catch (err) {
-      console.log(`   ✗ 追加时抛出异常：${err && err.message}`);
-      console.log(String((err && err.stack) || "").split("\n").slice(0, 6).join("\n"));
-    }
-    await new Promise((r) => setTimeout(r, 600));
-    const cards1 = doc.querySelectorAll("#grid .card").length;
-    check("哨兵触发后追加卡片", cards1 > cards0, `${cards0} → ${cards1}`);
-    console.log(`   追加后进度提示：${loadMoreText()}`);
+    console.log(`   进度提示：${loadMoreText()}`);
   }
 
   const releaseIO = observers.find((o) => String(o.opts.rootMargin || "").includes("150%"));
