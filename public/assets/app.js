@@ -846,7 +846,6 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     document.querySelectorAll(".lightbox.open, .modal-mask.open").forEach((el) => el.classList.remove("open"));
-    if (window.__stopSlide) window.__stopSlide();
     if (selectMode) exitSelectMode();
   }
 });
@@ -931,27 +930,10 @@ function openLightboxById(id, bustCache) {
   } else {
     img.src = busted(wantFull ? p.url : thumb);
   }
-  const d = document.getElementById("lbDesc");
-  if (p.desc && p.desc.trim()) {
-    d.textContent = p.desc;
-    d.hidden = false;
-  } else {
-    d.textContent = "";
-    d.hidden = true;
-  }
-  document.getElementById("lbDate").textContent = fmtDate(p.takenAt);
-  document.getElementById("lbSize").textContent = fmtSize(p.size);
-  document.getElementById("lbDims").textContent = `${p.width} × ${p.height}`;
-  document.getElementById("lbFormat").textContent = p.mime.replace("image/", "").toUpperCase();
-  const lbCats = catsOf(p);
-  document.getElementById("lbTags").innerHTML =
-    (lbCats.length ? lbCats.map(catChip).join("") : `<span class="tg cat" style="--tg:#8e8e93" title="主分类未设置">${t("未分类", "Uncategorized")}</span>`)
-    + p.tags.map(tagChip).join("");
-  const infoBtn = document.getElementById("lbToolInfo");
+  // v0.37：信息面板（描述 / 元信息 / 标签）已移除，灯箱只负责看图
   const lb = document.getElementById("lightbox");
   lb.classList.add("open");
   lb.dataset.cur = id;
-  if (infoBtn) infoBtn.classList.toggle("on", !lb.classList.contains("no-info"));
 }
 
 /* ---------- 性能模式：释放滚出很远的卡片图片（v0.25）----------
@@ -1329,7 +1311,7 @@ function initGallery() {
     // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
     // 老数据缺尺寸时不写，退回原来的自然高度
     const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";
-    return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true"${ratio}>
+    return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true" title="单击看大图 · 双击编辑"${ratio}>
       <img loading="lazy" decoding="async" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
       <button class="pick" title="选中">✓</button>
       <div class="card__content">
@@ -1468,9 +1450,11 @@ function initGallery() {
       else selected.add(id);
       card.classList.toggle("sel", selected.has(id));
       updateBatchUI();
-    } else {
-      openLightbox(id);
+      return;
     }
+    // v0.37：灯箱工具条删除后，编辑入口移到这里 —— 双击卡片 = 编辑该图
+    if (e.detail >= 2) { openEditModal(id); return; }
+    openLightbox(id);
   });
 
   // 灯箱（全局实现 openLightboxById；←→ 按当前筛选视图顺序切换）
@@ -1478,7 +1462,7 @@ function initGallery() {
   const lbCloseEl = document.querySelector(".lb-close");
   const lbPrevEl = document.querySelector(".lb-prev");
   const lbNextEl = document.querySelector(".lb-next");
-  if (lbCloseEl) lbCloseEl.onclick = () => { stopSlide(); lightbox.classList.remove("open"); };
+  if (lbCloseEl) lbCloseEl.onclick = () => { lightbox.classList.remove("open"); };
   if (lbPrevEl) lbPrevEl.onclick = () => step(-1);
   if (lbNextEl) lbNextEl.onclick = () => step(1);
   function step(d) {
@@ -1494,160 +1478,7 @@ function initGallery() {
     if (!lightbox.classList.contains("open")) return;
     if (e.key === "ArrowLeft") step(-1);
     if (e.key === "ArrowRight") step(1);
-    if (e.key === " ") { e.preventDefault(); toggleSlide(); } // 空格播放/暂停（v0.13）
   });
-  window.__stopSlide = stopSlide;
-
-  /* ---------- 灯箱工具条（v0.11.2；收藏按钮已在 v0.35 移除，改用「加入相册」） ---------- */
-  const lbToolInfo = document.getElementById("lbToolInfo");
-  const lbToolRot = document.getElementById("lbToolRot");
-  const lbToolDl = document.getElementById("lbToolDl");
-  const lbToolEdit = document.getElementById("lbToolEdit");
-  const curPhoto = () => PHOTOS.find((x) => x.id === lightbox.dataset.cur);
-
-  if (lbToolInfo) {
-    lbToolInfo.onclick = () => {
-      const off = lightbox.classList.toggle("no-info");
-      lbToolInfo.classList.toggle("on", !off);
-    };
-  }
-  if (lbToolRot) {
-    lbToolRot.onclick = async () => {
-      const p = curPhoto();
-      if (!p || lbToolRot.disabled) return;
-      lbToolRot.disabled = true;
-      try {
-        const res = await fetch(p.url, { cache: "reload" });
-        if (!res.ok) throw new Error("图片读取失败");
-        const blob = await res.blob();
-        const bmp = await createImageBitmap(blob);
-        const canvas = document.createElement("canvas");
-        canvas.width = bmp.height;
-        canvas.height = bmp.width;
-        const ctx = canvas.getContext("2d");
-        ctx.imageSmoothingQuality = "high";
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate(Math.PI / 2);
-        ctx.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
-        bmp.close();
-        let dataUrl = canvas.toDataURL("image/webp", 0.92);
-        let mime = "image/webp";
-        if (!dataUrl.startsWith("data:image/webp")) {
-          mime = "image/jpeg";
-          dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-        }
-        let thumbDataUrl = null;
-        try { thumbDataUrl = await makeThumbDataUrl(dataUrl); } catch (e) { /* ignore */ }
-        const r = await apiFetch(`/api/photos/${p.id}/image`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dataBase64: dataUrl, thumbBase64: thumbDataUrl }),
-        });
-        const d = await r.json();
-        if (!d.ok) throw new Error(d.error || "保存失败");
-        await loadData();
-        if (window.__refreshGallery) window.__refreshGallery();
-        openLightboxById(p.id, true); // 绕过 immutable 缓存，展示旋转后新图
-      } catch (err) {
-        alert("旋转失败：" + (err && err.message ? err.message : err));
-      }
-      lbToolRot.disabled = false;
-    };
-  }
-  if (lbToolDl) {
-    lbToolDl.onclick = () => {
-      const p = curPhoto();
-      if (!p) return;
-      const ext = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" }[p.mime] || "jpg";
-      const a = document.createElement("a");
-      a.href = `/api/photos/${p.id}/raw`;
-      a.download = `${String(p.title || "photo").replace(/[\\/:*?"<>|]/g, "_")}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    };
-  }
-  if (lbToolEdit) {
-    lbToolEdit.onclick = () => {
-      const p = curPhoto();
-      if (p) openEditModal(p.id);
-    };
-  }
-  const lbToolAlbum = document.getElementById("lbToolAlbum");
-  if (lbToolAlbum) {
-    lbToolAlbum.onclick = () => {
-      const p = curPhoto();
-      if (p) openAlbumPicker([p.id]);
-    };
-  }
-
-  /* ---------- 幻灯片放映（v0.13） ---------- */
-  const SLIDE_KEY = "rn_slide";
-  let slideTimer = null;
-  let slidePlaying = false;
-  let slideHideTimer = null;
-  const lbToolPlay = document.getElementById("lbToolPlay");
-  const slideSec = () => {
-    const v = parseInt(localStorage.getItem(SLIDE_KEY) || "5", 10);
-    return Number.isFinite(v) && v > 0 ? v : 5;
-  };
-  function stopSlide() {
-    slidePlaying = false;
-    if (slideTimer) { clearInterval(slideTimer); slideTimer = null; }
-    if (slideHideTimer) { clearTimeout(slideHideTimer); slideHideTimer = null; }
-    lightbox.classList.remove("sliding", "tools-hidden");
-    if (lbToolPlay) {
-      lbToolPlay.classList.remove("playing");
-      lbToolPlay.title = "幻灯片放映";
-    }
-    const badge = lightbox.querySelector(".lb-slide-badge");
-    if (badge) badge.remove();
-  }
-  function startSlide() {
-    const total = filtered.length || PHOTOS.length;
-    if (!total) return;
-    stopSlide();
-    slidePlaying = true;
-    lightbox.classList.add("sliding");
-    if (lbToolPlay) {
-      lbToolPlay.classList.add("playing");
-      lbToolPlay.title = "暂停（空格）";
-    }
-    // 顶部徽标提示间隔
-    const badge = document.createElement("div");
-    badge.className = "lb-slide-badge";
-    badge.textContent = `自动播放 · 每 ${slideSec()} 秒`;
-    lightbox.appendChild(badge);
-    setTimeout(() => badge.remove(), 2600);
-    slideTimer = setInterval(() => {
-      if (!lightbox.classList.contains("open")) { stopSlide(); return; }
-      document.querySelector(".lb-next").click();
-    }, slideSec() * 1000);
-    armHideTools();
-  }
-  function toggleSlide() {
-    if (slidePlaying) stopSlide();
-    else startSlide();
-  }
-  function armHideTools() {
-    if (!slidePlaying) return;
-    lightbox.classList.remove("tools-hidden");
-    if (slideHideTimer) clearTimeout(slideHideTimer);
-    slideHideTimer = setTimeout(() => lightbox.classList.add("tools-hidden"), 3000);
-  }
-  if (lbToolPlay) {
-    lbToolPlay.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleSlide();
-    });
-    lightbox.addEventListener("mousemove", armHideTools);
-  }
-  // 播放 / 暂停状态在打开灯箱时复位
-  const origOpenLb = openLightboxById;
-  window.openLightboxById = (id, bust) => {
-    if (slidePlaying) stopSlide();
-    origOpenLb(id, bust);
-  };
 
   render();
 
@@ -2981,19 +2812,7 @@ function initLang() {
 }
 
 /* 幻灯片间隔设置（v0.13） */
-function initSlideSetting() {
-  const seg = document.getElementById("slideSeg");
-  if (!seg) return;
-  const cur = localStorage.getItem("rn_slide") || "5";
-  [...seg.querySelectorAll(".seg-btn")].forEach((b) => {
-    b.classList.toggle("on", b.dataset.sec === cur);
-    b.addEventListener("click", () => {
-      [...seg.querySelectorAll(".seg-btn")].forEach((x) => x.classList.remove("on"));
-      b.classList.add("on");
-      localStorage.setItem("rn_slide", b.dataset.sec);
-    });
-  });
-}
+/* v0.37：幻灯片放映随灯箱工具条一起移除（原 initSlideSetting 一并删除） */
 
 /* ---------- 拼音匹配（v0.13：pinyin-pro CDN，离线自动降级） ---------- */
 const pinyinCache = new Map();
@@ -5010,7 +4829,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   initLogsUI();
   initWmSettings();
   initLang();
-  initSlideSetting();
   initFabHold();
   initAiChat();
 

@@ -348,11 +348,23 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       console.log("   （线上跳过相册创建与加图，避免改动真实数据）");
     }
   }
-  /* 收藏已移除；卡片上不再放任何快捷按钮（v0.36：卡片「加入相册」按钮也已删除） */
-  check("卡片不再有收藏星标", !doc.querySelector("#grid .card .fav-star"));
-  check("卡片不再有加入相册按钮", !doc.querySelector("#grid .card .alb-add"));
+  /* 灯箱信息面板与工具条已整体移除（v0.37）；编辑入口移到卡片双击 */
+  check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
+  check("灯箱不再有工具条按钮", !doc.querySelector(".lightbox .lb-tool"));
   check("灯箱不再有收藏按钮", !doc.getElementById("lbToolFav"));
   check("筛选菜单不再有收藏行", !doc.querySelector('#tagMenuList [data-tag="__fav"]'));
+  const firstCard = doc.querySelector("#grid .card");
+  if (firstCard) {
+    firstCard.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
+    await wait(400);
+    const editModal = doc.getElementById("editModal");
+    check("双击卡片打开编辑弹窗", !!editModal && editModal.classList.contains("open"));
+    if (editModal && editModal.classList.contains("open")) {
+      const cancel = doc.getElementById("edCancel");
+      if (cancel) clickEl(cancel);
+      await wait(200);
+    }
+  }
 
   /* 标签改名后界面立即更新（v0.31）——用一次性临时标签，写完就删，避免动到真实标签 */
   const uniq = "zz测试" + Math.random().toString(36).slice(2, 6);
