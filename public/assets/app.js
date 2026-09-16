@@ -3101,6 +3101,7 @@ function refreshTagManager() {
             <span class="caret">▾</span>
             <i class="dot" style="--tg:${g.color || "#ff9f0a"}"></i>${esc(g.name)}
             <span class="cnt">${items.length} 个标签</span>
+            <button class="act" data-gnew="${escAttr(g.id)}" title="在「${escAttr(g.name)}」组新建标签">＋</button>
             <button class="act" data-gact="edit" data-gid="${escAttr(g.id)}" title="编辑组">✎</button>
           </div>`;
           if (!folded) html += mgrPills(items, counts);
@@ -3112,6 +3113,7 @@ function refreshTagManager() {
         html += `<div class="tmgr-head foldable${foldedFree ? " folded" : ""}" data-gfold="__free" data-gcount="${freeNames.length}" style="margin-top:6px" title="${foldedFree ? "点击展开" : "点击折叠"}">
           <span class="caret">▾</span>
           <i class="dot"></i>未分组 · 待整理<span class="cnt">${freeNames.length}</span>
+          <button class="act" data-gnew="" title="新建「未分组」标签">＋</button>
         </div>`;
         if (!foldedFree) html += mgrPills(freeNames.map((n) => ({ name: n, color: null, group: "" })), counts);
       }
@@ -3235,6 +3237,11 @@ function refreshTagManager() {
   const openAllBtn = q("#tmgrOpenAll");
   if (openAllBtn) openAllBtn.addEventListener("click", () => setAllTmgrFold(false));
   root.querySelectorAll("[data-gact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-group", b.dataset.gid)));
+  // v0.30：组头旁的「＋」= 直接在该组新建标签（所属组已预选）
+  root.querySelectorAll("[data-gnew]").forEach((b) => b.addEventListener("click", (e) => {
+    e.stopPropagation(); // 不要触发组头折叠
+    openTagModal("new-tag", null, "", b.dataset.gnew || "");
+  }));
   root.querySelectorAll("[data-tact='edit']").forEach((b) => b.addEventListener("click", () => {
     const nm = b.dataset.tname;
     if (tagByName(nm)) openTagModal("edit-tag", nm);
@@ -4307,8 +4314,9 @@ function groupSelectHTML(sel) {
   </select>`;
 }
 
-/* 标签 / 标签组编辑弹窗。payload：标签名或组 id */
-function openTagModal(mode, payload, presetName) {
+/* 标签 / 标签组编辑弹窗。payload：标签名或组 id
+   v0.30：新增 presetGroup —— 从某个组头旁的「＋」进来时，直接把所属组预选好 */
+function openTagModal(mode, payload, presetName, presetGroup) {
   const modal = document.getElementById("tagModal");
   const body = document.getElementById("tagModalBody");
   if (!modal || !body) return;
@@ -4390,9 +4398,11 @@ function openTagModal(mode, payload, presetName) {
   if ((mode === "edit-group" || mode === "edit-tag") && !target) return closeTagModal();
 
   const editName = target ? target.name : (presetName || "");
-  const selGroup = target ? (target.group || "") : "";
+  const selGroup = target ? (target.group || "") : (presetGroup || "");
+  const presetGroupName = presetGroup ? ((TAGS.groups.find((g) => g.id === presetGroup) || {}).name || "") : "";
   const selColor = target ? (target.color || (target.group ? tagGroupColor(target.group) : null)) : null;
-  const title = isGroup ? (target ? "编辑标签组" : "新建标签组") : (target ? "编辑标签" : "新建标签");
+  const title = (isGroup ? (target ? "编辑标签组" : "新建标签组") : (target ? "编辑标签" : "新建标签"))
+    + (!target && presetGroupName ? `　→　「${presetGroupName}」组` : ""); // v0.30：从组头「＋」进来时标明目标组
 
   body.innerHTML = `
     <h3>${title}</h3>

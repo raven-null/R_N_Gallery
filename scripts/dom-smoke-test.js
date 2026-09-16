@@ -104,7 +104,17 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   window.dispatchEvent(new window.Event("scroll"));
   await wait(600);
   const afterScroll = doc.querySelectorAll("#grid .card").length;
-  check("滚动到底触发追加", afterScroll > cards0, `${cards0} → ${afterScroll}`);
+  const loadMoreTextNow = () => {
+    const lm = doc.getElementById("loadMore");
+    return lm && lm.querySelector("span") ? lm.querySelector("span").textContent.trim() : "";
+  };
+  const gsNow = window.__galleryState ? window.__galleryState() : { filtered: 0 };
+  if (gsNow.filtered > cards0) {
+    check("滚动到底触发追加", afterScroll > cards0, `${cards0} → ${afterScroll}`);
+  } else {
+    // 数据量不超过首屏时没有"更多"可加载，改为验证进度提示
+    check("数据量不足时进度提示正确", /全部加载|All loaded/.test(loadMoreTextNow()), `本次仅 ${cards0} 张，跳过追加断言`);
+  }
   if (window.__galleryState) console.log(`   内部状态：${JSON.stringify(window.__galleryState())}`);
 
   if (sentObserver) {
@@ -266,6 +276,21 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   } else {
     check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
+  }
+
+  /* 组头旁「＋」= 直接在该组新建标签，所属组预选（v0.30） */
+  const gnewBtn = doc.querySelector("#tagMgrRoot [data-gnew]");
+  check("组头有「＋」新建标签入口", !!gnewBtn);
+  if (gnewBtn) {
+    const gid = gnewBtn.dataset.gnew;
+    gnewBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await wait(300);
+    const sel = doc.querySelector("#tagModalBody #fGroup");
+    const t = modalTitle();
+    check("「＋」打开新建标签弹窗", doc.getElementById("tagModal").classList.contains("open") && t.includes("新建标签"), t);
+    check("所属组已预选", !!sel && sel.value === gid, sel ? `选中=${sel.value || "(未分组)"}` : "无组选择框");
+    closeModal();
+    await wait(200);
   }
 
   const failed = results.filter((x) => !x).length;

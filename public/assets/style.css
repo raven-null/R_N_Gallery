@@ -4077,3 +4077,24 @@ body.perf-lite .card__content {
   flex: none;
   align-items: center;
 }
+
+/* 组头旁的按钮（＋ 在该组新建标签 / ✎ 编辑组）—— v0.30 */
+.tmgr-head .act {
+  flex: none;
+  background: var(--w006);
+  border: 1px solid var(--w010);
+  border-radius: 7px;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: all 0.15s var(--ease-out);
+}
+.tmgr-head .act:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.tmgr-head.foldable .act { margin-left: 0; }
+.tmgr-head .cnt + .act { margin-left: 8px; }
