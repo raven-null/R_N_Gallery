@@ -2684,17 +2684,27 @@ let cwShown = 40;            // 左栏一次性渲染张数
 let cwList = [];             // 当前筛选后的图片列表
 const cwSel = new Set();     // 左栏点选（再拖任意一张 = 整批归类）
 const cwExtraSlots = new Set(); // 面板内临时自定义分类（不回写标签库）
+const cwOpenGroups = new Set(); // v0.20：分类工作台里展开的作品组（手风琴）
+let cwSlotQuery = "";           // v0.20：分类槽搜索关键词
+let cwOpenInited = false;
 function refreshTagManager() {
   const root = document.getElementById("tagMgrRoot");
   if (!root) return;
   const counts = tagCounts();
   const used = Object.keys(counts);
-  const view = localStorage.getItem(TMGR_VIEW_KEY) === "group" ? "group" : "classify";
+  const savedView = localStorage.getItem(TMGR_VIEW_KEY);
+  const view = savedView === "group" ? "group" : (savedView === "review" ? "review" : "classify");
+  // v0.20：离开「整理」视图时摘掉键盘监听
+  if (view !== "review" && window.__rvKey) {
+    document.removeEventListener("keydown", window.__rvKey, true);
+    window.__rvKey = null;
+  }
 
   let html = `<div class="tmgr-seg">
       <div class="seg" id="tmgrViewSeg" role="group" aria-label="视图">
         <button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
         <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>
+        <button class="seg-btn${view === "review" ? " on" : ""}" data-view="review" title="一次只处理一张图，键盘流快速分类">整理</button>
       </div>
     </div>`;
 
@@ -2727,7 +2737,7 @@ function refreshTagManager() {
         html += mgrPills(freeNames.map((n) => ({ name: n, color: null, group: "" })), counts);
       }
     }
-  } else {
+  } else if (view === "classify") {
     // 分类工作台（v0.14.4）：左=图片小卡（点选可多选），右=分类槽，拖入即打标
     html += `<div class="cw">
       <div class="cw-left">
@@ -2745,12 +2755,54 @@ function refreshTagManager() {
       <div class="cw-right">
         <div class="uq-panel">
           <div class="uq-panel-title">分类</div>
-          <div class="uq-panel-sub">拖左侧图片到分类槽 = 加上该标签；也可把图库卡片直接拖进来</div>
+          <div class="uq-panel-sub">点左侧图片选中 → 点分类槽即打标（也可拖拽）；组头可折叠，一次只展开一个作品组</div>
+          <input type="text" id="cwSlotSearch" class="uq-slot-search" placeholder="搜角色 / 作品（支持拼音，如 ht）" autocomplete="off">
           <div class="uq-panel-status" id="cwSelStatus"></div>
           <div class="uq-slots" id="cwSlots"></div>
           <div class="uq-new-slot">
             <input type="text" id="cwNewSlotInput" placeholder="+ 新分类标签，回车创建" autocomplete="off">
           </div>
+        </div>
+      </div>
+    </div>`;
+  } else if (view === "review") {
+    // v0.20 逐张整理：一次只面对一张图，主分类可点选、标签可搜索，键盘流推进
+    html += `<div class="rv">
+      <div class="rv-head">
+        <span class="rv-progress" id="rvProgress">…</span>
+        <span class="seg rv-filters" id="rvFilters" role="group">
+          <button class="seg-btn sm${rvFilter === "todo" ? " on" : ""}" data-rvf="todo" title="缺主分类或还没打过库内标签的图片">待整理</button>
+          <button class="seg-btn sm${rvFilter === "nocat" ? " on" : ""}" data-rvf="nocat">未分类</button>
+          <button class="seg-btn sm${rvFilter === "notag" ? " on" : ""}" data-rvf="notag">无标签</button>
+          <button class="seg-btn sm${rvFilter === "all" ? " on" : ""}" data-rvf="all">全部</button>
+        </span>
+      </div>
+      <div class="rv-body">
+        <div class="rv-photo">
+          <img id="rvImg" alt="">
+          <div class="rv-meta" id="rvMeta"></div>
+        </div>
+        <div class="rv-panel">
+          <div class="uq-panel">
+            <div class="uq-panel-title">主分类 <span class="req">可多选</span></div>
+            <div class="uq-cats" id="rvCats" data-multi="1"></div>
+          </div>
+          <div class="uq-panel">
+            <div class="uq-panel-title">标签</div>
+            <div class="tag-input-wrap">
+              <div class="tag-input" id="rvTagBox">
+                <input type="text" id="rvTagInput" placeholder="输入搜索 / 回车添加…" autocomplete="off">
+              </div>
+              <div class="tag-suggest" id="rvTagSuggest" hidden></div>
+            </div>
+            <div class="quick-pick show" id="rvQuick"></div>
+          </div>
+          <div class="rv-actions">
+            <button class="btn primary" id="rvApply" type="button">应用并下一张 (Enter)</button>
+            <button class="btn ghost" id="rvSkip" type="button">跳过 (S)</button>
+          </div>
+          <div class="rv-help">1-9 = 最近使用标签　｜　Backspace = 删最后一个标签　｜　Esc = 退出整理</div>
+          <div class="hint" id="rvHint"></div>
         </div>
       </div>
     </div>`;
@@ -2777,10 +2829,12 @@ function refreshTagManager() {
       b.addEventListener("click", () => {
         localStorage.setItem(TMGR_VIEW_KEY, b.dataset.view);
         refreshTagManager();
+        renderTagMenuContent(); // 整理视图改过标签后，筛选菜单计数同步刷新
       });
     });
   }
   if (view === "classify") initCwView(root);
+  if (view === "review") initReviewView(root);
   root.querySelectorAll("[data-gact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-group", b.dataset.gid)));
   root.querySelectorAll("[data-tact='edit']").forEach((b) => b.addEventListener("click", () => {
     const nm = b.dataset.tname;
@@ -2824,6 +2878,11 @@ function initCwView(root) {
     flashCwSlot(v);
   });
   const cardsEl = q("#cwCards");
+  const cwSearchEl = q("#cwSlotSearch");
+  if (cwSearchEl) {
+    cwSearchEl.value = cwSlotQuery;
+    cwSearchEl.addEventListener("input", () => { cwSlotQuery = cwSearchEl.value; renderCwSlots(); });
+  }
   if (cardsEl) {
     cardsEl.addEventListener("click", (e) => {
       const card = e.target.closest(".cw-card");
@@ -2894,6 +2953,13 @@ function initCwView(root) {
         if (window.__refreshGallery) window.__refreshGallery(); // 内部含 refreshTagManager
       } catch (err) { /* 静默 */ }
     });
+    // v0.20：点组头折叠 / 点槽给已选图片打标 / 点「最近使用」同样直接打标
+    slotsEl.addEventListener("click", (e) => {
+      const sec = e.target.closest("[data-sg]");
+      if (sec) { toggleCwGroup(sec.dataset.sg); return; }
+      const slot = e.target.closest(".uq-slot");
+      if (slot && slot.dataset.tag) cwApplyTagToSelection(slot.dataset.tag);
+    });
   }
 }
 function updateCwSelStatus(msg) {
@@ -2915,8 +2981,42 @@ function renderCwSlots() {
   const wrap = document.getElementById("cwSlots");
   if (!wrap) return;
   const counts = tagCounts();
+  // v0.20：和管理页对齐——组折叠 + 搜索 + 最近使用，避免一次平铺几百个标签
+  if (!cwOpenInited) {
+    const first = TAGS.tags.find((x) => x.group && (TAGS.groups || []).some((g) => g.id === x.group));
+    if (first) cwOpenGroups.add(first.group);
+    cwOpenInited = true;
+  }
   wrap.innerHTML = slotSectionsHTML((n) => counts[n] || 0, cwExtraSlots,
-    "还没有分类。用下方输入框创建临时分类，或先到「分组」页建好标签库再回来。");
+    "还没有分类。用下方输入框创建临时分类，或先到「分组」页建好标签库再回来。",
+    { collapsible: true, openGroups: cwOpenGroups, recent: loadRecentTags(), query: cwSlotQuery });
+}
+/* 手风琴：展开某作品组时收起其他组 */
+function toggleCwGroup(gid) {
+  if (!gid) return;
+  if (cwOpenGroups.has(gid)) cwOpenGroups.delete(gid);
+  else { cwOpenGroups.clear(); cwOpenGroups.add(gid); }
+  renderCwSlots();
+}
+/* 点分类槽 = 把该标签打到已选图片上（v0.20，免拖拽） */
+async function cwApplyTagToSelection(tag) {
+  if (!tag) return;
+  const ids = [...cwSel];
+  if (!ids.length) { updateCwSelStatus("先在左侧点选图片，再点分类槽即可打标（也可多选后一次打）"); return; }
+  const todo = ids.map((id) => PHOTOS.find((p) => p.id === id))
+    .filter((p) => p && !(p.tags || []).includes(tag));
+  if (!todo.length) { updateCwSelStatus(`已选图片都已有「${esc(tag)}」标签`); return; }
+  try {
+    await Promise.all(todo.map((p) => apiFetch(`/api/photos/${p.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags: [...new Set([...(p.tags || []), tag])].slice(0, 10) }),
+    })));
+    pushRecentTags(tag);
+    await loadData();
+    cwSel.clear();
+    if (window.__refreshGallery) window.__refreshGallery(); // 内部含 refreshTagManager
+  } catch (e) { /* 静默 */ }
 }
 function renderCwCards() {
   const wrap = document.getElementById("cwCards");
@@ -2942,6 +3042,162 @@ function renderCwCards() {
     more.hidden = rest <= 0;
     if (rest > 0) more.textContent = `再显示 ${Math.min(40, rest)} 张（已 ${Math.min(cwShown, cwList.length)}/${cwList.length}）`;
   }
+}
+
+/* ---------- 逐张整理视图（v0.20）：一次只面对一张图，键盘流快速分类 ---------- */
+let rvFilter = "todo"; // todo（缺主分类或没打过库内标签）| nocat | notag | all
+let rvIds = [];
+let rvIdx = 0;
+let rvBusy = false;
+
+function rvPickIds() {
+  const hasLibTag = (p) => (p.tags || []).some((n) => tagByName(n));
+  return PHOTOS.filter((p) => {
+    const hasCat = catsOf(p).length > 0;
+    if (rvFilter === "nocat") return !hasCat;
+    if (rvFilter === "notag") return !(p.tags || []).length;
+    if (rvFilter === "all") return true;
+    return !hasCat || !hasLibTag(p);
+  }).map((p) => p.id);
+}
+
+/* 「最近使用」快捷 chips：点一下加标签，数字键 1-9 同样可用 */
+function rvRefreshQuick() {
+  const wrap = document.getElementById("rvQuick");
+  const box = document.getElementById("rvTagBox");
+  if (!wrap || !box) return;
+  const recent = loadRecentTags();
+  if (!recent.length) {
+    wrap.innerHTML = `<div class="qp-empty">最近还没用过标签；整理几张图后这里会出现快捷入口</div>`;
+    return;
+  }
+  const used = new Set(tagsOfBox(box));
+  wrap.innerHTML = recent.map((n, i) => `<span class="qp-item${used.has(n) ? " sel" : ""}" data-tag="${escAttr(n)}" title="快捷键 ${i + 1}">
+    <span class="qp-num">${i + 1}</span>${esc(n)}</span>`).join("");
+  wrap.querySelectorAll(".qp-item").forEach((el) => el.addEventListener("click", () => {
+    const n = el.dataset.tag;
+    if (used.has(n)) {
+      [...box.querySelectorAll(".t")].forEach((c) => { if (c.childNodes[0].textContent.trim() === n) c.remove(); });
+    } else addTagChip(box, n);
+    rvRefreshQuick();
+  }));
+}
+
+function rvRender() {
+  const img = document.getElementById("rvImg");
+  const meta = document.getElementById("rvMeta");
+  const prog = document.getElementById("rvProgress");
+  const hint = document.getElementById("rvHint");
+  const box = document.getElementById("rvTagBox");
+  if (!img || !meta || !prog) return;
+  const p = PHOTOS.find((x) => x.id === rvIds[rvIdx]);
+  if (!p) {
+    img.removeAttribute("src");
+    img.classList.add("rv-empty-img");
+    meta.innerHTML = rvIds.length
+      ? `🎉 这一轮 ${rvIds.length} 张都过完了<br><span class="rv-sub">换个筛选条件可以继续；点「分组」或「分类」返回</span>`
+      : `这个筛选条件下没有需要整理的图片 🎉<br><span class="rv-sub">试试「全部」或先去上传一些图片</span>`;
+    prog.textContent = rvIds.length ? `已完成 ${rvIds.length} / ${rvIds.length}` : "没有待整理项";
+    renderCatPicks(document.getElementById("rvCats"), []);
+    if (box) box.querySelectorAll(".t").forEach((el) => el.remove());
+    if (hint) hint.textContent = "";
+    rvRefreshQuick();
+    return;
+  }
+  img.classList.remove("rv-empty-img");
+  img.src = qualityMode() === "low" ? (p.thumbUrl || p.url) : p.url; // 与原图一致，便于看清角色
+  const cats = catsOf(p);
+  meta.innerHTML = `<b>${esc(p.title || "未命名")}</b> · ${p.width}×${p.height} · ${fmtSize(p.size)} · ${fmtDate(p.uploadedAt)}`
+    + (cats.length ? ` · 当前分类：${cats.map((c) => esc(c)).join("、")}` : ` · <span style="color:var(--danger)">当前未分类</span>`);
+  prog.textContent = `第 ${rvIdx + 1} / ${rvIds.length} 张 · 还剩 ${rvIds.length - rvIdx} 张`;
+  renderCatPicks(document.getElementById("rvCats"), cats);
+  if (box) {
+    box.querySelectorAll(".t").forEach((el) => el.remove());
+    (p.tags || []).forEach((n) => addTagChip(box, n));
+    const inp = document.getElementById("rvTagInput");
+    if (inp) inp.value = "";
+  }
+  if (hint) { hint.textContent = ""; hint.style.color = ""; }
+  rvRefreshQuick();
+}
+
+async function rvApply() {
+  if (rvBusy) return;
+  const p = PHOTOS.find((x) => x.id === rvIds[rvIdx]);
+  if (!p) return;
+  const hint = document.getElementById("rvHint");
+  const cats = selCatsOf(document.getElementById("rvCats"));
+  const tags = tagsOfBox(document.getElementById("rvTagBox"));
+  rvBusy = true;
+  try {
+    const r = await apiFetch(`/api/photos/${p.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ categories: cats, tags }),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || "保存失败");
+    p.categories = cats; // 本地同步，免得每张都重拉全量
+    p.tags = tags;
+    pushRecentTags(tags.slice(-3));
+    if (window.__refreshGallery) { /* 图库墙下次筛选时用新数据 */ }
+    rvIdx++;
+    rvRender();
+  } catch (e) {
+    if (hint) { hint.style.color = "var(--danger)"; hint.textContent = "保存失败：" + e.message; }
+  }
+  rvBusy = false;
+}
+function rvSkip() { rvIdx++; rvRender(); }
+
+function initReviewView(root) {
+  rvIds = rvPickIds();
+  rvIdx = 0;
+  rvRender();
+  const q = (sel) => root.querySelector(sel);
+  const filters = q("#rvFilters");
+  if (filters) {
+    filters.querySelectorAll("[data-rvf]").forEach((b) => b.addEventListener("click", () => {
+      rvFilter = b.dataset.rvf;
+      refreshTagManager();
+    }));
+  }
+  bindCatPicks(document.getElementById("rvCats"));
+  bindTagSuggest(document.getElementById("rvTagInput"), document.getElementById("rvTagSuggest"), document.getElementById("rvTagBox"), rvRefreshQuick);
+  const apply = q("#rvApply");
+  const skip = q("#rvSkip");
+  if (apply) apply.addEventListener("click", rvApply);
+  if (skip) skip.addEventListener("click", rvSkip);
+
+  // 键盘流：Enter 应用并下一张 / S 跳过 / 1-9 最近使用 / Esc 退出
+  if (window.__rvKey) document.removeEventListener("keydown", window.__rvKey, true);
+  window.__rvKey = (e) => {
+    if (localStorage.getItem(TMGR_VIEW_KEY) !== "review") return;
+    if (document.querySelector(".modal-mask.open")) return;
+    const inp = document.getElementById("rvTagInput");
+    const typing = !!(inp && document.activeElement === inp && inp.value.trim());
+    if (e.key === "Enter") { e.preventDefault(); rvApply(); return; }
+    if (e.key === "Escape") {
+      localStorage.setItem(TMGR_VIEW_KEY, "group");
+      document.removeEventListener("keydown", window.__rvKey, true);
+      window.__rvKey = null;
+      refreshTagManager();
+      renderTagMenuContent();
+      return;
+    }
+    if (typing) return;
+    if (e.key === "s" || e.key === "S") { e.preventDefault(); rvSkip(); return; }
+    if (/^[1-9]$/.test(e.key)) {
+      const chips = [...document.querySelectorAll("#rvQuick .qp-item")];
+      const el = chips[Number(e.key) - 1];
+      if (el && el.dataset.tag) {
+        addTagChip(document.getElementById("rvTagBox"), el.dataset.tag);
+        rvRefreshQuick();
+      }
+      e.preventDefault();
+    }
+  };
+  document.addEventListener("keydown", window.__rvKey, true);
 }
 
 /* ---------- 拖拽分类（v0.14：把图库卡片拖到分组视图标签 pill 上打标） ---------- */

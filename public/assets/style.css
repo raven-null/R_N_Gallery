@@ -3879,3 +3879,45 @@ body.select-mode .card .pick { display: grid; }
   background: color-mix(in srgb, var(--accent) 32%, transparent);
 }
 .tag-group-head .gfilter + .caret { margin-left: 6px; }
+
+/* ============================================================
+   逐张整理视图（v0.20）：一次一张图 + 键盘流
+   ============================================================ */
+.rv { display: flex; flex-direction: column; gap: 12px; margin-bottom: 10px; }
+.rv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.rv-progress { font-size: 12.5px; font-weight: 600; color: var(--text-dim); }
+.rv-body { display: flex; gap: 18px; align-items: flex-start; }
+.rv-photo { flex: 1 1 52%; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.rv-photo img {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--w008);
+}
+[data-theme="light"] .rv-photo img { background: rgba(0, 0, 0, 0.06); }
+.rv-photo img.rv-empty-img { min-height: 200px; }
+.rv-meta { font-size: 12.5px; line-height: 1.65; color: var(--text-dim); }
+.rv-meta .rv-sub { font-size: 12px; color: var(--text-faint); }
+.rv-panel { flex: 1 1 48%; min-width: 280px; display: flex; flex-direction: column; gap: 10px; }
+.rv-actions { display: flex; gap: 8px; }
+.rv-actions .btn { flex: 1; justify-content: center; }
+.rv-help { font-size: 11.5px; line-height: 1.7; color: var(--text-faint); }
+.qp-item .qp-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--w010);
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-weight: 700;
+  flex: none;
+}
+@media (max-width: 900px) {
+  .rv-body { flex-direction: column; }
+  .rv-panel { min-width: 0; width: 100%; }
+}
