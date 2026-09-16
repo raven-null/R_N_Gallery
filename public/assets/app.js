@@ -305,13 +305,15 @@ function catChipsOf(p, max = 2) {
   return cats.slice(0, max).map(catChip).join("")
     + (cats.length > max ? `<span class="tg cat" style="--tg:#8e8e93" title="${escAttr(cats.join("、"))}">+${cats.length - max}</span>` : "");
 }
-/* 主分类 chips 渲染（sel 可为字符串或数组）；容器 data-multi="1" 时多选 */
+/* 主分类 chips 渲染（sel 可为字符串或数组）；容器 data-multi="1" 时多选
+   v0.28：容器 data-can-edit="1" 时每个分类带「✎」编辑入口（改名 / 改色 / 删除） */
 function renderCatPicks(container, sel) {
   if (!container) return;
   const set = new Set(Array.isArray(sel) ? sel : (sel ? [sel] : []));
+  const canEdit = container.dataset.canEdit === "1";
   container.innerHTML = sortedCategories().map((c) =>
     `<button type="button" class="cat-pick${set.has(c.name) ? " on" : ""}" data-cat="${escAttr(c.name)}" style="--tg:${c.color || "var(--accent)"}">
-      <i class="dot"></i>${esc(c.name)}</button>`).join("");
+      <i class="dot"></i>${esc(c.name)}${canEdit ? `<span class="cat-edit" title="编辑该主分类（改名 / 改色 / 删除）">✎</span>` : ""}</button>`).join("");
 }
 /* 读取容器里已选的主分类（数组） */
 const selCatsOf = (container) => {
@@ -325,6 +327,17 @@ const selCatOf = (container) => selCatsOf(container)[0] || null;
 function bindCatPicks(container, onChange) {
   if (!container) return;
   container.addEventListener("click", (e) => {
+    // v0.28：点「✎」= 打开主分类编辑弹窗（改名 / 改色 / 删除），不影响当前选择
+    const editBtn = e.target.closest(".cat-edit");
+    if (editBtn) {
+      const host = editBtn.closest(".cat-pick");
+      if (host && host.dataset.cat) {
+        e.preventDefault();
+        e.stopPropagation();
+        openCatModal("edit-category", host.dataset.cat);
+      }
+      return;
+    }
     const b = e.target.closest(".cat-pick");
     if (!b) return;
     const multi = container.dataset.multi === "1";
@@ -3070,9 +3083,11 @@ function refreshTagManager() {
       </div>
       <div class="cw-right">
         <div class="uq-panel">
-          <div class="uq-panel-title">主分类 <span class="req">点一下 = 设置到选中图片</span></div>
-          <div class="uq-panel-sub">选中左侧图片后点分类名即可加上；已全部包含时再点 = 取消。也可把图片直接拖到分类名上</div>
-          <div class="uq-cats" id="cwCats" data-multi="1"></div>
+          <div class="uq-panel-title">主分类 <span class="req">点一下 = 设置到选中图片</span>
+            <button class="mini-link" id="cwNewCat" type="button" title="新建主分类">＋ 新建</button>
+          </div>
+          <div class="uq-panel-sub">选中左侧图片后点分类名即可加上；已全部包含时再点 = 取消。也可把图片直接拖到分类名上；点分类名里的 ✎ 可改名 / 改色 / 删除</div>
+          <div class="uq-cats" id="cwCats" data-multi="1" data-can-edit="1"></div>
         </div>
         <div class="uq-panel">
           <div class="uq-panel-title">标签（作品 / 角色）</div>
@@ -3107,8 +3122,10 @@ function refreshTagManager() {
         </div>
         <div class="rv-panel">
           <div class="uq-panel">
-            <div class="uq-panel-title">主分类 <span class="req">可多选</span></div>
-            <div class="uq-cats" id="rvCats" data-multi="1"></div>
+            <div class="uq-panel-title">主分类 <span class="req">可多选</span>
+              <button class="mini-link" id="rvNewCat" type="button" title="新建主分类">＋ 新建</button>
+            </div>
+            <div class="uq-cats" id="rvCats" data-multi="1" data-can-edit="1"></div>
           </div>
           <div class="uq-panel">
             <div class="uq-panel-title">标签</div>
@@ -3184,6 +3201,13 @@ function initCwView(root) {
   const cwCatsEl = q("#cwCats");
   if (cwCatsEl) {
     cwCatsEl.addEventListener("click", (e) => {
+      // v0.28：点「✎」= 编辑该主分类（不改选中状态）
+      const editBtn = e.target.closest(".cat-edit");
+      if (editBtn) {
+        const host = editBtn.closest(".cat-pick");
+        if (host && host.dataset.cat) { e.preventDefault(); e.stopPropagation(); openCatModal("edit-category", host.dataset.cat); }
+        return;
+      }
       const b = e.target.closest(".cat-pick");
       if (b && b.dataset.cat) cwApplyCategory(b.dataset.cat);
     });
@@ -3212,6 +3236,8 @@ function initCwView(root) {
       }
       if (ids.length) await cwApplyCategory(b.dataset.cat, "add", ids);
     });
+    const cwNewCatBtn = q("#cwNewCat");
+    if (cwNewCatBtn) cwNewCatBtn.addEventListener("click", () => openCatModal("new-category"));
   }
   q("#cwFilters").querySelectorAll("[data-cwf]").forEach((b) => b.addEventListener("click", () => {
     cwFilter = b.dataset.cwf;
@@ -3664,6 +3690,8 @@ function initReviewView(root) {
       rvRender();
     });
   }
+  const rvNewCatBtn = q("#rvNewCat");
+  if (rvNewCatBtn) rvNewCatBtn.addEventListener("click", () => openCatModal("new-category"));
   const filters = q("#rvFilters");
   if (filters) {
     filters.querySelectorAll("[data-rvf]").forEach((b) => b.addEventListener("click", () => {

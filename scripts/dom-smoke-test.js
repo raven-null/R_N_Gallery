@@ -211,6 +211,30 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("点主分类后已写回图库", finalCats.includes(catName) === expectAdd, `预期${expectAdd ? "有" : "无"}「${catName}」`);
   }
 
+  /* 主分类就地编辑（v0.28）：chips 里的 ✎ 打开编辑弹窗；标题旁「＋ 新建」打开新建弹窗 */
+  const cwEditBtn = doc.querySelector("#cwCats .cat-edit");
+  check("分类工作台主分类带编辑入口", !!cwEditBtn);
+  const modalTitle = () => ((doc.querySelector("#tagModalBody h3") || {}).textContent || "").trim();
+  const closeModal = () => {
+    const c = doc.querySelector("#tagModalBody #fCancel");
+    if (c) c.click();
+  };
+  if (cwEditBtn) {
+    cwEditBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await wait(300);
+    check("点 ✎ 打开「编辑主分类」弹窗", doc.getElementById("tagModal").classList.contains("open") && modalTitle().includes("编辑主分类"), modalTitle());
+    closeModal();
+    await wait(200);
+  }
+  const cwNewBtn = doc.getElementById("cwNewCat");
+  if (cwNewBtn) {
+    cwNewBtn.click();
+    await wait(300);
+    check("点「＋ 新建」打开「新建主分类」弹窗", modalTitle().includes("新建主分类"), modalTitle());
+    closeModal();
+    await wait(200);
+  }
+
   const failed = results.filter((x) => !x).length;
   console.log(`\n${failed ? `✗ ${failed} 项未通过` : "✓ 全部通过"}（共 ${results.length} 项）\n`);
   process.exit(failed ? 1 : 0);
