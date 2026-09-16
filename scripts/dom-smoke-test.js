@@ -178,7 +178,18 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       const t = (d.photos || []).find((p) => p.id === id);
       return (t && (t.categories || [])) || [];
     };
-    const before = await readCats();
+    /* 线上 Netlify Blobs 写入后有读延迟：连续读两次一致才算稳定，避免期望值判断错 */
+    const stableCats = async () => {
+      let prev = await readCats();
+      for (let i = 0; i < 8; i++) {
+        await wait(2000);
+        const cur = await readCats();
+        if (cur.join(",") === prev.join(",")) return cur;
+        prev = cur;
+      }
+      return prev;
+    };
+    const before = await stableCats();
     const expectAdd = !before.includes(catName); // toggle 语义：已含则点击是「取消」
     cwCard.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     await wait(200);
