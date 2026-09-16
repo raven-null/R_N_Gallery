@@ -1307,6 +1307,64 @@ body[data-page="gallery"] .page {
 .lightbox .lb-close:active { 
   transform: scale(0.95); 
 }
+
+/* ---- 右下角悬浮工具条（v0.38：默认隐藏，鼠标在灯箱内移动时浮现，静止 3 秒淡出） ---- */
+.lightbox .lb-tools-float {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 999px;
+  border: 1px solid var(--w012);
+  background: linear-gradient(135deg, var(--s28) 0%, var(--s09) 100%);
+  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  backdrop-filter: blur(24px) saturate(200%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.1),
+    0 12px 32px rgba(0,0,0,0.35);
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition: opacity 0.28s var(--ease-out), transform 0.28s var(--ease-out);
+  z-index: 12;
+}
+.lightbox.tools-visible .lb-tools-float {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.lightbox .lb-tool {
+  width: 40px; height: 40px;
+  flex: none;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s, transform 0.2s var(--ease-spring);
+}
+.lightbox .lb-tool svg { width: 19px; height: 19px; }
+.lightbox .lb-tool:hover { background: var(--s20); transform: scale(1.1); }
+.lightbox .lb-tool:active { transform: scale(0.94); }
+.lightbox .lb-tool:disabled { opacity: 0.45; cursor: default; transform: none; }
+.lightbox .lb-tool.playing { color: var(--accent); }
+@media (max-width: 900px) {
+  .lightbox .lb-tools-float { right: 12px; bottom: 12px; gap: 2px; padding: 6px; }
+  .lightbox .lb-tool { width: 36px; height: 36px; }
+}
+body.perf-lite .lightbox .lb-tools-float {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: rgba(18,18,20,0.94);
+  transition: none;
+}
+body.perf-lite .lightbox .lb-tool { transition: none; }
 @keyframes slide-up {
   from { 
     opacity: 0; 

@@ -845,7 +845,9 @@ document.addEventListener("keydown", (e) => {
     setTimeout(() => document.getElementById("searchInput")?.focus(), 250);
   }
   if (e.key === "Escape") {
-    document.querySelectorAll(".lightbox.open, .modal-mask.open").forEach((el) => el.classList.remove("open"));
+    // v0.38：关灯箱时一并停掉幻灯片、收起悬浮工具条
+    if (document.querySelector(".lightbox.open")) closeLightbox();
+    document.querySelectorAll(".modal-mask.open").forEach((el) => el.classList.remove("open"));
     if (selectMode) exitSelectMode();
   }
 });
@@ -934,6 +936,225 @@ function openLightboxById(id, bustCache) {
   const lb = document.getElementById("lightbox");
   lb.classList.add("open");
   lb.dataset.cur = id;
+  // v0.38：悬浮工具条默认隐藏，鼠标在灯箱内移动才浮现（指针停在工具条上时保持）
+  if (!lbToolsHover) {
+    clearTimeout(lbHideTimer);
+    lbToolsVisible(false);
+  }
+  syncSlideBtn();
+}
+
+/* ---------- 灯箱右下角悬浮工具条 + 幻灯片（v0.38） ----------
+   工具条固定在灯箱右下角，默认隐藏：鼠标在灯箱内移动 → 浮现；静止 3 秒 → 自动淡出。
+   指针停在工具条上时不会自动隐藏。幻灯片播放中同样规则。 */
+const LB_HIDE_DELAY = 3000;
+const SLIDE_SEC_KEY = "rn_slide";
+const SLIDE_SECS = [3, 5, 8];
+let slideTimer = null;
+let lbHideTimer = null;
+let lbToolsHover = false;
+
+function slideSeconds() {
+  const v = parseInt(localStorage.getItem(SLIDE_SEC_KEY) || "5", 10);
+  return SLIDE_SECS.includes(v) ? v : 5;
+}
+function lbEl() { return document.getElementById("lightbox"); }
+function lbIsOpen() { const lb = lbEl(); return !!(lb && lb.classList.contains("open")); }
+function lbCurrentPhoto() {
+  const lb = lbEl();
+  if (!lb || !lb.classList.contains("open")) return null;
+  return PHOTOS.find((x) => x.id === lb.dataset.cur) || null;
+}
+function lbToolsVisible(on) {
+  const lb = lbEl();
+  if (lb) lb.classList.toggle("tools-visible", !!on);
+}
+function lbShowTools() {
+  lbToolsVisible(true);
+  clearTimeout(lbHideTimer);
+  if (lbToolsHover) return;
+  lbHideTimer = setTimeout(() => lbToolsVisible(false), LB_HIDE_DELAY);
+}
+function closeLightbox() {
+  stopSlide();
+  clearTimeout(lbHideTimer);
+  lbToolsHover = false;
+  const lb = lbEl();
+  if (lb) {
+    lb.classList.remove("open");
+    lb.classList.remove("tools-visible");
+  }
+}
+
+/* 切换上一张 / 下一张：默认按 PHOTOS 顺序，图库页会注册当前筛选后的顺序 */
+function lbStepList() {
+  try {
+    const l = window.__lbStepList && window.__lbStepList();
+    if (Array.isArray(l) && l.length) return l;
+  } catch (e) { /* ignore */ }
+  return PHOTOS;
+}
+function lbStep(d) {
+  const lb = lbEl();
+  if (!lb) return;
+  const cur = lb.dataset.cur;
+  const list = lbStepList();
+  if (!list.length) return;
+  const i = list.findIndex((x) => x.id === cur);
+  const next = list[((i < 0 ? 0 : i) + d + list.length) % list.length];
+  if (next && next.id !== cur) openLightboxById(next.id);
+}
+
+/* 幻灯片放映（v0.38 恢复：间隔见设置页，空格键开关） */
+function isSliding() { return !!slideTimer; }
+function syncSlideBtn() {
+  const b = document.getElementById("lbToolPlay");
+  if (!b) return;
+  const on = isSliding();
+  b.classList.toggle("playing", on);
+  b.title = on ? "暂停幻灯片" : "幻灯片放映";
+  const play = b.querySelector(".ico-play");
+  const pause = b.querySelector(".ico-pause");
+  if (play) play.style.display = on ? "none" : "";
+  if (pause) pause.style.display = on ? "" : "none";
+}
+function startSlide() {
+  stopSlide();
+  const lb = lbEl();
+  if (!lb || !lb.classList.contains("open")) return;
+  slideTimer = setInterval(() => {
+    if (!lbIsOpen()) { stopSlide(); return; }
+    lbStep(1);
+  }, slideSeconds() * 1000);
+  syncSlideBtn();
+  lbShowTools();
+}
+function stopSlide() {
+  if (slideTimer) {
+    clearInterval(slideTimer);
+    slideTimer = null;
+  }
+  syncSlideBtn();
+}
+function toggleSlide() {
+  if (isSliding()) stopSlide();
+  else startSlide();
+}
+window.__stopSlide = stopSlide;
+
+/* 旋转 90°：本地 canvas 旋转后覆盖原图（POST /api/photos/:id/image） */
+function lbRotatePhoto() {
+  const p = lbCurrentPhoto();
+  if (!p) return;
+  const btn = document.getElementById("lbToolRot");
+  if (btn) btn.disabled = true;
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = async () => {
+    try {
+      const c = document.createElement("canvas");
+      c.width = img.naturalHeight;
+      c.height = img.naturalWidth;
+      const ctx = c.getContext("2d");
+      ctx.translate(c.width / 2, c.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      const keepPng = p.mime === "image/png";
+      const mime = keepPng ? "image/png" : (c.toDataURL("image/webp").startsWith("data:image/webp") ? "image/webp" : "image/jpeg");
+      const dataUrl = c.toDataURL(mime, 0.92);
+      let thumbDataUrl = null;
+      try { thumbDataUrl = await makeThumbDataUrl(dataUrl); } catch (e) { /* 缩略图失败可继续 */ }
+      const r = await apiFetch(`/api/photos/${p.id}/image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataBase64: dataUrl, thumbBase64: thumbDataUrl }),
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || "旋转失败");
+      await loadData();
+      if (window.__refreshGallery) window.__refreshGallery();
+      openLightboxById(p.id, true); // 带时间戳重取，绕开浏览器缓存
+      lbShowTools();
+    } catch (e) {
+      alert("旋转失败：" + e.message);
+    }
+    if (btn) btn.disabled = false;
+  };
+  img.onerror = () => {
+    alert("旋转失败：原图无法读取");
+    if (btn) btn.disabled = false;
+  };
+  img.src = p.url + (p.url.includes("?") ? "&" : "?") + "r=" + Date.now();
+}
+
+/* 下载原图 */
+function lbDownload() {
+  const p = lbCurrentPhoto();
+  if (!p) return;
+  const ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" }[p.mime] || "jpg";
+  const a = document.createElement("a");
+  a.href = p.url;
+  a.download = `${(p.title || p.id).replace(/[\\/:*?"<>|]/g, "_")}.${ext}`;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  lbShowTools();
+}
+
+function initLightboxTools() {
+  const lb = lbEl();
+  const bar = document.getElementById("lbToolsFloat");
+  if (!lb || !bar || lb.dataset.toolsBound === "1") return;
+  lb.dataset.toolsBound = "1";
+  lb.addEventListener("mousemove", lbShowTools);
+  lb.addEventListener("touchstart", lbShowTools, { passive: true });
+  lb.addEventListener("mouseleave", () => { lbToolsVisible(false); });
+  bar.addEventListener("mouseenter", () => {
+    lbToolsHover = true;
+    clearTimeout(lbHideTimer);
+    lbToolsVisible(true);
+  });
+  bar.addEventListener("mouseleave", () => {
+    lbToolsHover = false;
+    lbShowTools();
+  });
+  const bind = (id, fn) => {
+    const el = document.getElementById(id);
+    if (el) el.onclick = (e) => { e.stopPropagation(); fn(); };
+  };
+  bind("lbToolPlay", toggleSlide);
+  bind("lbToolEdit", () => { const p = lbCurrentPhoto(); if (p) openEditModal(p.id); });
+  bind("lbToolRot", lbRotatePhoto);
+  bind("lbToolDl", lbDownload);
+  bind("lbToolAlbum", () => { const p = lbCurrentPhoto(); if (p) openAlbumPicker([p.id]); });
+
+  // 空格：开始 / 暂停幻灯片（仅在可见输入框内不触发，避免在弹窗里打不出空格）
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== " " && e.code !== "Space") return;
+    if (!lbIsOpen()) return;
+    const a = document.activeElement;
+    const typing = a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
+    if (typing && a.getClientRects && a.getClientRects().length) return; // 可见输入框 → 让位给打字
+    e.preventDefault();
+    toggleSlide();
+  });
+}
+
+/* 幻灯片间隔设置（v0.13，v0.38 随工具条恢复） */
+function initSlideSetting() {
+  const seg = document.getElementById("slideSeg");
+  if (!seg) return;
+  const cur = String(slideSeconds());
+  [...seg.querySelectorAll(".seg-btn")].forEach((b) => {
+    b.classList.toggle("on", b.dataset.sec === cur);
+    b.addEventListener("click", () => {
+      [...seg.querySelectorAll(".seg-btn")].forEach((x) => x.classList.toggle("on", x === b));
+      localStorage.setItem(SLIDE_SEC_KEY, b.dataset.sec);
+      // 播放中改间隔：立即按新间隔重启计时
+      if (isSliding()) startSlide();
+    });
+  });
 }
 
 /* ---------- 性能模式：释放滚出很远的卡片图片（v0.25）----------
@@ -1452,28 +1673,21 @@ function initGallery() {
       updateBatchUI();
       return;
     }
-    // v0.37：灯箱工具条删除后，编辑入口移到这里 —— 双击卡片 = 编辑该图
+    // v0.37：双击卡片 = 直接编辑该图（v0.38 灯箱右下角工具条也有「编辑」）
     if (e.detail >= 2) { openEditModal(id); return; }
     openLightbox(id);
   });
 
-  // 灯箱（全局实现 openLightboxById；←→ 按当前筛选视图顺序切换）
+  // 灯箱（全局实现 openLightboxById；←→ / 幻灯片按当前筛选视图顺序切换）
   const openLightbox = openLightboxById;
   const lbCloseEl = document.querySelector(".lb-close");
   const lbPrevEl = document.querySelector(".lb-prev");
   const lbNextEl = document.querySelector(".lb-next");
-  if (lbCloseEl) lbCloseEl.onclick = () => { lightbox.classList.remove("open"); };
+  const step = (d) => lbStep(d); // v0.38：切图逻辑抽到全局，灯箱悬浮工具条 / 幻灯片共用
+  window.__lbStepList = () => (filtered.length && filtered.some((x) => x.id === lightbox.dataset.cur) ? filtered : PHOTOS);
+  if (lbCloseEl) lbCloseEl.onclick = () => closeLightbox();
   if (lbPrevEl) lbPrevEl.onclick = () => step(-1);
   if (lbNextEl) lbNextEl.onclick = () => step(1);
-  function step(d) {
-    const cur = lightbox.dataset.cur;
-    // 搜索窗口打开灯箱时可能不在当前筛选列表，回退到全图顺序
-    const list = filtered.length && filtered.some((x) => x.id === cur) ? filtered : PHOTOS;
-    if (!list.length) return;
-    const i = list.findIndex((x) => x.id === cur);
-    const next = list[(i + d + list.length) % list.length];
-    openLightbox(next.id);
-  }
   document.addEventListener("keydown", (e) => {
     if (!lightbox.classList.contains("open")) return;
     if (e.key === "ArrowLeft") step(-1);
@@ -2067,8 +2281,8 @@ function delFromEditModal() {
       return;
     }
     document.getElementById("editModal").classList.remove("open");
-    const lb = document.getElementById("lightbox");
-    if (lb.classList.contains("open")) lb.classList.remove("open");
+    // v0.38：图片已删除 → 关灯箱（顺带停幻灯片、收工具条）
+    if (lbIsOpen()) closeLightbox();
     await loadData();
     if (window.__refreshGallery) window.__refreshGallery();
   });
@@ -2753,6 +2967,7 @@ const I18N_DICT = {
   "返回图库": "Back", "上传": "Upload",
   "打开搜索窗口": "Open search window", "灯箱中切换上一张 / 下一张": "Prev / next in lightbox",
   "关闭灯箱 / 弹窗 / 悬浮菜单": "Close lightbox / dialogs / menus",
+  "幻灯片间隔": "Slideshow interval", "灯箱中开始 / 暂停幻灯片放映": "Start / pause slideshow in lightbox",
   "标签筛选": "Filter by tag", "搜索标签 / 别名…": "Search tags / aliases…",
   "启用 AI 助手": "Enable AI assistant", "API Key": "API Key", "温度": "Temperature",
   "测试对话": "Test chat", "发送「你好」": "Say hi",
@@ -4821,6 +5036,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   initSelection();
   initSortMenu();
   initEditModal();
+  initLightboxTools(); // v0.38：灯箱右下角悬浮工具条 + 幻灯片
+  initSlideSetting();
   initUqModal();
   initImportUrl();
   initAiSettings();

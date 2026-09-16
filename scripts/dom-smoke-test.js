@@ -348,12 +348,36 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       console.log("   （线上跳过相册创建与加图，避免改动真实数据）");
     }
   }
-  /* 灯箱信息面板与工具条已整体移除（v0.37）；编辑入口移到卡片双击 */
+  /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
-  check("灯箱不再有工具条按钮", !doc.querySelector(".lightbox .lb-tool"));
   check("灯箱不再有收藏按钮", !doc.getElementById("lbToolFav"));
+  const lbBox = doc.getElementById("lightbox");
+  const lbBar = doc.getElementById("lbToolsFloat");
+  const toolIds = ["lbToolPlay", "lbToolEdit", "lbToolRot", "lbToolDl", "lbToolAlbum"];
+  check("灯箱右下角悬浮工具条含 5 个按钮", !!lbBar && toolIds.every((i) => doc.getElementById(i)));
+  check("工具条默认隐藏（无 tools-visible 类）", !!(lbBox && !lbBox.classList.contains("tools-visible")));
   check("筛选菜单不再有收藏行", !doc.querySelector('#tagMenuList [data-tag="__fav"]'));
   const firstCard = doc.querySelector("#grid .card");
+  if (lbBox && lbBar && firstCard) {
+    doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); // 退出可能残留的多选态
+    await wait(150);
+    clickEl(firstCard);
+    await wait(350);
+    check("打开灯箱后工具条仍隐藏", lbBox.classList.contains("open") && !lbBox.classList.contains("tools-visible"));
+    lbBox.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 400, clientY: 300 }));
+    await wait(100);
+    check("鼠标移动后工具条浮现", lbBox.classList.contains("tools-visible"));
+    doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    await wait(100);
+    const playBtn = doc.getElementById("lbToolPlay");
+    check("空格开始幻灯片（按钮切为暂停态）", !!playBtn && playBtn.classList.contains("playing"));
+    doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    await wait(100);
+    check("再按空格停止幻灯片", !!playBtn && !playBtn.classList.contains("playing"));
+    clickEl(doc.querySelector(".lb-close"));
+    await wait(250);
+    check("关闭灯箱并收起工具条", !lbBox.classList.contains("open") && !lbBox.classList.contains("tools-visible"));
+  }
   if (firstCard) {
     firstCard.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
     await wait(400);
