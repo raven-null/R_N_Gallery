@@ -584,3 +584,6 @@ async function aiTagSearch(query) {
 - 图库超过 800 张时，「已加载」提示会附带"用筛选或搜索更快定位"的建议
 - **新增前端冒烟测试** `scripts/dom-smoke-test.js`：用 jsdom 真跑 `index.html` + `app.js`（stub 掉 IntersectionObserver / fetch 转发到本地服务），验证首屏渲染、哨兵追加、图片回收的离开/恢复、CSS 规则在位 —— 本次 8 项全部通过；用法见文件头（需要 `npm install --no-save --no-package-lock --cache .npm-cache jsdom`）
 - `package.json` 增加便捷脚本：`npm run test:dom` / `import:chars` / `find:dups` / `migrate` / `tagger`
+- 顺手修掉一个真实缺陷：**初始化不幂等** —— 若 `initGallery()` 被调用两次（jsdom 测试里由"自然派发 + 手动派发 DOMContentLoaded"复现），会插两个滚动哨兵、留两个观察器，导致追加逻辑各自持有一份 `shown/filtered` 状态而失灵。现在创建哨兵前先移除同 id 的旧元素
+- 冒烟测试脚本同时修正了 DOMContentLoaded 时序（先等 jsdom 自然派发，没有再补发），失败时会打印内部状态 `{shown, filtered, total, busy}` 与观察器列表，便于定位
+- 验证：本地（20 张测试数据）8/8 通过；**线上（真实 104 张、带门禁凭证）8/8 通过** —— 首屏 12 张 → `__appendMore` 后 24 张 → 哨兵触发后 36 张，图片离开视口换占位 / 回来恢复均正常
