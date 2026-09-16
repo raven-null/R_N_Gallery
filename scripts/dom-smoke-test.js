@@ -137,21 +137,33 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   if (cwCard && cwChip) {
     const catName = cwChip.dataset.cat;
     const id = cwCard.dataset.id;
+    const headers = TOKEN ? { "X-Auth-Token": TOKEN } : {};
+    const readCats = async () => {
+      const res = await fetch(`${BASE}/api/photos?limit=200&_=${Math.random()}`, { headers });
+      const d = await res.json();
+      const t = (d.photos || []).find((p) => p.id === id);
+      return (t && (t.categories || [])) || [];
+    };
+    const before = await readCats();
+    const expectAdd = !before.includes(catName); // toggle 语义：已含则点击是「取消」
     cwCard.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     await wait(200);
     const selStatus = () => ((doc.getElementById("cwSelStatus") || {}).textContent || "").trim();
     console.log(`   选中后：${selStatus()}　（卡片 sel 类：${cwCard.classList.contains("sel")}）`);
     const chip2 = doc.querySelector("#cwCats .cat-pick"); // 面板会随选中重建，重新取一次
-    console.log(`   点击「${chip2 ? chip2.dataset.cat : "?"}」…`);
+    console.log(`   点击「${catName}」（预期：${expectAdd ? "加上" : "取消"}，当前 [${before.join(",")}]）…`);
     chip2.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    await wait(1500);
-    console.log(`   点主分类后：${selStatus()}`);
-    const headers = TOKEN ? { "X-Auth-Token": TOKEN } : {};
-    const res = await fetch(`${BASE}/api/photos?limit=200&_=${Math.random()}`, { headers });
-    const d = await res.json();
-    const target = (d.photos || []).find((p) => p.id === id);
-    const cats = (target && (target.categories || [])) || [];
-    check("点主分类后已写回图库", cats.includes(catName), `${catName} → [${cats.join(",")}]`);
+
+    /* Netlify Blobs 写入后读取有延迟，轮询等待（本地通常立即命中） */
+    let finalCats = [];
+    const t0 = Date.now();
+    while (Date.now() - t0 < 30000) {
+      await wait(1500);
+      finalCats = await readCats();
+      if (finalCats.includes(catName) === expectAdd) break;
+    }
+    console.log(`   点主分类后：${selStatus()}　读回的分类 [${finalCats.join(",")}]`);
+    check("点主分类后已写回图库", finalCats.includes(catName) === expectAdd, `预期${expectAdd ? "有" : "无"}「${catName}」`);
   }
 
   const failed = results.filter((x) => !x).length;
