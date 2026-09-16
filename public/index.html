@@ -444,35 +444,25 @@
       </div>
     </div>
   </div>
-  <!-- ======= 相册窗口（v0.32：左右两栏；FAB 上方的相册按钮右滑进入） ======= -->
-  <div class="page-panel" id="panelAlbums">
-    <div class="panel-header">
-      <div class="traffic">
-        <span class="dot red" id="closeAlbums" title="关闭窗口"></span>
-        <span class="dot yellow"></span>
-        <span class="dot green"></span>
-      </div>
-      <h1>相册</h1>
-      <div class="spacer"></div>
-      <button class="btn ghost panel-back" id="btnBackAlbums">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        返回图库
+  <!-- ======= 相册页（v0.34：独立整页，iOS 相册风格；FAB 相册按钮左滑进入，右滑返回） ======= -->
+  <div class="album-page" id="albumPage" aria-hidden="true">
+    <!-- 顶部导航栏（随页面停留，切换页面时保持） -->
+    <header class="album-nav">
+      <button class="album-nav-btn" id="albBack" type="button" title="返回">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        <span id="albBackLabel">图库</span>
       </button>
+      <span class="album-nav-title" id="albNavTitle">相册</span>
+      <button class="album-nav-btn" id="albAddBtn" type="button" title="新建相册">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </header>
+    <!-- 新建相册输入行（点＋时展开） -->
+    <div class="album-newbar" id="albNewBar" hidden>
+      <input type="text" id="albNewName" placeholder="相册名称，回车创建" maxlength="30" autocomplete="off">
+      <button class="btn ghost sm" id="albNewCancel" type="button">取消</button>
     </div>
-    <div class="panel-content settings-scroll">
-      <div class="alb-split">
-        <aside class="alb-left">
-          <div class="alb-new">
-            <input type="text" id="albNewName2" placeholder="＋ 新建相册，回车创建" maxlength="30" autocomplete="off">
-          </div>
-          <div class="alb-list" id="albList"></div>
-        </aside>
-        <section class="alb-right">
-          <div class="alb-head" id="albHead"></div>
-          <div class="alb-grid" id="albGrid"></div>
-        </section>
-      </div>
-    </div>
+    <div class="album-body" id="albumBody"></div>
   </div>
 
   <!-- 清空确认弹窗 -->

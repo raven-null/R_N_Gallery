@@ -4100,82 +4100,146 @@ body.perf-lite .card__content {
 .tmgr-head .cnt + .act { margin-left: 8px; }
 
 /* ============================================================
-   相册窗口（v0.32）：左右两栏 + 从右侧滑入
+   相册整页（v0.34）：iOS 相册风格 —— 顶部导航栏 + 大标题 +
+   封面网格（一级）/ 照片网格（二级）；从右侧滑入，右滑返回
    ============================================================ */
-#panelAlbums.slide-in { animation: albumsSlideIn 0.46s cubic-bezier(0.16, 1, 0.3, 1); }
-@keyframes albumsSlideIn {
-  from { transform: translateX(72px) scale(0.98); opacity: 0; }
-  to { transform: translateX(0) scale(1); opacity: 1; }
+.album-page {
+  position: fixed;
+  inset: 0;
+  z-index: 88;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  transform: translateX(100%);
+  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+  visibility: hidden;
 }
-.alb-split { display: flex; gap: 18px; align-items: flex-start; }
-.alb-left { flex: 0 0 210px; display: flex; flex-direction: column; gap: 8px; }
-.alb-new input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 11px;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px dashed var(--w016);
-  border-radius: 10px;
-  color: var(--text);
-  font-size: 12.5px;
-  outline: none;
-}
-.alb-new input:focus { border-color: rgba(255, 159, 10, 0.55); border-style: solid; }
-[data-theme="light"] .alb-new input { background: rgba(255, 255, 255, 0.7); }
-.alb-list { display: flex; flex-direction: column; gap: 4px; max-height: 62vh; overflow-y: auto; }
-.alb-item {
+.album-page.open { transform: translateX(0); visibility: visible; }
+body.album-open { overflow: hidden; }
+
+/* 顶部导航栏（页面切换时保持在顶部） */
+.album-nav {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--w008);
-  border-radius: 10px;
-  background: var(--w004);
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text-dim);
-  transition: all 0.16s var(--ease-out);
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 54px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--w008);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
 }
-.alb-item:hover { color: var(--text); background: var(--w006); }
-.alb-item.on {
-  color: var(--text);
+body.perf-lite .album-nav { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--bg); }
+.album-nav-title {
+  font-size: 15px;
   font-weight: 600;
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.alb-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.alb-item .cnt { flex: none; font-size: 11px; color: var(--text-faint); }
-.alb-item .act {
-  flex: none;
+.album-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 2px;
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text-faint);
-  font-size: 12px;
-  padding: 0 2px;
-  opacity: 0;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 500;
   transition: opacity 0.15s;
 }
-.alb-item:hover .act { opacity: 0.8; }
-.alb-item .act:hover { opacity: 1; color: var(--accent); }
-.alb-item .act.danger:hover { color: var(--danger); }
-.alb-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.alb-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.alb-head .t { font-size: 15px; font-weight: 600; color: var(--text); }
-.alb-head .cnt { font-size: 12px; color: var(--text-faint); }
-.alb-head .hint { font-size: 11.5px; color: var(--text-faint); }
-.alb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
-.alb-card {
-  position: relative;
-  aspect-ratio: 1;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--w010);
-  background: var(--w004);
-  cursor: pointer;
+.album-nav-btn:hover { opacity: 0.7; }
+.album-newbar {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--w008);
 }
-.alb-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.alb-card .alb-out {
+.album-newbar input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--w016);
+  color: var(--text);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+}
+.album-newbar input:focus { border-color: rgba(255, 159, 10, 0.55); }
+[data-theme="light"] .album-newbar input { background: rgba(255, 255, 255, 0.7); }
+.album-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 14px 48px; }
+
+/* iOS 大标题 */
+.alb-largetitle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 14px;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.alb-largetitle .cnt { font-size: 12.5px; font-weight: 500; color: var(--text-faint); }
+
+/* 一级：相册封面网格 */
+.alb-cover-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+@media (min-width: 820px) { .alb-cover-grid { grid-template-columns: repeat(4, 1fr); gap: 16px; } }
+@media (min-width: 1360px) { .alb-cover-grid { grid-template-columns: repeat(6, 1fr); } }
+.alb-cover {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.alb-cover .cv {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--w004);
+  border: 1px solid var(--w008);
+  transition: transform 0.18s var(--ease-out), box-shadow 0.18s;
+}
+.alb-cover:hover .cv { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28); }
+.alb-cover .cv img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.alb-cover .ph { font-size: 28px; opacity: 0.45; }
+.alb-cover .nm {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alb-cover .ct { font-size: 12px; color: var(--text-faint); }
+
+/* 二级：相册内照片网格（iOS 相册内页：细密方格） */
+.alb-subbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.alb-subbar .hint { margin-right: auto; font-size: 11.5px; color: var(--text-faint); }
+.alb-photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+@media (min-width: 700px) { .alb-photo-grid { grid-template-columns: repeat(5, 1fr); gap: 4px; } }
+@media (min-width: 1200px) { .alb-photo-grid { grid-template-columns: repeat(7, 1fr); } }
+.alb-photo { position: relative; aspect-ratio: 1; overflow: hidden; background: var(--w004); cursor: pointer; }
+.alb-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.alb-photo .alb-out {
   position: absolute;
   top: 4px;
   right: 4px;
@@ -4191,11 +4255,6 @@ body.perf-lite .card__content {
   opacity: 0;
   transition: opacity 0.15s;
 }
-.alb-card:hover .alb-out { opacity: 1; }
-.alb-empty { padding: 18px 6px; font-size: 12.5px; line-height: 1.7; color: var(--text-faint); }
-.alb-empty .sub { font-size: 11.5px; opacity: 0.8; }
-@media (max-width: 860px) {
-  .alb-split { flex-direction: column; }
-  .alb-left { flex: none; width: 100%; }
-  .alb-list { max-height: 30vh; }
-}
+.alb-photo:hover .alb-out { opacity: 1; }
+.alb-empty { padding: 34px 8px; text-align: center; font-size: 13px; line-height: 1.8; color: var(--text-faint); }
+.alb-empty .sub { font-size: 12px; opacity: 0.85; }

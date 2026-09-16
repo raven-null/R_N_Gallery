@@ -2594,118 +2594,217 @@ function albumPhotoIds(a) {
   const set = new Set((a && a.photoIds) || []);
   return PHOTOS.filter((p) => set.has(p.id)).map((p) => p.id);
 }
-function renderAlbumsView() {
-  const listEl = document.getElementById("albList");
-  const gridEl = document.getElementById("albGrid");
-  const headEl = document.getElementById("albHead");
-  if (!listEl || !gridEl || !headEl) return;
-  const albums = albumsSorted();
-  if (!albCurrentId || !albums.some((a) => a.id === albCurrentId)) {
-    albCurrentId = albums.length ? albums[0].id : null;
-  }
-  listEl.innerHTML = albums.length ? albums.map((a) => {
-    const n = albumPhotoIds(a).length;
-    return `<div class="alb-item${a.id === albCurrentId ? " on" : ""}" data-aid="${escAttr(a.id)}">
-      <span class="nm">${esc(a.name)}</span>
-      <span class="cnt">${n}</span>
-      <button class="act" data-alb-act="rename" title="重命名">✎</button>
-      <button class="act danger" data-alb-act="del" title="删除相册">×</button>
-    </div>`;
-  }).join("") : `<div class="alb-empty">还没有相册<br><span class="sub">在上方输入名字回车即可创建</span></div>`;
+/* ---------- 相册页（v0.34）：独立整页，iOS 相册风格 ----------
+   一级 = 相册封面网格；二级 = 某个相册内的照片网格
+   进入/返回走左右滑动动画（FAB 相册按钮进入；页面右滑返回，二级先回一级） */
+let albLevel = "list"; // list | album
+let albOpenFlag = false;
 
-  const cur = albums.find((a) => a.id === albCurrentId) || null;
-  if (!cur) {
-    headEl.innerHTML = "";
-    gridEl.innerHTML = `<div class="alb-empty">左边还没有相册</div>`;
+function openAlbumPage() {
+  const page = document.getElementById("albumPage");
+  if (!page) return;
+  albLevel = "list";
+  const newBar = document.getElementById("albNewBar");
+  if (newBar) newBar.hidden = true;
+  renderAlbumsView();
+  page.classList.add("open");
+  page.setAttribute("aria-hidden", "false");
+  document.body.classList.add("album-open");
+  albOpenFlag = true;
+}
+function closeAlbumPage() {
+  const page = document.getElementById("albumPage");
+  if (!page) return;
+  if (albLevel === "album") { // 二级先退回一级（iOS 的返回层级）
+    albLevel = "list";
+    renderAlbumsView();
     return;
   }
-  const ids = albumPhotoIds(cur);
-  headEl.innerHTML = `<span class="t">${esc(cur.name)}</span><span class="cnt">${ids.length} 张</span>
-    <span class="hint">在图库里选中图片 →「＋ 入相册」可加入；点图片看大图，✕ 移出相册</span>`;
-  gridEl.innerHTML = ids.length ? ids.map((id) => {
-    const p = PHOTOS.find((x) => x.id === id);
-    if (!p) return "";
-    return `<div class="alb-card" data-id="${escAttr(id)}" title="${escAttr(p.title || "")}">
-      <img loading="lazy" decoding="async" src="${cardImgSrc(p)}" alt="">
-      <button class="alb-out" data-alb-out="1" title="从相册移除">✕</button>
-    </div>`;
-  }).join("") : `<div class="alb-empty">这个相册还是空的<br><span class="sub">在图库里选中图片后用「＋ 入相册」加进来</span></div>`;
+  page.classList.remove("open");
+  page.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("album-open");
+  albOpenFlag = false;
 }
-function initAlbumsView() {
-  const input = document.getElementById("albNewName2");
-  if (input && !input.dataset.bound) {
-    input.dataset.bound = "1";
-    input.addEventListener("keydown", async (e) => {
+
+function renderAlbumsView() {
+  const body = document.getElementById("albumBody");
+  if (!body) return;
+  const titleEl = document.getElementById("albNavTitle");
+  const backLabel = document.getElementById("albBackLabel");
+  const albums = albumsSorted();
+  if (titleEl) titleEl.textContent = albLevel === "album" ? ((albumOf(albCurrentId) || {}).name || "相册") : "相册";
+  if (backLabel) backLabel.textContent = albLevel === "album" ? "相册" : "图库";
+
+  if (albLevel === "list") {
+    body.innerHTML = `
+      <div class="alb-largetitle">相册<span class="cnt">${albums.length} 个 · 共 ${PHOTOS.length} 张</span></div>
+      ${albums.length ? `<div class="alb-cover-grid">` + albums.map((a) => {
+        const ids = albumPhotoIds(a);
+        const cover = ids.length ? PHOTOS.find((p) => p.id === ids[0]) : null;
+        return `<button class="alb-cover" data-aid="${escAttr(a.id)}" type="button" title="${escAttr(a.name)}">
+          <span class="cv">${cover ? `<img loading="lazy" decoding="async" src="${cardImgSrc(cover)}" alt="">` : `<span class="ph">🖼</span>`}</span>
+          <span class="nm">${esc(a.name)}</span>
+          <span class="ct">${ids.length} 张</span>
+        </button>`;
+      }).join("") + `</div>`
+        : `<div class="alb-empty">还没有相册<br><span class="sub">点右上角「＋」新建，然后在图库里选中图片用「＋ 入相册」加进来</span></div>`}`;
+    return;
+  }
+
+  /* 二级：某个相册的内容 */
+  const cur = albumOf(albCurrentId);
+  if (!cur) { albLevel = "list"; return renderAlbumsView(); }
+  const ids = albumPhotoIds(cur);
+  body.innerHTML = `
+    <div class="alb-largetitle">${esc(cur.name)}<span class="cnt">${ids.length} 张</span></div>
+    <div class="alb-subbar">
+      <span class="hint">点图片看大图，✕ 从相册移除</span>
+      <button class="btn ghost sm" data-alb-act="rename" type="button">重命名</button>
+      <button class="btn ghost sm" data-alb-act="del" type="button">删除相册</button>
+    </div>
+    ${ids.length ? `<div class="alb-photo-grid">` + ids.map((id) => {
+      const p = PHOTOS.find((x) => x.id === id);
+      if (!p) return "";
+      return `<div class="alb-photo" data-id="${escAttr(id)}" title="${escAttr(p.title || "")}">
+        <img loading="lazy" decoding="async" src="${cardImgSrc(p)}" alt="">
+        <button class="alb-out" data-alb-out="1" title="从相册移除">✕</button>
+      </div>`;
+    }).join("") + `</div>`
+      : `<div class="alb-empty">这个相册还是空的<br><span class="sub">回图库选中图片 →「＋ 入相册」</span></div>`}`;
+}
+
+function initAlbumPage() {
+  const page = document.getElementById("albumPage");
+  const body = document.getElementById("albumBody");
+  if (!page || !body || page.dataset.bound) return;
+  page.dataset.bound = "1";
+  const newBar = document.getElementById("albNewBar");
+  const newInput = document.getElementById("albNewName");
+
+  document.getElementById("albBack").addEventListener("click", closeAlbumPage);
+  const addBtn = document.getElementById("albAddBtn");
+  if (addBtn) {
+    addBtn.addEventListener("click", () => {
+      if (!newBar) return;
+      newBar.hidden = !newBar.hidden;
+      if (!newBar.hidden && newInput) { newInput.value = ""; newInput.focus(); }
+    });
+  }
+  const cancelNew = document.getElementById("albNewCancel");
+  if (cancelNew) cancelNew.addEventListener("click", () => { if (newBar) newBar.hidden = true; });
+  if (newInput) {
+    newInput.addEventListener("keydown", async (e) => {
       if (e.key !== "Enter") return;
       e.preventDefault();
-      const name = input.value.trim();
+      const name = newInput.value.trim();
       if (!name) return;
       ALBUMS.albums.push({ id: "", name, photoIds: [], sort: ALBUMS.albums.length });
       try {
         await saveAlbums();
-        const last = ALBUMS.albums[ALBUMS.albums.length - 1];
-        albCurrentId = (last && last.id) || albCurrentId;
-        input.value = "";
+        newInput.value = "";
+        if (newBar) newBar.hidden = true;
       } catch (err) { alert("新建相册失败：" + err.message); }
       renderAlbumsView();
     });
   }
-  const listEl = document.getElementById("albList");
-  if (listEl && !listEl.dataset.bound) {
-    listEl.dataset.bound = "1";
-    listEl.addEventListener("click", async (e) => {
-      const row = e.target.closest(".alb-item");
-      if (!row) return;
-      const a = albumOf(row.dataset.aid);
-      if (!a) return;
-      const act = e.target.closest("[data-alb-act]");
-      if (!act) { albCurrentId = a.id; renderAlbumsView(); return; }
-      if (act.dataset.albAct === "del") {
-        const ok = await askConfirmAsync(`删除相册「${a.name}」？`, "相册会被删除，其中的图片不受影响。", "删除");
+
+  /* 点击委托：封面进二级 / 相册内图片进灯箱或移出 / 二级的重命名与删除 */
+  body.addEventListener("click", async (e) => {
+    const cover = e.target.closest(".alb-cover");
+    if (cover) {
+      albCurrentId = cover.dataset.aid;
+      albLevel = "album";
+      renderAlbumsView();
+      return;
+    }
+    const actBtn = e.target.closest("[data-alb-act]");
+    if (actBtn && albLevel === "album") {
+      const cur = albumOf(albCurrentId);
+      if (!cur) return;
+      if (actBtn.dataset.albAct === "del") {
+        const ok = await askConfirmAsync(`删除相册「${cur.name}」？`, "相册会被删除，其中的图片不受影响。", "删除");
         if (!ok) return;
-        ALBUMS.albums = ALBUMS.albums.filter((x) => x.id !== a.id);
+        ALBUMS.albums = ALBUMS.albums.filter((x) => x.id !== cur.id);
         try { await saveAlbums(); } catch (err) { alert("删除失败：" + err.message); }
-        if (activeAlbumId === a.id) activeAlbumId = null;
+        if (activeAlbumId === cur.id) activeAlbumId = null;
+        albLevel = "list";
         renderAlbumsView();
         renderTagMenuContent();
         if (window.__applyFilter) window.__applyFilter();
-      } else if (act.dataset.albAct === "rename") {
-        const nm = prompt("相册名称", a.name);
+      } else if (actBtn.dataset.albAct === "rename") {
+        const nm = prompt("相册名称", cur.name);
         if (nm === null) return;
         const v = nm.trim();
-        if (!v || v === a.name) return;
-        a.name = v;
+        if (!v || v === cur.name) return;
+        cur.name = v;
         try { await saveAlbums(); } catch (err) { alert("重命名失败：" + err.message); }
         renderAlbumsView();
         renderTagMenuContent();
       }
-    });
-  }
-  const gridEl = document.getElementById("albGrid");
-  if (gridEl && !gridEl.dataset.bound) {
-    gridEl.dataset.bound = "1";
-    gridEl.addEventListener("click", async (e) => {
-      const card = e.target.closest(".alb-card");
-      if (!card) return;
-      const id = card.dataset.id;
-      if (e.target.closest("[data-alb-out]")) {
-        const a = albumOf(albCurrentId);
-        if (!a) return;
-        a.photoIds = a.photoIds.filter((x) => x !== id);
-        try { await saveAlbums(); } catch (err) { alert("移出失败：" + err.message); }
-        renderAlbumsView();
-        renderTagMenuContent();
-        if (window.__applyFilter) window.__applyFilter();
-        return;
-      }
-      openLightboxById(id);
-    });
-  }
+      return;
+    }
+    const photo = e.target.closest(".alb-photo");
+    if (!photo) return;
+    const id = photo.dataset.id;
+    if (e.target.closest("[data-alb-out]")) {
+      const cur = albumOf(albCurrentId);
+      if (!cur) return;
+      cur.photoIds = cur.photoIds.filter((x) => x !== id);
+      try { await saveAlbums(); } catch (err) { alert("移出失败：" + err.message); }
+      renderAlbumsView();
+      renderTagMenuContent();
+      if (window.__applyFilter) window.__applyFilter();
+      return;
+    }
+    openLightboxById(id);
+  });
+
+  /* 触摸手势（iOS 风格）：
+     相册页内右滑 → 二级回一级 / 一级退出回图库；
+     图库页右边缘左滑 → 进入相册页（限定从边缘起手，避免和卡片拖拽冲突） */
+  const SWIPE = 60;
+  let sx = 0, sy = 0, tracking = false;
+  page.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+  }, { passive: true });
+  page.addEventListener("touchend", (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if (dx > SWIPE && Math.abs(dx) > Math.abs(dy) * 1.6) closeAlbumPage(); // 右滑返回
+  }, { passive: true });
+
+  let gx = 0, gy = 0, gtrack = false;
+  document.addEventListener("touchstart", (e) => {
+    if (albOpenFlag || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (window.innerWidth - t.clientX > 60) return; // 仅右边缘 60px 内起手
+    gx = t.clientX; gy = t.clientY; gtrack = true;
+  }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    if (!gtrack) return;
+    gtrack = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - gx, dy = t.clientY - gy;
+    if (dx < -SWIPE && Math.abs(dx) > Math.abs(dy) * 1.6) openAlbumPage(); // 左滑进入相册
+  }, { passive: true });
+
+  // 桌面端：Esc 返回上一级
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !albOpenFlag) return;
+    if (document.querySelector(".lightbox.open")) return; // 灯箱自己处理
+    closeAlbumPage();
+  });
+
   renderAlbumsView();
 }
 /* 调试 / 测试钩子（与项目里 __refreshGallery 等一致） */
-window.__albumsState = () => ({ albums: ALBUMS.albums, current: albCurrentId });
+window.__albumsState = () => ({ albums: ALBUMS.albums, current: albCurrentId, level: albLevel, open: albOpenFlag });
 window.__reloadAlbums = async () => { await loadAlbums(); renderAlbumsView(); };
+window.__openAlbumPage = openAlbumPage;
+window.__closeAlbumPage = closeAlbumPage;
 
 function initAlbumModal() {  const modal = document.getElementById("albumModal");
   if (!modal) return;
@@ -4950,6 +5049,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initImportUrl();
   initAiSettings();
   initAlbumModal();
+  initAlbumPage(); // v0.34：相册整页（FAB 相册按钮 / 右边缘左滑进入）
   initLogsUI();
   initWmSettings();
   initLang();
@@ -4984,21 +5084,18 @@ function initPageSwitch() {
     settings: document.getElementById("panelSettings"),
     search: document.getElementById("panelSearch"),
     tags: document.getElementById("panelTags"),
-    albums: document.getElementById("panelAlbums"), // v0.32
   };
   const btnBack = {
     upload: document.getElementById("btnBackUpload"),
     settings: document.getElementById("btnBackSettings"),
     search: document.getElementById("btnBackSearch"),
     tags: document.getElementById("btnBackTags"),
-    albums: document.getElementById("btnBackAlbums"),
   };
   const btnClose = {
     upload: document.getElementById("closeUpload"),
     settings: document.getElementById("closeSettings"),
     search: document.getElementById("closeSearch"),
     tags: document.getElementById("closeTags"),
-    albums: document.getElementById("closeAlbums"),
   };
   const menuItems = pageMenu.querySelectorAll(".page-menu-item");
   const displacement = document.getElementById("genieDisplacement");
@@ -5121,20 +5218,11 @@ function initPageSwitch() {
     if (!existed) {
       openStack.push(page);
       refreshStack();
-      // v0.32：相册窗口从右侧滑入（其余窗口仍是右下角 genie 展开）
-      if (page === "albums") {
-        el.classList.add("open");
-        el.classList.add("slide-in");
-        setTimeout(() => el.classList.remove("slide-in"), 520);
-        if (typeof initAlbumsView === "function") initAlbumsView();
-      } else {
-        genie(el, 1, () => {});
-      }
+      genie(el, 1, () => {});
     } else {
       openStack.splice(openStack.indexOf(page), 1);
       openStack.push(page);
       refreshStack();
-      if (page === "albums" && typeof initAlbumsView === "function") initAlbumsView();
     }
   }
 
@@ -5198,7 +5286,7 @@ function initPageSwitch() {
 
   // 供快捷键等外部调用
   window.__openWindow = openWindow;
-  // v0.32：FAB 上方的相册按钮 —— 点击右滑进入相册窗口
+  // v0.34：FAB 上方的相册按钮 —— 打开独立相册整页（左滑进入的页面）
   const fabAlbumsBtn = document.getElementById("fabAlbumsBtn");
   if (fabAlbumsBtn) {
     fabAlbumsBtn.addEventListener("click", (e) => {
@@ -5212,7 +5300,7 @@ function initPageSwitch() {
       fabPageBtn.classList.remove("open");
       flyoutOpenCount = 0;
       syncFabGroup();
-      openWindow("albums");
+      openAlbumPage();
     });
   }
 

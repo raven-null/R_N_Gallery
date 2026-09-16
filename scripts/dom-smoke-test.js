@@ -278,27 +278,35 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
   }
 
-  /* 相册窗口（v0.32）：FAB 上方按钮进入，左右两栏 */
+  /* 相册整页（v0.34）：FAB 相册按钮进入，iOS 风格一级/二级 */
   const fabAlb = doc.getElementById("fabAlbumsBtn");
   check("FAB 有相册按钮", !!fabAlb);
   check("页面切换菜单已移除「图库」项", !doc.querySelector('#pageMenu [data-page="gallery"]'));
   const clickEl = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   if (fabAlb) {
     clickEl(fabAlb);
-    await wait(700);
-    const panel = doc.getElementById("panelAlbums");
-    check("点击后相册窗口打开", !!panel && panel.classList.contains("open"));
-    check("左栏有新建相册输入框", !!doc.getElementById("albNewName2"));
+    await wait(800);
+    const page = doc.getElementById("albumPage");
+    check("点击后相册整页打开", !!page && page.classList.contains("open"));
+    check("有顶部导航栏与大标题容器", !!doc.getElementById("albNavTitle") && !!doc.getElementById("albumBody"));
+    const addBtn = doc.getElementById("albAddBtn");
+    if (addBtn) {
+      clickEl(addBtn);
+      await wait(250);
+      const bar = doc.getElementById("albNewBar");
+      check("点＋展开新建相册输入框", !!bar && !bar.hidden && !!doc.getElementById("albNewName"));
+    }
     if (!TOKEN) {
-      const inp = doc.getElementById("albNewName2");
+      const inp = doc.getElementById("albNewName");
       if (inp) {
         const albName = "zz测试相册" + Math.random().toString(36).slice(2, 5);
         inp.value = albName;
         inp.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        await wait(1500);
+        await wait(1800);
         const st = window.__albumsState ? window.__albumsState() : { albums: [] };
         const created = st.albums[st.albums.length - 1];
-        check("新建相册出现在左栏", !!created && doc.querySelectorAll("#albList .alb-item").length > 0, created ? created.name : "");
+        const covers = doc.querySelectorAll("#albumBody .alb-cover").length;
+        check("新建相册出现在一级网格", !!created && covers > 0, created ? `${created.name}（${covers} 个封面）` : "");
         const firstCard = doc.querySelector("#grid .card");
         const photoId = firstCard && firstCard.dataset.id;
         if (created && photoId) {
@@ -314,9 +322,25 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
               body: JSON.stringify({ albums }),
             });
             await window.__reloadAlbums();
-            await wait(500);
-            const n = doc.querySelectorAll("#albGrid .alb-card").length;
-            check("右栏显示相册内图片", n > 0, `${n} 张`);
+            await wait(400);
+            // 点封面进二级，应看到照片网格
+            const cover = doc.querySelector(`#albumBody .alb-cover[data-aid="${created.id}"]`);
+            if (cover) {
+              clickEl(cover);
+              await wait(500);
+              const photos = doc.querySelectorAll("#albumBody .alb-photo").length;
+              const lv = window.__albumsState ? window.__albumsState().level : "?";
+              check("点封面进入二级并显示照片", photos > 0 && lv === "album", `${photos} 张，层级=${lv}`);
+              // 返回按钮：二级 → 一级 → 关闭
+              clickEl(doc.getElementById("albBack"));
+              await wait(400);
+              const lv2 = window.__albumsState ? window.__albumsState().level : "?";
+              check("返回按钮：二级退回一级", lv2 === "list", `层级=${lv2}`);
+              clickEl(doc.getElementById("albBack"));
+              await wait(600);
+              const stillOpen = doc.getElementById("albumPage").classList.contains("open");
+              check("再点返回关闭相册页", !stillOpen);
+            }
           }
         }
       }
