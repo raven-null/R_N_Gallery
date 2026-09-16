@@ -951,24 +951,29 @@ async function tagsRename(req) {
   const from = String(body.from || "").trim();
   const to = String(body.to || "").trim();
   if (!from || !to) return badRequest("需要 from 与 to");
+  if (from === to) return json({ ok: true, photos: 0, merged: false });
   const s = store();
   const cfg = await loadConfig(s);
   const idx = cfg.tags.findIndex((t) => t.name === from);
-  if (idx < 0) return notFound(`标签不存在: ${from}`);
-  if (from === to) return json({ ok: true, photos: 0, merged: false });
-
   const merged = cfg.tags.some((t) => t.name === to);
-  if (merged) {
-    // 合并：别名并入目标（去重）
-    const fromTag = cfg.tags[idx];
-    const toTag = cfg.tags.find((t) => t.name === to);
-    const aliases = new Set(toTag.aliases || []);
-    (fromTag.aliases || []).forEach((a) => aliases.add(a));
-    aliases.delete(to);
-    toTag.aliases = [...aliases];
-    cfg.tags.splice(idx, 1);
-  } else {
-    cfg.tags[idx].name = to;
+
+  if (idx >= 0) {
+    if (merged) {
+      // 合并：别名并入目标（去重）
+      const fromTag = cfg.tags[idx];
+      const toTag = cfg.tags.find((t) => t.name === to);
+      const aliases = new Set(toTag.aliases || []);
+      (fromTag.aliases || []).forEach((a) => aliases.add(a));
+      aliases.delete(to);
+      toTag.aliases = [...aliases];
+      cfg.tags.splice(idx, 1);
+    } else {
+      cfg.tags[idx].name = to;
+    }
+  } else if (!merged) {
+    // v0.33：配置里暂时看不到旧名（刚新建、Blobs 写入还没传播）时**不要直接失败**，
+    // 至少保证新名存在于配置里；照片引用照样改写，前端随后会用完整配置 PUT 覆盖对齐。
+    cfg.tags.push({ id: `t-${nanoid(6)}`, name: to, aliases: [], group: "", color: null, sort: cfg.tags.length });
   }
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
@@ -1028,14 +1033,14 @@ async function categoryRename(req) {
   const s = store();
   const cfg = await loadConfig(s);
   const cats = normCategories(cfg.categories);
-  const idx = cats.findIndex((c) => c.name === from);
-  if (idx < 0) return notFound(`主分类不存在: ${from}`);
   if (cats.some((c) => c.name === to)) return badRequest(`主分类已存在: ${to}`);
-  cats[idx].name = to;
+  const idx = cats.findIndex((c) => c.name === from);
+  if (idx >= 0) cats[idx].name = to;
+  else cats.push({ id: `c-${nanoid(6)}`, name: to, color: null, sort: cats.length }); // v0.33：宽容处理（配置暂不可见旧名时不失败）
   cfg.categories = cats;
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
-  const photos = await rewriteByCategory(s, (cats) => (cats.includes(from) ? cats.map((c) => (c === from ? to : c)) : null));
+  const photos = await rewriteByCategory(s, (cats2) => (cats2.includes(from) ? cats2.map((c) => (c === from ? to : c)) : null));
   logAction(req, "主分类改名", `${from} → ${to}（${photos} 张照片）`);
   return json({ ok: true, photos });
 }
@@ -1053,9 +1058,8 @@ async function categoryRemove(req) {
 
   const s = store();
   const cfg = await loadConfig(s);
-  const before = cfg.categories.length;
-  cfg.categories = cfg.categories.filter((c) => c.name !== name);
-  if (cfg.categories.length === before) return notFound(`主分类不存在: ${name}`);
+  // v0.33：配置里找不到该分类也继续（可能刚删除或写入未传播）——照片引用照样清理，不再直接报错
+  cfg.categories = (Array.isArray(cfg.categories) ? cfg.categories : []).filter((c) => c.name !== name);
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
   const photos = await rewriteByCategory(s, (cats) => (cats.includes(name) ? cats.filter((c) => c !== name) : null));

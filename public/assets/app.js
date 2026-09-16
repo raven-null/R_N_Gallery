@@ -4291,6 +4291,7 @@ function openCatModal(mode, payload) {
       try {
         await apiRemoveCategory(name);
         removeCategoryLocally(name); // v0.31：本地立即生效（不等 Blobs 重读）
+        await apiSaveTags();         // v0.33：用本地配置覆盖服务端
         refreshTagUI();
         if (window.__renderGallery) window.__renderGallery();
         closeTagModal();
@@ -4514,6 +4515,7 @@ function openTagModal(mode, payload, presetName, presetGroup) {
       try {
         await apiRemoveTag(name);
         removeTagLocally(name); // v0.31：本地立即生效（不等 Blobs 重读）
+        await apiSaveTags();    // v0.33：用本地（已删）的完整配置覆盖服务端，避免读延迟把标签带回来
         refreshTagUI();
         if (window.__renderGallery) window.__renderGallery();
         closeTagModal();
