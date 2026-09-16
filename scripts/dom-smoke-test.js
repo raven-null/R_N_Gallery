@@ -278,6 +278,50 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
   }
 
+  /* 标签改名后界面立即更新（v0.31）——用一次性临时标签，最后删掉，避免动到真实标签 */
+  const uniq = "zz测试" + Math.random().toString(36).slice(2, 6);
+  const renamedName = uniq + "改";
+  const clickBtn = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  const pillEditByName = (nm) => [...doc.querySelectorAll("#tagMgrRoot .tmgr-pill .act[data-tact='edit']")].find((b) => b.dataset.tname === nm);
+
+  const newTagBtn = doc.getElementById("btnNewTag");
+  if (newTagBtn) {
+    clickBtn(newTagBtn);
+    await wait(300);
+    const n1 = doc.querySelector("#tagModalBody #fName");
+    const s1 = doc.querySelector("#tagModalBody #fSave");
+    if (n1 && s1) { n1.value = uniq; clickBtn(s1); await wait(1500); }
+    window.__refreshTagManager();
+    await wait(300);
+    check("新建的未分组标签能在分组视图看到", !!pillEditByName(uniq), uniq);
+    const editBtn = pillEditByName(uniq);
+    if (editBtn) {
+      clickBtn(editBtn);
+      await wait(300);
+      const n2 = doc.querySelector("#tagModalBody #fName");
+      const s2 = doc.querySelector("#tagModalBody #fSave");
+      if (n2 && s2) {
+        n2.value = renamedName;
+        const t0 = Date.now();
+        clickBtn(s2);
+        await wait(500); // 只等本地渲染，刻意不等服务端重读
+        const shown = !!pillEditByName(renamedName);
+        check("改名后界面立即更新（不等服务端）", shown, `耗时 ${Date.now() - t0}ms`);
+      }
+      // 清理：删除这个临时标签
+      window.__refreshTagManager();
+      await wait(300);
+      const delBtn = [...doc.querySelectorAll("#tagMgrRoot .tmgr-pill .act[data-tact='remove']")].find((b) => b.dataset.tname === renamedName);
+      if (delBtn) {
+        clickBtn(delBtn);
+        await wait(300);
+        const confirm = doc.querySelector("#tagModalBody #fConfirm");
+        if (confirm) { clickBtn(confirm); await wait(1500); }
+        check("临时标签已清理", !pillEditByName(renamedName));
+      }
+    }
+  }
+
   /* 组头旁「＋」= 直接在该组新建标签，所属组预选（v0.30） */
   const gnewBtn = doc.querySelector("#tagMgrRoot [data-gnew]");
   check("组头有「＋」新建标签入口", !!gnewBtn);

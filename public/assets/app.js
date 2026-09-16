@@ -383,6 +383,9 @@ async function apiSaveTags() {
   if (!d.ok) throw new Error(d.error || "保存标签配置失败");
   if (d.config) TAGS = d.config;
 }
+/* v0.31：改名 / 删除类接口不再内部重读配置（loadTags）。
+   Netlify Blobs 写入后读取有 1~2 分钟延迟，重读会拿到旧数据，
+   界面就会长时间显示旧名 —— 改为「后端写入 + 前端本地立即生效」。 */
 async function apiRenameTag(from, to) {
   const res = await apiFetch("/api/tags/rename", {
     method: "POST",
@@ -391,7 +394,6 @@ async function apiRenameTag(from, to) {
   });
   const d = await res.json();
   if (!d.ok) throw new Error(d.error || "改名失败");
-  await loadTags();
   return d;
 }
 async function apiRemoveTag(name) {
@@ -402,7 +404,6 @@ async function apiRemoveTag(name) {
   });
   const d = await res.json();
   if (!d.ok) throw new Error(d.error || "删除失败");
-  await loadTags();
   return d;
 }
 /* ---------- 主分类管理 API（v0.15） ---------- */
@@ -414,7 +415,6 @@ async function apiRenameCategory(from, to) {
   });
   const d = await res.json();
   if (!d.ok) throw new Error(d.error || "主分类改名失败");
-  await loadTags();
   return d;
 }
 async function apiRemoveCategory(name) {
@@ -425,8 +425,46 @@ async function apiRemoveCategory(name) {
   });
   const d = await res.json();
   if (!d.ok) throw new Error(d.error || "删除主分类失败");
-  await loadTags();
   return d;
+}
+
+/* ---------- 本地即时更新（v0.31）：改名 / 删除后立刻反映到界面，不等服务端重读 ---------- */
+/* 标签改名（若目标已存在 = 合并：删掉旧名记录，引用都指向新名） */
+function renameTagLocally(from, to) {
+  const exists = TAGS.tags.some((t) => t.name === to);
+  if (exists) TAGS.tags = TAGS.tags.filter((t) => t.name !== from);
+  else {
+    const t = TAGS.tags.find((x) => x.name === from);
+    if (t) t.name = to;
+  }
+  PHOTOS.forEach((p) => {
+    if (Array.isArray(p.tags) && p.tags.includes(from)) {
+      p.tags = [...new Set(p.tags.map((x) => (x === from ? to : x)))].slice(0, 10);
+    }
+  });
+}
+function removeTagLocally(name) {
+  TAGS.tags = TAGS.tags.filter((t) => t.name !== name);
+  PHOTOS.forEach((p) => {
+    if (Array.isArray(p.tags) && p.tags.includes(name)) {
+      p.tags = p.tags.filter((x) => x !== name);
+    }
+  });
+}
+function renameCategoryLocally(from, to) {
+  const c = (TAGS.categories || []).find((x) => x.name === from);
+  if (c) c.name = to;
+  PHOTOS.forEach((p) => {
+    const cats = catsOf(p);
+    if (cats.includes(from)) p.categories = cats.map((x) => (x === from ? to : x));
+  });
+}
+function removeCategoryLocally(name) {
+  TAGS.categories = (TAGS.categories || []).filter((c) => c.name !== name);
+  PHOTOS.forEach((p) => {
+    const cats = catsOf(p);
+    if (cats.includes(name)) p.categories = cats.filter((x) => x !== name);
+  });
 }
 
 /* ---------- 图库状态组件（v0.9.5）：loading / empty / error / null ---------- */
@@ -3107,15 +3145,24 @@ function refreshTagManager() {
           if (!folded) html += mgrPills(items, counts);
         }
       }
-      const freeNames = used.filter((n) => !tagByName(n));
-      if (freeNames.length) {
-        const foldedFree = isTmgrFolded("__free", freeNames.length);
-        html += `<div class="tmgr-head foldable${foldedFree ? " folded" : ""}" data-gfold="__free" data-gcount="${freeNames.length}" style="margin-top:6px" title="${foldedFree ? "点击展开" : "点击折叠"}">
+      // v0.31：未分组区同时展示「库里但未归组」的标签与「照片里有但库里没有」的游离标签
+      // （此前只显示游离标签，导致新建的未分组标签在分组视图里看不到）
+      const libLoose = TAGS.tags
+        .filter((t) => !t.group)
+        .sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
+      const looseFree = used.filter((n) => !tagByName(n));
+      const looseItems = [
+        ...libLoose,
+        ...looseFree.map((n) => ({ name: n, color: null, group: "" })),
+      ];
+      if (looseItems.length) {
+        const foldedFree = isTmgrFolded("__free", looseItems.length);
+        html += `<div class="tmgr-head foldable${foldedFree ? " folded" : ""}" data-gfold="__free" data-gcount="${looseItems.length}" style="margin-top:6px" title="${foldedFree ? "点击展开" : "点击折叠"}">
           <span class="caret">▾</span>
-          <i class="dot"></i>未分组 · 待整理<span class="cnt">${freeNames.length}</span>
+          <i class="dot"></i>未分组 · 待整理<span class="cnt">${looseItems.length}</span>
           <button class="act" data-gnew="" title="新建「未分组」标签">＋</button>
         </div>`;
-        if (!foldedFree) html += mgrPills(freeNames.map((n) => ({ name: n, color: null, group: "" })), counts);
+        if (!foldedFree) html += mgrPills(looseItems, counts);
       }
     }
   } else if (view === "classify") {
@@ -4121,9 +4168,9 @@ function openCatModal(mode, payload) {
       b.textContent = "删除中…";
       try {
         await apiRemoveCategory(name);
-        await loadData();
-        if (window.__refreshGallery) window.__refreshGallery();
+        removeCategoryLocally(name); // v0.31：本地立即生效（不等 Blobs 重读）
         refreshTagUI();
+        if (window.__renderGallery) window.__renderGallery();
         closeTagModal();
       } catch (err) {
         b.disabled = false;
@@ -4191,15 +4238,17 @@ function openCatModal(mode, payload) {
       if (target) {
         if (name !== target.name) {
           if (catByName(name)) { busy(fSave, null); return showErr(`主分类「${name}」已存在`); }
-          await apiRenameCategory(target.name, name); // 后端同步照片
+          const from = target.name;
+          await apiRenameCategory(from, name); // 后端同步照片
+          renameCategoryLocally(from, name);   // v0.31：本地立即生效
           const nt = catByName(name);
           if (nt) nt.color = color;
         } else {
           target.color = color;
         }
         await apiSaveTags();
-        await loadData(); // 改名后照片引用已同步 → 重载统一刷新
-        if (window.__refreshGallery) window.__refreshGallery();
+        refreshTagUI();
+        if (window.__renderGallery) window.__renderGallery();
       } else {
         if (catByName(name)) { busy(fSave, null); return showErr(`主分类「${name}」已存在`); }
         TAGS.categories.push({ id: "", name, color, sort: TAGS.categories.length });
@@ -4342,8 +4391,9 @@ function openTagModal(mode, payload, presetName, presetGroup) {
       b.textContent = "删除中…";
       try {
         await apiRemoveTag(name);
-        await loadData();
-        if (window.__refreshGallery) window.__refreshGallery();
+        removeTagLocally(name); // v0.31：本地立即生效（不等 Blobs 重读）
+        refreshTagUI();
+        if (window.__renderGallery) window.__renderGallery();
         closeTagModal();
       } catch (err) {
         b.disabled = false;
@@ -4474,8 +4524,10 @@ function openTagModal(mode, payload, presetName, presetGroup) {
         if (target) {
           if (name !== target.name) {
             renamed = true;
+            const from = target.name;
             // 改名：后端同步照片引用（名称即引用键）
-            await apiRenameTag(target.name, name);
+            await apiRenameTag(from, name);
+            renameTagLocally(from, name); // v0.31：本地立即生效，不等 Blobs 重读
             const nt = tagByName(name);
             if (nt) { nt.color = color; nt.group = gid; nt.aliases = aliases; }
           } else {
@@ -4486,12 +4538,9 @@ function openTagModal(mode, payload, presetName, presetGroup) {
         }
       }
       await apiSaveTags();
-      if (renamed) {
-        await loadData(); // 照片引用已同步改名 → 重载后统一刷新
-        if (window.__refreshGallery) window.__refreshGallery();
-      } else {
-        refreshTagUI();
-      }
+      // v0.31：改名 / 删除一律本地即时刷新，不再 loadData 重读（避开 Blobs 写后读延迟）
+      refreshTagUI();
+      if (window.__renderGallery) window.__renderGallery();
       closeTagModal();
     } catch (err) {
       busy(fSave, null);
