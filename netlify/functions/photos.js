@@ -32,6 +32,7 @@ const PREFIX_IMG = "img/";
 const KEY_TAGS = "tags-config"; // 标签分组配置（v0.11 / v0.15 主分类）
 const KEY_ALBUMS = "albums-config"; // 相册配置（v0.12）
 const KEY_LOGS = "logs"; // 操作日志（v0.12）
+const KEY_INDEX = "photos-index"; // 列表索引（v0.24）：轻量元数据数组，避免列表接口逐个读 meta
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 /* 内置主分类（上传必选、可多选；照片 meta.categories 存名称数组，名称即引用键）
    首次读写配置时若 categories 缺失则自动补这份默认值 */
@@ -174,6 +175,7 @@ exports.default = async (req) => {
     if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 1) return getMeta(rest[0]);
     if (method === "POST" && path.endsWith("/api/photos")) return upload(req);
     if (method === "POST" && path.endsWith("/api/photos/reindex-dhash")) return reindexDHash(req); // v0.21 补算感知哈希
+    if (method === "POST" && path.endsWith("/api/photos/reindex")) return reindexIndex(req); // v0.24 重建列表索引
     if (method === "PATCH" && path.startsWith("/api/photos/") && rest.length === 1) return patch(req, rest[0]);
     if (method === "DELETE" && path.endsWith("/api/photos")) return clearAll(req);
     if (method === "DELETE" && path.startsWith("/api/photos/") && rest.length === 1) return remove(req, rest[0]);
@@ -196,6 +198,7 @@ exports.config = {
     "/api/photos/:id/thumb",
     "/api/photos/check",
     "/api/photos/reindex-dhash",
+    "/api/photos/reindex",
     "/api/photos/:id/image",
     "/api/meta/stats",
     "/api/export",
@@ -346,23 +349,93 @@ async function scrubAlbums(ids) {
   } catch (e) { /* ignore */ }
 }
 
-/* ---------- 列表（分页） ---------- */
+/* ============================================================
+   照片列表索引（v0.24）：把列表/筛选/搜索所需的轻量字段存在一个 Blob 里
+   —— 图片字节仍按需取（raw / thumb），但列表接口不必再逐个读 meta，
+   几千张时从「几千次 Blobs 读」降到「一次读」。
+   索引会在上传/编辑/删除/导入时增量维护，批量改写（改名、删标签、删分类）后整体重建。
+   ============================================================ */
+function indexEntry(m) {
+  return {
+    id: m.id,
+    title: m.title || "",
+    desc: m.desc || "",
+    tags: Array.isArray(m.tags) ? m.tags : [],
+    categories: Array.isArray(m.categories) ? m.categories : (m.category ? [m.category] : []),
+    r18: m.r18 === true,
+    width: m.width || 0,
+    height: m.height || 0,
+    size: m.size || 0,
+    mime: m.mime || "",
+    uploadedAt: m.uploadedAt || "",
+    takenAt: m.takenAt || "",
+    thumbKey: m.thumbKey || null,
+    hash: m.hash || null,
+    dhash: m.dhash || null,
+    src: m.src || null,
+  };
+}
+async function indexGet(s) {
+  const raw = await s.get(KEY_INDEX, { type: "json" });
+  return Array.isArray(raw) ? raw : null;
+}
+const indexSet = (s, arr) => s.set(KEY_INDEX, JSON.stringify(arr));
+/* 全量重建（低频操作后调用；也能修复索引与 meta 不一致） */
+async function indexRebuild(s) {
+  const out = [];
+  let cursor;
+  do {
+    const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
+    for (const item of res.blobs) {
+      const m = await s.get(item.key, { type: "json" });
+      if (m) out.push(indexEntry(m));
+    }
+    cursor = res.nextCursor;
+  } while (cursor);
+  out.sort((a, b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
+  await indexSet(s, out);
+  return out;
+}
+/* 索引不存在时构建（老库第一次访问会慢一次，之后走索引） */
+async function indexEnsure(s) {
+  const cur = await indexGet(s);
+  if (cur) return cur;
+  return indexRebuild(s);
+}
+async function indexUpsert(s, meta) {
+  const arr = (await indexGet(s)) || [];
+  const e = indexEntry(meta);
+  const i = arr.findIndex((x) => x.id === e.id);
+  if (i >= 0) arr[i] = e;
+  else {
+    arr.unshift(e);
+    arr.sort((a, b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
+  }
+  await indexSet(s, arr);
+}
+async function indexDrop(s, ids) {
+  const arr = await indexGet(s);
+  if (!arr) return;
+  const del = new Set(ids);
+  await indexSet(s, arr.filter((x) => !del.has(x.id)));
+}
+
+/* ---------- 列表（v0.24：走索引，分页用数字偏移） ---------- */
 async function list(url) {
   const q = url.searchParams;
-  const limit = Math.min(parseInt(q.get("limit"), 10) || 60, 200);
+  const limit = Math.min(parseInt(q.get("limit"), 10) || 60, 500);
   const s = store();
-  const res = await s.list({ prefix: PREFIX_META, cursor: q.get("cursor"), limit });
-  const photos = [];
-  for (const item of res.blobs) {
-    const m = await s.get(item.key, { type: "json" });
-    if (m) photos.push({ ...m, r18: isR18Photo(m) }); // r18 标记由后端统一判定（标签 / 主分类 / 独立字段）
-  }
-  photos.sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""));
-  return json({ photos, cursor: res.nextCursor || null, hasMore: !!res.nextCursor });
+  const arr = await indexEnsure(s);
+  const start = Math.max(parseInt(q.get("cursor"), 10) || 0, 0);
+  const page = arr.slice(start, start + limit).map((e) => ({ ...e, r18: isR18Photo(e) }));
+  const nextStart = start + limit;
+  const next = nextStart < arr.length ? String(nextStart) : null;
+  return json({ photos: page, cursor: next, hasMore: !!next, total: arr.length });
 }
 
 /* ---------- 单张元数据 ---------- */
-async function getMeta(id) {  const m = await store().get(`${PREFIX_META}${id}.json`, { type: "json" });
+async function getMeta(id) {
+  const m = await store().get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
   return json({ photo: { ...m, r18: isR18Photo(m) } });
 }
@@ -418,6 +491,7 @@ async function replaceImage(req, id) {
   await saveThumb(s, meta, id, buf, thumb); // 前端缩略图优先，否则服务端生成
   meta.updatedAt = new Date().toISOString();
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
+  await indexUpsert(s, meta); // v0.24 同步列表索引（尺寸/大小/哈希都变了）
   logAction(req, "替换图片内容", (meta.title || id) + ` ${dims.width}x${dims.height}`);
   return json({ ok: true, photo: meta });
 }
@@ -440,6 +514,7 @@ async function thumb(id, req, url) {
       meta.thumbMime = "image/webp";
       await s.set(meta.thumbKey, out);
       await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
+      await indexUpsert(s, meta); // v0.24 懒生成缩略图后同步索引
       buf = out;
     } catch (e) {
       return notFound("Thumbnail generation failed");
@@ -498,7 +573,15 @@ async function reindexDHash(req) {
     cursor = res.nextCursor;
   } while (cursor);
   logAction(req, "补算感知哈希", `${updated} 张已补算 / ${skipped} 张已有 / ${failed} 张失败`);
+  if (updated) await indexRebuild(s); // v0.24：索引里的 dhash 也一起刷新
   return json({ ok: true, updated, skipped, failed });
+}
+
+/* ---------- POST /api/photos/reindex：重建列表索引（v0.24，可修复索引与 meta 不一致） ---------- */
+async function reindexIndex(req) {
+  const arr = await indexRebuild(store());
+  logAction(req, "重建列表索引", `${arr.length} 张`);
+  return json({ ok: true, count: arr.length });
 }
 
 /* ---------- 上传 ---------- */
@@ -543,6 +626,7 @@ async function upload(req) {
   await s.set(origKey, buf);
   await saveThumb(s, meta, id, buf, thumb); // 前端缩略图优先，否则服务端生成（v0.13.8）
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
+  await indexUpsert(s, meta); // v0.24 同步列表索引
   logAction(req, "上传图片", meta.title);
   return json({ ok: true, photo: meta }, 201);
 }
@@ -569,6 +653,7 @@ async function patch(req, id) {
   if (body.r18 !== undefined) meta.r18 = body.r18 === true || body.r18 === "true" || body.r18 === 1; // R18 独立开关
   if (body.takenAt !== undefined) meta.takenAt = body.takenAt;
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
+  await indexUpsert(s, meta); // v0.24 同步列表索引
   logAction(req, "编辑图片", meta.title || id);
   return json({ ok: true, photo: meta });
 }
@@ -581,6 +666,7 @@ async function remove(req, id) {
   await s.delete(meta.origKey || `${PREFIX_IMG}${id}`);
   if (meta.thumbKey) await s.delete(meta.thumbKey);
   await s.delete(`${PREFIX_META}${id}.json`);
+  await indexDrop(s, [id]); // v0.24 同步列表索引
   await scrubAlbums([id]);
   logAction(req, "删除图片", meta.title || id);
   return json({ ok: true });
@@ -607,28 +693,20 @@ async function clearAll(req) {
   return json({ ok: true, deleted });
 }
 
-/* ---------- 用量统计 ---------- */
+/* ---------- 用量统计（v0.24：走索引，不再逐个读 meta） ---------- */
 async function stats() {
   const s = store();
-  let cursor;
-  let count = 0;
+  const arr = await indexEnsure(s);
   let bytes = 0;
   const byMonth = {};
-  do {
-    const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
-    for (const item of res.blobs) {
-      const m = await s.get(item.key, { type: "json" });
-      if (!m) continue;
-      count++;
-      bytes += m.size || 0;
-      const month = (m.uploadedAt || "").slice(0, 7) || "unknown";
-      byMonth[month] = (byMonth[month] || 0) + 1;
-    }
-    cursor = res.nextCursor;
-  } while (cursor);
+  for (const e of arr) {
+    bytes += e.size || 0;
+    const month = String(e.uploadedAt || "").slice(0, 7) || "unknown";
+    byMonth[month] = (byMonth[month] || 0) + 1;
+  }
   // 配额（默认 1GB，可用 QUOTA_BYTES 环境变量覆盖）
   const quota = Math.max(parseInt(process.env.QUOTA_BYTES, 10) || 1024 * 1024 * 1024, 1);
-  return json({ count, bytes, byMonth, quota });
+  return json({ count: arr.length, bytes, byMonth, quota });
 }
 
 /* ---------- 导出全部元数据 ---------- */
@@ -696,6 +774,7 @@ async function importStatic(req) {
       await s.set(origKey, buf);
       await saveThumb(s, meta, id, buf, null); // 导入图无前端缩略图 → 服务端生成（v0.13.8）
       await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
+      await indexUpsert(s, meta); // v0.24 同步列表索引
       imported++;
     } catch (e) {
       errors.push({ url: typeof item === "string" ? item : item && item.url, error: e.message });
@@ -737,6 +816,7 @@ async function rewritePhotos(s, fn) {
     }
     cursor = res.nextCursor;
   } while (cursor);
+  if (changed) await indexRebuild(s); // v0.24：批量改写后重建列表索引
   return changed;
 }
 
@@ -779,6 +859,7 @@ async function rewriteByCategory(s, fn) {
     }
     cursor = res.nextCursor;
   } while (cursor);
+  if (changed) await indexRebuild(s); // v0.24：批量改写后重建列表索引
   return changed;
 }
 

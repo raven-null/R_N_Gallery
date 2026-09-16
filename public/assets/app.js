@@ -433,20 +433,49 @@ function showGalleryState(mode) {
   }
 }
 
+const FIRST_PAGE = 120; // v0.24：首屏只取 120 张，秒开
+const NEXT_PAGE = 200;  // 其余后台分批静默补齐
+const mapPhoto = (p) => ({
+  ...p,
+  url: mediaUrl(p.id, "raw"),
+  thumbUrl: p.thumbKey ? mediaUrl(p.id, "thumb") : null,
+});
+async function fetchPhotosPage(cursor, limit) {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (cursor) qs.set("cursor", String(cursor));
+  const res = await fetch(`/api/photos?${qs}`, { headers: apiHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error("api unavailable");
+  return res.json();
+}
+/* 后台静默补齐剩余照片（不阻塞首屏；补齐后刷新菜单计数与列表数据） */
+let bgLoading = false;
+async function backgroundLoad(cursor) {
+  if (bgLoading) return;
+  bgLoading = true;
+  let c = cursor;
+  try {
+    while (c) {
+      const page = await fetchPhotosPage(c, NEXT_PAGE);
+      const items = (page.photos || []).map(mapPhoto);
+      if (!items.length) break;
+      const known = new Set(PHOTOS.map((p) => p.id));
+      PHOTOS.push(...items.filter((p) => !known.has(p.id)));
+      c = page.cursor || null;
+      renderTagMenuContent();
+    }
+  } catch (e) { /* 补齐失败不影响已显示的内容 */ }
+  bgLoading = false;
+  if (window.__photosGrown) window.__photosGrown(); // 让图库墙把新数据纳入筛选（保留当前显示数量）
+}
+
 async function loadData() {
   showGalleryState("loading");
   try {
-    // cache: no-store 强制绕过浏览器缓存，确保上传后立即可见（v0.9.19）
-    const res = await fetch("/api/photos?limit=200", { headers: apiHeaders(), cache: "no-store" });
-    if (!res.ok) throw new Error("api unavailable");
-    const data = await res.json();
-    PHOTOS = (data.photos || []).map((p) => ({
-      ...p,
-      url: mediaUrl(p.id, "raw"),
-      thumbUrl: p.thumbKey ? mediaUrl(p.id, "thumb") : null,
-    }));
+    const first = await fetchPhotosPage(null, FIRST_PAGE);
+    PHOTOS = (first.photos || []).map(mapPhoto);
     USE_API = true;
     showGalleryState(null); // 由 render 决定显示图片或空态
+    if (first.hasMore) backgroundLoad(first.cursor); // 剩余的后台补齐
   } catch (e) {
     PHOTOS = [];
     showGalleryState("error");
@@ -1262,6 +1291,13 @@ function initGallery() {
     initReveal(grid, ".card");
   }
   window.__renderGallery = () => render();
+  // v0.24：后台补齐照片后，把新数据纳入当前筛选；显示数量不多时直接重建列表（保留已显示张数）
+  window.__photosGrown = () => {
+    renderTagMenuContent();
+    filtered = sortPhotos(PHOTOS.filter((p) => albumPred(p) && basePred(p)));
+    if (shown <= 300) render();
+    else updateLoadMore();
+  };
 
   /* 无限滚动（v0.13.2：增量追加，不再清空重建，杜绝整页闪屏） */
   let scrollBusy = false;
