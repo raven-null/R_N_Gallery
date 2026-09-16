@@ -235,6 +235,39 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(200);
   }
 
+  /* 分组视图：标签组折叠（v0.29） */
+  window.localStorage.setItem("rn_tmgr_view", "group");
+  window.localStorage.removeItem("rn_tmgr_fold");
+  window.__refreshTagManager();
+  await wait(400);
+  const heads = [...doc.querySelectorAll("#tagMgrRoot [data-gfold]")];
+  check("分组视图有可折叠的组头", heads.length > 0, `${heads.length} 个组`);
+  const bigHead = heads.find((h) => Number(h.dataset.gcount) > 20);
+  if (bigHead) {
+    const next = bigHead.nextElementSibling;
+    check("标签多的组默认折叠", bigHead.classList.contains("folded") && !(next && next.classList.contains("tmgr-pills")),
+      `${bigHead.textContent.trim().replace(/\s+/g, " ")}`);
+    bigHead.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await wait(400);
+    const again = [...doc.querySelectorAll("#tagMgrRoot [data-gfold]")].find((h) => h.dataset.gfold === bigHead.dataset.gfold);
+    const pillNext = again && again.nextElementSibling;
+    check("点组头可展开", !!again && !again.classList.contains("folded") && !!(pillNext && pillNext.classList.contains("tmgr-pills")));
+    const foldAll = doc.getElementById("tmgrFoldAll");
+    if (foldAll) {
+      foldAll.click();
+      await wait(400);
+      check("「全部折叠」生效", [...doc.querySelectorAll("#tagMgrRoot [data-gfold]")].every((h) => h.classList.contains("folded")));
+    }
+    const openAll = doc.getElementById("tmgrOpenAll");
+    if (openAll) {
+      openAll.click();
+      await wait(400);
+      check("「全部展开」生效", ![...doc.querySelectorAll("#tagMgrRoot [data-gfold]")].some((h) => h.classList.contains("folded")));
+    }
+  } else {
+    check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
+  }
+
   const failed = results.filter((x) => !x).length;
   console.log(`\n${failed ? `✗ ${failed} 项未通过` : "✓ 全部通过"}（共 ${results.length} 项）\n`);
   process.exit(failed ? 1 : 0);

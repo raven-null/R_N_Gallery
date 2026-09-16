@@ -3003,6 +3003,47 @@ function catMgrBlockHTML() {
 }
 
 const TMGR_VIEW_KEY = "rn_tmgr_view";
+/* ---------- 分组视图：标签组折叠（v0.29） ----------
+   标签多的组（> TMGR_AUTO_FOLD）默认折叠，避免一次铺开几百个标签 pill；
+   用户手动展开 / 折叠过的组会记进 localStorage，刷新后保持。 */
+const TMGR_FOLD_KEY = "rn_tmgr_fold";
+const TMGR_AUTO_FOLD = 20;
+let tmgrFold = null; // 元素形如 "open:组id" / "fold:组id"（未分组用 __free）
+function loadTmgrFold() {
+  try {
+    const a = JSON.parse(localStorage.getItem(TMGR_FOLD_KEY) || "null");
+    tmgrFold = Array.isArray(a) ? new Set(a) : null;
+  } catch (e) { tmgrFold = null; }
+}
+function saveTmgrFold() {
+  try { localStorage.setItem(TMGR_FOLD_KEY, JSON.stringify([...(tmgrFold || [])])); } catch (e) { /* ignore */ }
+}
+function isTmgrFolded(key, count) {
+  if (tmgrFold) {
+    if (tmgrFold.has("open:" + key)) return false; // 用户显式展开过
+    if (tmgrFold.has("fold:" + key)) return true;  // 用户显式折叠过
+  }
+  return count > TMGR_AUTO_FOLD; // 默认：标签多的组折叠
+}
+function toggleTmgrFold(key, count) {
+  const folded = isTmgrFolded(key, count);
+  tmgrFold = tmgrFold || new Set();
+  tmgrFold.delete("open:" + key);
+  tmgrFold.delete("fold:" + key);
+  tmgrFold.add((folded ? "open:" : "fold:") + key);
+  saveTmgrFold();
+  refreshTagManager();
+}
+function setAllTmgrFold(fold) {
+  tmgrFold = tmgrFold || new Set();
+  [...(TAGS.groups || []).map((g) => g.id), "__free"].forEach((k) => {
+    tmgrFold.delete("open:" + k);
+    tmgrFold.delete("fold:" + k);
+    tmgrFold.add((fold ? "fold:" : "open:") + k);
+  });
+  saveTmgrFold();
+  refreshTagManager();
+}
 /* ---------- 分类工作台状态（v0.14.4：统计视图 → 两栏拖拽分类） ---------- */
 let cwFilter = "all";        // all | loose（只显示未入库分类的图片）
 let cwShown = 40;            // 左栏一次性渲染张数
@@ -3015,6 +3056,7 @@ let cwOpenInited = false;
 function refreshTagManager() {
   const root = document.getElementById("tagMgrRoot");
   if (!root) return;
+  if (tmgrFold === null) loadTmgrFold(); // v0.29：首次读取标签组折叠状态
   const counts = tagCounts();
   const used = Object.keys(counts);
   const savedView = localStorage.getItem(TMGR_VIEW_KEY);
@@ -3035,6 +3077,10 @@ function refreshTagManager() {
         <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>
         <button class="seg-btn${view === "review" ? " on" : ""}" data-view="review" title="一次只处理一张图，键盘流快速分类">整理</button>
       </div>
+      ${view === "group" ? `<span class="tmgr-fold-actions">
+        <button class="mini-link" id="tmgrFoldAll" type="button" title="折叠所有标签组">全部折叠</button>
+        <button class="mini-link" id="tmgrOpenAll" type="button" title="展开所有标签组">全部展开</button>
+      </span>` : ""}
     </div>`;
 
   if (view === "group") {
@@ -3050,20 +3096,24 @@ function refreshTagManager() {
           const items = TAGS.tags
             .filter((t) => t.group === g.id)
             .sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
-          html += `<div class="tmgr-head" style="margin-top:6px">
+          const folded = isTmgrFolded(g.id, items.length); // v0.29：标签多的组默认折叠
+          html += `<div class="tmgr-head foldable${folded ? " folded" : ""}" data-gfold="${escAttr(g.id)}" data-gcount="${items.length}" style="margin-top:6px" title="${folded ? "点击展开" : "点击折叠"}">
+            <span class="caret">▾</span>
             <i class="dot" style="--tg:${g.color || "#ff9f0a"}"></i>${esc(g.name)}
             <span class="cnt">${items.length} 个标签</span>
             <button class="act" data-gact="edit" data-gid="${escAttr(g.id)}" title="编辑组">✎</button>
           </div>`;
-          html += mgrPills(items, counts);
+          if (!folded) html += mgrPills(items, counts);
         }
       }
       const freeNames = used.filter((n) => !tagByName(n));
       if (freeNames.length) {
-        html += `<div class="tmgr-head" style="margin-top:6px">
+        const foldedFree = isTmgrFolded("__free", freeNames.length);
+        html += `<div class="tmgr-head foldable${foldedFree ? " folded" : ""}" data-gfold="__free" data-gcount="${freeNames.length}" style="margin-top:6px" title="${foldedFree ? "点击展开" : "点击折叠"}">
+          <span class="caret">▾</span>
           <i class="dot"></i>未分组 · 待整理<span class="cnt">${freeNames.length}</span>
         </div>`;
-        html += mgrPills(freeNames.map((n) => ({ name: n, color: null, group: "" })), counts);
+        if (!foldedFree) html += mgrPills(freeNames.map((n) => ({ name: n, color: null, group: "" })), counts);
       }
     }
   } else if (view === "classify") {
@@ -3175,6 +3225,15 @@ function refreshTagManager() {
   }
   if (view === "classify") initCwView(root);
   if (view === "review") initReviewView(root);
+  // v0.29：分组视图的标签组折叠 + 全部折叠 / 展开
+  root.querySelectorAll("[data-gfold]").forEach((h) => h.addEventListener("click", (e) => {
+    if (e.target.closest("button")) return; // 组头右侧的编辑按钮等不触发折叠
+    toggleTmgrFold(h.dataset.gfold, Number(h.dataset.gcount) || 0);
+  }));
+  const foldAllBtn = q("#tmgrFoldAll");
+  if (foldAllBtn) foldAllBtn.addEventListener("click", () => setAllTmgrFold(true));
+  const openAllBtn = q("#tmgrOpenAll");
+  if (openAllBtn) openAllBtn.addEventListener("click", () => setAllTmgrFold(false));
   root.querySelectorAll("[data-gact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-group", b.dataset.gid)));
   root.querySelectorAll("[data-tact='edit']").forEach((b) => b.addEventListener("click", () => {
     const nm = b.dataset.tname;
