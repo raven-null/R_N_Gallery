@@ -478,3 +478,15 @@ async function aiTagSearch(query) {
 - 新增端点：`GET /api/auth/state`、`POST /api/auth/login`、`POST /api/auth/password`、`POST /api/auth/r18`、`POST /api/auth/r18/verify`
 - 涉及文件：`netlify/functions/_lib.js`、`netlify/functions/photos.js`、`public/index.html`、`public/assets/app.js`、`public/assets/style.css`（资源版本号 → ?v=20261022）
 - 待办：本地 `scripts/dev-server.js` 尚未实现 `/api/auth/*`，本地开发时门禁不生效、设置页相关按钮会失败（生产环境正常）
+
+### 批次 10 · 标签粒度与录入效率（v0.17，2026-09-13）✅
+> 解决「角色太多难选」与「只打作品又搜不到具体角色」的两难：作品级兜底 + 按需细化 + 快速定位。
+- **整组筛选（作品级兜底）**：筛选菜单每个组头新增「整组 N」按钮 → 点一下筛出该组任一标签命中的全部图片（含只打了作品标签的图），计数按照片去重；与主分类 / 收藏 / AI 筛选 AND 叠加；组头高亮并自动展开，单标签筛选与整组筛选互斥
+- **上传页录入优化**：
+  - 分类槽按组折叠（手风琴：一次只展开一个作品组），组头显示组内标签数；未分组与临时自定义槽仍平铺
+  - 分类槽搜索框：按名称 / 别名 / 拼音首字母过滤（`ht` → 胡桃），搜索时扁平列出并标注所属组
+  - 「最近使用」置顶 10 个标签（localStorage `rn_recent_tags`，上传成功或用过槽标签时记录）
+  - 点槽 = 加到选中行（未选则全部待上传），免拖拽；拖动行/整批拖拽行为不变
+- **批量导入标签**：标签页「⇪ 批量导入标签」→ 选目标组 + 粘贴名单（每行一个，逗号/竖线分隔别名），一次录入原神/绝区零全部角色，已存在的自动跳过
+- 建议策略：作品级兜底（只打作品标签）+ 只在重点图补角色标签 —— 检索靠整组筛选，细化靠角色标签
+- 涉及文件：`public/assets/app.js`（整组筛选 / 槽折叠与搜索 / 最近使用 / 批量导入）、`public/index.html`（槽搜索框）、`public/assets/style.css`（组头按钮 / 槽折叠 / 搜索框样式）

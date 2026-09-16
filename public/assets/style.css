@@ -3599,6 +3599,56 @@ body.select-mode .card .pick { display: grid; }
   text-transform: uppercase;
 }
 .uq-sec:first-child { margin-top: 0; }
+/* v0.16：组头可折叠（手风琴）+ 组内计数 + 槽内所属组标注 + 槽搜索框 */
+.uq-sec.clickable {
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 11.5px;
+}
+.uq-sec.clickable:hover { background: var(--w006); color: var(--text-dim); }
+.uq-sec.clickable.open { color: var(--text); background: var(--w006); }
+.uq-sec .gcount {
+  margin-left: auto;
+  flex: none;
+  font-weight: 600;
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--w010);
+  border-radius: 99px;
+  padding: 0 6px;
+}
+.uq-sec .caret {
+  flex: none;
+  font-size: 9px;
+  transition: transform 0.22s var(--ease-out);
+}
+.uq-sec.open .caret { transform: rotate(90deg); }
+.uq-slot .gsrc {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--w006);
+  border-radius: 99px;
+  padding: 0 6px;
+}
+.uq-slot-search {
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 11px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--w014);
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color 0.18s;
+}
+.uq-slot-search:focus { border-color: rgba(255,159,10,0.55); }
+[data-theme="light"] .uq-slot-search { background: rgba(255,255,255,0.7); }
 .uq-slot .dot {
   width: 9px;
   height: 9px;
@@ -3797,3 +3847,35 @@ body.select-mode .card .pick { display: grid; }
 /* 编辑弹窗：R18 开关 */
 .r18-toggle { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; cursor: pointer; line-height: 1.55; color: var(--text-dim, rgba(255,255,255,.7)); }
 .r18-toggle input { width: 16px; height: 16px; margin-top: 2px; flex: none; accent-color: #ff8080; cursor: pointer; }
+
+/* ============================================================
+   整组筛选（v0.16）：组头「整组」按钮 = 作品级兜底筛选
+   ============================================================ */
+.tag-group-head.active { color: var(--text); }
+.tag-group-head .gfilter {
+  flex: none;
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+  background: var(--w006);
+  border: 1px solid var(--w010);
+  border-radius: 99px;
+  padding: 1px 7px;
+  cursor: pointer;
+  transition: all 0.16s var(--ease-out);
+}
+.tag-group-head .gfilter:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.tag-group-head .gfilter.on {
+  color: #fff;
+  font-weight: 700;
+  border-color: color-mix(in srgb, var(--accent) 75%, transparent);
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.tag-group-head .gfilter + .caret { margin-left: 6px; }

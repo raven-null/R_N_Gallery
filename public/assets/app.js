@@ -36,6 +36,7 @@ const DEFAULT_CATEGORIES = [
 let TAGS = { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] };
 let activeTagName = null; // 图库墙当前筛选的标签名（"__fav" = 收藏）
 let activeCategory = null; // 图库墙当前筛选的主分类名（"__none" = 未分类）
+let activeGroupId = null; // 图库墙当前筛选的标签组 id（整组筛选：组内任一标签命中即可，v0.16）
 const collapsedGroups = new Set(); // 筛选菜单中折叠的组 id
 
 /* ---------- 收藏 / 排序 / 批量选择（v0.11.2） ---------- */
@@ -759,6 +760,16 @@ function initReveal(container, selector) {
 }
 
 /* ---------- 标签筛选菜单（v0.11：分组视图 + 搜索，行点击由 initGallery 委托） ---------- */
+/* 组内标签名集合（v0.16 整组筛选 / 计数复用） */
+function groupTagNames(gid) {
+  return new Set(TAGS.tags.filter((t) => t.group === gid).map((t) => t.name));
+}
+/* 组命中照片数（v0.16）：组内任一标签命中的照片数（按照片去重） */
+function groupHitCount(groupTags) {
+  if (!groupTags || !groupTags.length) return 0;
+  const names = new Set(groupTags.map((t) => t.name));
+  return PHOTOS.filter((p) => (p.tags || []).some((n) => names.has(n))).length;
+}
 function tagRowHTML(t, counts) {
   const c = t.color || tagGroupColor(t.group);
   return `<button class="tag-menu-item${activeTagName === t.name ? " active" : ""}" data-tag="${escAttr(t.name)}">
@@ -777,7 +788,7 @@ function renderTagMenuContent() {
   PHOTOS.forEach((p) => p.tags.forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
   const used = Object.keys(counts);
 
-  let html = `<button class="tag-menu-item${!activeTagName && !aiFilter && !activeCategory ? " active" : ""}" data-tag="">
+  let html = `<button class="tag-menu-item${!activeTagName && !aiFilter && !activeCategory && !activeGroupId ? " active" : ""}" data-tag="">
       <span class="nm">${t("全部", "All")}</span><span class="cnt">${PHOTOS.length}</span></button>
     <button class="tag-menu-item${activeTagName === "__fav" ? " active" : ""}" data-tag="__fav">
       <span class="nm"><i class="dot" style="--tg:var(--accent)"></i>${t("收藏", "Favorites")}</span><span class="cnt">${favs.size}</span></button>`;
@@ -831,14 +842,18 @@ function renderTagMenuContent() {
   if (used.length) {
     const groups = [...TAGS.groups].sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
     for (const g of groups) {
-      const items = TAGS.tags
-        .filter((t) => t.group === g.id && counts[t.name] > 0 && kwHit(t))
+      const all = TAGS.tags.filter((t) => t.group === g.id);
+      const items = all
+        .filter((t) => counts[t.name] > 0 && kwHit(t))
         .sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
-      if (!items.length) continue;
+      // 整组命中计数（v0.16）：组内任一标签命中该照片即算，用于「作品级」筛选
+      const wholeHit = groupHitCount(all);
+      if (!items.length && !(wholeHit && !q)) continue; // 搜索标签词时只显示有命中的组
       const col = g.color || null;
-      const collapsed = collapsedGroups.has(g.id);
-      html += `<div class="tag-group-head${collapsed ? " collapsed" : ""}" data-gid="${escAttr(g.id)}">
+      const collapsed = collapsedGroups.has(g.id) && activeGroupId !== g.id; // 正在整组筛选时强制展开
+      html += `<div class="tag-group-head${collapsed ? " collapsed" : ""}${activeGroupId === g.id ? " active" : ""}" data-gid="${escAttr(g.id)}">
         <i class="dot"${col ? ` style="--tg:${col}"` : ""}></i>${esc(g.name)}
+        ${wholeHit ? `<button class="gfilter${activeGroupId === g.id ? " on" : ""}" data-gfilter="${escAttr(g.id)}" title="${t("按整组筛选：该组任一标签命中即可（作品级兜底）", "Filter the whole group")}">${t("整组", "group")} ${wholeHit}</button>` : ""}
         <span class="caret">▼</span></div>`;
       if (!collapsed) html += items.map((t) => tagRowHTML(t, counts)).join("");
     }
@@ -925,6 +940,15 @@ function initGallery() {
       if (tagFlyout) tagFlyout.close();
       return;
     }
+    const gf = e.target.closest("[data-gfilter]");
+    if (gf) {
+      const gid = gf.dataset.gfilter;
+      setGroupFilter(activeGroupId === gid ? null : gid); // v0.16 整组（作品级）筛选
+      if (tagSearch) { tagSearch.value = ""; if (tagSearchClear) tagSearchClear.classList.remove("on"); }
+      renderTagMenuContent();
+      if (tagFlyout) tagFlyout.close();
+      return;
+    }
     const gh = e.target.closest(".tag-group-head");
     if (gh && gh.dataset.gid) {
       const gid = gh.dataset.gid;
@@ -961,6 +985,15 @@ function initGallery() {
   function setTagFilter(name) {
     aiFilter = null; // 点具体标签/全部时清除 AI 语义筛选
     activeTagName = name;
+    activeGroupId = null; // 单标签筛选与「整组筛选」互斥
+    updateFabDot();
+    applyFilter();
+  }
+  // 整组筛选（v0.16）：组内任一标签命中即算，用于「作品级」兜底（如原神全部图）
+  function setGroupFilter(gid) {
+    aiFilter = null;
+    activeGroupId = gid;
+    activeTagName = null;
     updateFabDot();
     applyFilter();
   }
@@ -971,10 +1004,10 @@ function initGallery() {
     applyFilter();
   }
   function updateFabDot() {
-    fabDot.classList.toggle("on", !!(activeTagName || activeCategory));
+    fabDot.classList.toggle("on", !!(activeTagName || activeCategory || activeGroupId));
   }
 
-  // 标签筛选（v0.8.6 / v0.11.2 / v0.12 / v0.15：收藏 / 排序 / AI / 相册 / 主分类叠加）
+  // 标签筛选（v0.8.6 / v0.11.2 / v0.12 / v0.15 / v0.16：收藏 / 排序 / AI / 相册 / 主分类 / 整组叠加）
   /* R18 收尾（v0.16）：未解锁时，正在筛选 R18 相关内容才保留（渲染成锁定卡），其余情况一律不显示 */
   function filterHitsR18() {
     const hit = (v) => String(v || "").trim().toLowerCase() === "r18";
@@ -987,6 +1020,11 @@ function initGallery() {
     if (activeCategory) {
       if (activeCategory === "__none") { if (p.category) return false; }
       else if (p.category !== activeCategory) return false;
+    }
+    // 整组筛选：组内任一标签命中即可（v0.16）
+    if (activeGroupId) {
+      const names = groupTagNames(activeGroupId);
+      if (!names.size || !(p.tags || []).some((n) => names.has(n))) return false;
     }
     if (aiFilter && aiFilter.tags && aiFilter.tags.length) {
       return aiFilter.match === "all"
@@ -1494,6 +1532,7 @@ function initUpload() {
               row.querySelector(".status").className = "status ok";
               row.classList.add("done");
               setSub("已上传");
+              pushRecentTags(rowSendTags(it)); // v0.16：上传用过的标签进「最近使用」
               resolve();
             } else {
               let msg = "上传失败";
@@ -1613,6 +1652,26 @@ function initUpload() {
         applyTagsToItems(items, slot.dataset.tag);
         clearUqSelection();
       }
+    });
+    // v0.16：点组头 = 手风琴展开/收起；点槽 = 加到选中项（未选则全部待上传），省去拖拽
+    uqSlotsEl.addEventListener("click", (e) => {
+      const sec = e.target.closest("[data-sg]");
+      if (sec) { toggleUqGroup(sec.dataset.sg); return; }
+      const slot = e.target.closest(".uq-slot");
+      if (!slot || !slot.dataset.tag) return;
+      const items = uqSelSet.size ? [...uqSelSet] : files.filter((it) => it.status === "ready");
+      if (!items.length) { setUqStatus("先在左侧加入图片，或点选若干行后再点分类槽"); return; }
+      const name = slot.dataset.tag;
+      applyTagsToItems(items, name);
+      setUqStatus(`已把「${esc(name)}」加到 <span class="cnt">${items.length}</span> 张图片`);
+    });
+  }
+  // v0.16：分类槽搜索（按名称 / 别名 / 拼音首字母，如 ht → 胡桃）
+  const uqSlotSearchEl = document.getElementById("uqSlotSearch");
+  if (uqSlotSearchEl) {
+    uqSlotSearchEl.addEventListener("input", () => {
+      uqSlotQuery = uqSlotSearchEl.value;
+      refreshUqSlots();
     });
   }
   const uqNewSlotInput = document.getElementById("uqNewSlotInput");
@@ -2673,6 +2732,7 @@ function refreshTagManager() {
     <button class="btn ghost sm" id="btnNewCategory">＋ ${t("新建主分类", "New category")}</button>
     <button class="btn ghost sm" id="btnNewTag">＋ 新建标签</button>
     <button class="btn ghost sm" id="btnNewGroup">＋ 新建标签组</button>
+    <button class="btn ghost sm" id="btnBulkTags">⇪ ${t("批量导入标签", "Bulk import")}</button>
   </div>`;
   root.innerHTML = html;
 
@@ -2680,6 +2740,7 @@ function refreshTagManager() {
   if (q("#btnNewCategory")) q("#btnNewCategory").addEventListener("click", () => openCatModal("new-category"));
   if (q("#btnNewTag")) q("#btnNewTag").addEventListener("click", () => openTagModal("new-tag"));
   if (q("#btnNewGroup")) q("#btnNewGroup").addEventListener("click", () => openTagModal("new-group"));
+  if (q("#btnBulkTags")) q("#btnBulkTags").addEventListener("click", () => openBulkTagModal());
   root.querySelectorAll("[data-cact='edit']").forEach((b) => b.addEventListener("click", () => openCatModal("edit-category", b.dataset.cname)));
   root.querySelectorAll("[data-cact='remove']").forEach((b) => b.addEventListener("click", () => openCatModal("remove-category", b.dataset.cname)));
   const seg = q("#tmgrViewSeg");
@@ -2994,45 +3055,104 @@ function uqSlotCount(name) {
   });
   return n;
 }
-/* 槽列表 HTML（上传面板 / 标签分类工作台共用）：标签库按组 + 临时自定义槽 */
-function slotSectionsHTML(countOf, extraSet, emptyTip) {
+/* ---------- 最近使用标签（v0.16：角色多时的快捷入口，localStorage 记最近 10 个） ---------- */
+const RECENT_TAGS_KEY = "rn_recent_tags";
+function loadRecentTags() {
+  try {
+    const a = JSON.parse(localStorage.getItem(RECENT_TAGS_KEY) || "[]");
+    return Array.isArray(a) ? a.filter(Boolean).slice(0, 10) : [];
+  } catch (e) { return []; }
+}
+function pushRecentTags(names) {
+  const list = (Array.isArray(names) ? names : [names]).filter(Boolean);
+  if (!list.length) return;
+  const cur = loadRecentTags().filter((n) => !list.includes(n));
+  try { localStorage.setItem(RECENT_TAGS_KEY, JSON.stringify([...list, ...cur].slice(0, 10))); } catch (e) { /* ignore */ }
+}
+/* 分类槽搜索关键词 / 手风琴展开的组（一次只展开一个作品组） */
+let uqSlotQuery = "";
+const uqOpenGroups = new Set();
+let uqOpenInited = false;
+
+/* 槽列表 HTML（上传面板 / 标签分类工作台共用）：标签库按组 + 临时自定义槽
+   opts（v0.16 上传面板专用）：collapsible 组折叠、openGroups 展开集合、recent 最近使用、query 搜索词 */
+function slotSectionsHTML(countOf, extraSet, emptyTip, opts = {}) {
+  const { collapsible = false, openGroups = null, recent = null, query = "" } = opts;
   const gmap = new Map();
   (TAGS.groups || []).forEach((g) => gmap.set(g.id, g));
   const grouped = new Map();
   TAGS.tags.forEach((t) => {
     const g = t.group && gmap.has(t.group) ? gmap.get(t.group) : null;
     const key = g ? g.id : "__none";
-    if (!grouped.has(key)) grouped.set(key, { g, items: [] });
+    if (!grouped.has(key)) grouped.set(key, { gid: g ? g.id : null, g, items: [] });
     grouped.get(key).items.push(t);
   });
   const sections = [];
-  grouped.forEach(({ g, items }) => sections.push({ title: g ? g.name : "", color: g ? g.color : null, items }));
-  if (extraSet && extraSet.size) {
-    sections.push({ title: "", color: null, items: [...extraSet].map((n) => ({ name: n, extra: true })) });
-  }
+  grouped.forEach(({ gid, g, items }) => sections.push({ gid, title: g ? g.name : "", color: g ? g.color : null, items }));
+  const extras = extraSet && extraSet.size ? [...extraSet].map((n) => ({ name: n, extra: true, group: "" })) : [];
+  if (extras.length) sections.push({ gid: null, title: "", color: null, items: extras });
   if (!sections.length) return `<div class="uq-empty-tip">${emptyTip || "还没有分类。"}</div>`;
-  return sections.map((sec) => {
+
+  /* 单个槽：点一下 = 加到选中/全部待上传；也可拖图片进来 */
+  const slotEl = (t, secColor, groupName) => {
+    const c = t.color || secColor || "";
+    const ct = countOf(t.name);
+    return `<div class="uq-slot" data-tag="${escAttr(t.name)}" title="点一下 = 加到选中（未选则全部待上传）；也可把图片拖进来">
+      ${c ? `<i class="dot" style="--tg:${c}"></i>` : `<i class="dot"></i>`}
+      <span class="nm">${esc(t.name)}</span>${groupName ? `<span class="gsrc">${esc(groupName)}</span>` : ""}
+      <span class="ct${ct ? " hot" : ""}">${ct || ""}</span>
+    </div>`;
+  };
+
+  // 搜索模式：忽略折叠，扁平列出命中项（含拼音匹配），并标注所属组
+  const kw = String(query || "").trim().toLowerCase();
+  if (kw) {
+    const hits = TAGS.tags.filter((t) => tagQueryMatch(t, kw));
+    const extraHits = extras.filter((t) => t.name.toLowerCase().includes(kw));
+    if (!hits.length && !extraHits.length) return `<div class="uq-empty-tip">没有匹配「${esc(query)}」的标签</div>`;
+    return hits.map((t) => {
+      const g = t.group ? gmap.get(t.group) : null;
+      return slotEl(t, g ? g.color : null, g ? g.name : "");
+    }).join("") + extraHits.map((t) => slotEl(t, null, "")).join("");
+  }
+
+  const parts = [];
+  if (recent && recent.length) {
+    parts.push(`<div class="uq-sec static"><i class="dot" style="--tg:var(--accent)"></i>${t("最近使用", "Recent")}</div>`);
+    parts.push(recent.map((n) => slotEl({ name: n }, null, "")).join(""));
+  }
+  sections.forEach((sec) => {
     const head = sec.title
-      ? `<div class="uq-sec">${sec.color ? `<i class="dot" style="--tg:${sec.color}"></i>` : ""}${esc(sec.title)}</div>`
+      ? `<div class="uq-sec${collapsible && sec.gid ? " clickable" : ""}${sec.gid && openGroups && openGroups.has(sec.gid) ? " open" : ""}"${collapsible && sec.gid ? ` data-sg="${escAttr(sec.gid)}" title="展开 / 收起该作品组"` : ""}>
+          ${sec.color ? `<i class="dot" style="--tg:${sec.color}"></i>` : ""}${esc(sec.title)}
+          ${collapsible && sec.gid ? `<span class="gcount">${sec.items.length}</span><span class="caret">▸</span>` : ""}
+        </div>`
       : "";
-    const slots = sec.items.map((t) => {
-      const c = t.color || sec.color || "";
-      const ct = countOf(t.name);
-      return `<div class="uq-slot" data-tag="${escAttr(t.name)}">
-        ${c ? `<i class="dot" style="--tg:${c}"></i>` : `<i class="dot"></i>`}
-        <span class="nm">${esc(t.name)}</span>
-        <span class="ct${ct ? " hot" : ""}">${ct || ""}</span>
-      </div>`;
-    }).join("");
-    return head + slots;
-  }).join("");
+    const open = !collapsible || !sec.gid || (openGroups && openGroups.has(sec.gid));
+    parts.push(head + (open ? sec.items.map((it) => slotEl(it, sec.color, "")).join("") : ""));
+  });
+  return parts.join("");
 }
-/* 渲染分类槽：标签库标签按组展示 + 临时自定义槽 */
+/* 渲染分类槽：最近使用 + 标签库按组折叠 + 临时自定义槽 */
 function refreshUqSlots() {
   const wrap = document.getElementById("uqSlots");
   if (!wrap) return;
+  // 首次渲染默认展开第一个组（有作品组时直接可见其角色）
+  if (!uqOpenInited) {
+    const first = TAGS.tags.find((x) => x.group && (TAGS.groups || []).some((g) => g.id === x.group));
+    if (first) uqOpenGroups.add(first.group);
+    uqOpenInited = true;
+  }
   wrap.innerHTML = slotSectionsHTML(uqSlotCount, uqExtraSlots,
-    "还没有分类。用下方输入框创建临时分类，或先到「标签」页建好标签库再回来。");
+    "还没有分类。用下方输入框创建临时分类，或先到「标签」页建好标签库再回来。",
+    { collapsible: true, openGroups: uqOpenGroups, recent: loadRecentTags(), query: uqSlotQuery });
+}
+/* 手风琴：展开某作品组时收起其他组，避免角色全库混排 */
+function toggleUqGroup(gid) {
+  if (!gid) return;
+  if (uqOpenGroups.has(gid)) uqOpenGroups.delete(gid);
+  else { uqOpenGroups.clear(); uqOpenGroups.add(gid); }
+  refreshUqSlots();
 }
 function setUqStatus(msg) {
   const el = document.getElementById("uqSelStatus");
@@ -3063,6 +3183,7 @@ function applyTagsToItems(items, name) {
     it.tags = [...new Set([...(it.tags || []), name])].slice(0, 10);
     renderUqRowTags(it);
   });
+  pushRecentTags(name); // v0.16：用过的标签进「最近使用」
   refreshUqSlots();
   clearUqSelection();
 }
@@ -3198,6 +3319,92 @@ function swatchHTML(sel) {
     <button type="button" class="tag-swatch none${!sel ? " on" : ""}" data-v="" title="默认"></button>
     ${SWATCHES.map((c) => `<button type="button" class="tag-swatch${sel === c ? " on" : ""}" data-v="${c}" style="background:${c}" title="${c}"></button>`).join("")}
   </div>`;
+}
+
+/* ---------- 批量导入标签（v0.16：粘贴名单一次建到指定组，如一次录入原神全部角色） ---------- */
+function parseBulkTagLines(text) {
+  const out = [];
+  const seen = new Set();
+  String(text || "").split(/\r?\n/).forEach((line) => {
+    const parts = line.split(/[,，|｜]/).map((s) => s.trim()).filter(Boolean);
+    if (!parts.length) return;
+    const name = parts[0].slice(0, 30);
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    out.push({ name, aliases: parts.slice(1, 21) });
+  });
+  return out;
+}
+
+function openBulkTagModal() {
+  const modal = document.getElementById("tagModal");
+  const body = document.getElementById("tagModalBody");
+  if (!modal || !body) return;
+  const defaultGroup = TAGS.groups.length ? TAGS.groups[0].id : "";
+  body.innerHTML = `
+    <h3>批量导入标签</h3>
+    <form class="tag-form" id="fForm" onsubmit="return false">
+      <div class="field">
+        <label>导入到哪个组（角色请先建好作品组，如「原神」）</label>
+        ${groupSelectHTML(defaultGroup)}
+      </div>
+      <div class="field">
+        <label>标签名单（每行一个；可用逗号 / 竖线带别名）</label>
+        <textarea id="biText" rows="9" placeholder="胡桃, 核桃, hutao&#10;甘雨, 椰羊&#10;纳西妲"></textarea>
+        <div class="hint">首项为标签名，其余为别名（搜索与拼音匹配都会用上）；已存在的标签自动跳过。</div>
+      </div>
+      <div class="m-actions">
+        <button class="btn ghost" id="fCancel" type="button">取消</button>
+        <button class="btn primary" id="fSave" type="button">导入</button>
+      </div>
+    </form>
+    <div class="hint" id="fErr" style="color:var(--danger);display:none;margin-top:12px"></div>`;
+  modal.classList.add("open");
+  body.querySelector("#fCancel").onclick = closeTagModal;
+  const err = body.querySelector("#fErr");
+  body.querySelector("#fSave").onclick = async () => {
+    const btn = body.querySelector("#fSave");
+    const rows = parseBulkTagLines(body.querySelector("#biText").value);
+    if (!rows.length) {
+      err.style.display = "block";
+      err.style.color = "var(--danger)";
+      err.textContent = "没有解析到标签：请每行写一个标签名";
+      return;
+    }
+    const gid = body.querySelector("#fGroup").value || "";
+    btn.disabled = true;
+    btn.textContent = "导入中…";
+    try {
+      const exist = new Set(TAGS.tags.map((t) => t.name));
+      let skipped = 0;
+      let added = 0;
+      rows.forEach((r) => {
+        if (exist.has(r.name)) { skipped++; return; }
+        exist.add(r.name);
+        TAGS.tags.push({ id: "", name: r.name, aliases: r.aliases, group: gid, color: null, sort: TAGS.tags.length });
+        added++;
+      });
+      await apiSaveTags();
+      refreshTagUI();
+      btn.disabled = false;
+      btn.textContent = "导入";
+      if (!added) {
+        err.style.display = "block";
+        err.style.color = "var(--text-faint)";
+        err.textContent = `这 ${skipped} 个标签都已存在，无需导入`;
+        return;
+      }
+      const g = TAGS.groups.find((x) => x.id === gid);
+      closeTagModal();
+      alert(`已导入 ${added} 个标签${g ? `到「${g.name}」组` : "（未分组）"}${skipped ? `，跳过 ${skipped} 个已存在的` : ""}`);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = "导入";
+      err.style.display = "block";
+      err.style.color = "var(--danger)";
+      err.textContent = e.message;
+    }
+  };
 }
 
 function groupSelectHTML(sel) {
