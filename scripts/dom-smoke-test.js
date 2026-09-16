@@ -383,6 +383,10 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(400);
     const editModal = doc.getElementById("editModal");
     check("双击卡片打开编辑弹窗", !!editModal && editModal.classList.contains("open"));
+    // v0.41：描述字段整体移除
+    check("编辑弹窗不再有描述输入", !doc.getElementById("edDesc") && !doc.querySelector(".modal-mask #edDesc"));
+    check("上传项编辑弹窗不再有描述输入", !doc.getElementById("uqDesc"));
+    check("搜索框文案不含描述", !/描述/.test((doc.getElementById("searchInput") || {}).placeholder || ""));
     if (editModal && editModal.classList.contains("open")) {
       const cancel = doc.getElementById("edCancel");
       if (cancel) clickEl(cancel);

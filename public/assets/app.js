@@ -932,7 +932,7 @@ function openLightboxById(id, bustCache) {
   } else {
     img.src = busted(wantFull ? p.url : thumb);
   }
-  // v0.37：信息面板（描述 / 元信息 / 标签）已移除，灯箱只负责看图
+  // v0.37：信息面板已移除，灯箱只负责看图
   const lb = document.getElementById("lightbox");
   lb.classList.add("open");
   lb.dataset.cur = id;
@@ -1752,7 +1752,7 @@ function initUpload() {
         </div>
         <div class="status">待上传</div>
         <div class="uq-ops">
-          <button class="u-edit" title="编辑描述 / 标签">✎</button>
+          <button class="u-edit" title="编辑标签">✎</button>
           <button class="danger u-del" title="从队列移除">✕</button>
         </div>`;
       const img = row.querySelector("img");
@@ -1946,7 +1946,6 @@ function initUpload() {
             thumbBase64: thumbDataUrl,
             mime,
             title,
-            desc: it.desc || "",
             categories,
             tags,
           }));
@@ -2221,13 +2220,12 @@ async function applyBatchTag() {
   }
   okBtn.disabled = false;
 }
-/* ---------- 单张编辑弹窗（v0.11.2：描述 / 标签 / 删除） ---------- */
+/* ---------- 单张编辑弹窗（v0.11.2：标签 / 删除；v0.41 描述已移除） ---------- */
 let editTargetId = null;
 function openEditModal(id) {
   const p = PHOTOS.find((x) => x.id === id);
   if (!p) return;
   editTargetId = id;
-  document.getElementById("edDesc").value = p.desc || "";
   renderCatPicks(document.getElementById("edCats"), catsOf(p)); // v0.19 主分类（多选）
   const box = document.getElementById("edTagBox");
   box.querySelectorAll(".t").forEach((el) => el.remove());
@@ -2250,7 +2248,6 @@ async function saveEditModal() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        desc: document.getElementById("edDesc").value.trim(),
         categories: selCatsOf(document.getElementById("edCats")), // v0.19 主分类（多选数组）
         tags: tagsOfBox(document.getElementById("edTagBox")),
         r18: !!(document.getElementById("edR18") && document.getElementById("edR18").checked), // v0.16 R18 独立开关
@@ -2980,7 +2977,7 @@ const I18N_DICT = {
   "确认删除": "Delete", "清空": "Clear", "清空日志": "Clear logs",
   "加标签": "Add Tags", "入相册": "Add to Album", "全部": "All",
   "最新上传": "Newest", "最早上传": "Oldest", "标题 A–Z": "Title A–Z", "文件大小": "Size",
-  "标题": "Title", "描述": "Description", "标签": "Tags",
+  "标题": "Title", "标签": "Tags",
   "加入相册": "Add to Album", "新建相册名称…": "New album name…", "＋ 新建并加入": "Create & add",
   "编辑待上传项": "Edit upload item", "编辑图片信息": "Edit photo",
   "留空则使用文件名": "Empty = use file name", "留空则跟随上方全局标签": "Empty = use global tags",
@@ -3060,13 +3057,12 @@ function tagQueryMatch(t, q) {
   return false;
 }
 
-/* ---------- 上传队列逐张编辑（v0.13：描述 / 标签） ---------- */
+/* ---------- 上传队列逐张编辑（v0.13：标签；v0.41 描述已移除） ---------- */
 let uqTarget = null;
 function openUqEdit(it) {
   uqTarget = it;
   const m = document.getElementById("uqModal");
   if (!m) return;
-  document.getElementById("uqDesc").value = it.desc || "";
   renderCatPicks(document.getElementById("uqCatPick"), Array.isArray(it.categories) ? it.categories : []); // v0.19 行内主分类覆盖（多选）
   const box = document.getElementById("uqTagBox");
   box.querySelectorAll(".t").forEach((el) => el.remove());
@@ -3078,15 +3074,13 @@ function openUqEdit(it) {
 function saveUqEdit() {
   const it = uqTarget;
   if (!it) return;
-  const desc = document.getElementById("uqDesc").value.trim();
   const tags = tagsOfBox(document.getElementById("uqTagBox"));
   const cats = selCatsOf(document.getElementById("uqCatPick"));
-  it.desc = desc || null;
   it.tags = tags.length ? tags : undefined; // undefined → 跟随全局标签
   it.categories = cats.length ? cats : undefined; // undefined → 跟随全局主分类（v0.19 多选）
   const nameRow = it.row && it.row.querySelector(".uq-name-row");
   if (nameRow) {
-    const edited = !!(it.desc || it.tags || it.categories);
+    const edited = !!(it.tags || it.categories);
     nameRow.innerHTML = `<span class="name">${esc(it.f.name)}</span>` + (edited ? `<span class="edited-mark">已编辑</span>` : "");
   }
   document.getElementById("uqModal").classList.remove("open");
@@ -5029,7 +5023,7 @@ function initSearch() {
     }
     const list = PHOTOS.filter((p) => {
       if (catsOf(p).some((c) => String(c).toLowerCase().includes(keyword))) return true; // 主分类可搜（v0.15 / v0.19 多选）
-      if ((p.title + " " + p.desc).toLowerCase().includes(keyword)) return true;
+      if (String(p.title || "").toLowerCase().includes(keyword)) return true;
       return p.tags.some((t) => t.toLowerCase().includes(keyword) || aliasNames.has(t));
     });
     count.hidden = false;

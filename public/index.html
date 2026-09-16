@@ -409,11 +409,11 @@
       <div class="search-window">
         <div class="search-box">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
-          <input id="searchInput" type="text" placeholder="搜索标题、标签、描述…" autocomplete="off">
+          <input id="searchInput" type="text" placeholder="搜索标题、标签…" autocomplete="off">
           <button class="search-clear" id="searchClear" title="清除">✕</button>
         </div>
         <div class="search-count" id="searchCount" hidden></div>
-        <div class="search-hint" id="searchHint">输入关键词开始搜索，支持标题、标签与描述</div>
+        <div class="search-hint" id="searchHint">输入关键词开始搜索，支持标题与标签</div>
         <div class="search-grid" id="searchResults"></div>
       </div>
     </div>
@@ -496,15 +496,11 @@
     </div>
   </div>
 
-  <!-- 图片信息编辑弹窗（v0.11.2：描述 / 标签） -->
+  <!-- 图片信息编辑弹窗（v0.41：主分类 / 标签 / R18，描述已移除） -->
   <div class="modal-mask" id="editModal">
     <div class="modal">
       <h3>编辑图片</h3>
       <form class="tag-form" onsubmit="return false">
-        <div class="field">
-          <label>描述</label>
-          <textarea id="edDesc" rows="3" maxlength="500"></textarea>
-        </div>
         <div class="field">
           <label>主分类（必选，可多选；全部取消则显示「未分类」）</label>
           <div class="uq-cats" id="edCats" data-multi="1"></div>
@@ -595,15 +591,11 @@
     </div>
   </div>
 
-  <!-- 上传项编辑弹窗（v0.13：描述 / 标签） -->
+  <!-- 上传项编辑弹窗（v0.41：主分类 / 标签，描述已移除） -->
   <div class="modal-mask" id="uqModal">
     <div class="modal">
       <h3>编辑待上传项</h3>
       <form class="tag-form" onsubmit="return false">
-        <div class="field">
-          <label>描述</label>
-          <textarea id="uqDesc" rows="2" maxlength="500"></textarea>
-        </div>
         <div class="field">
           <label>主分类（留空 = 跟随上方全局必选，可多选）</label>
           <div class="uq-cats" id="uqCatPick" data-multi="1"></div>
@@ -767,7 +759,7 @@
         <svg class="ico-play" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
         <svg class="ico-pause" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
       </button>
-      <button class="lb-tool" id="lbToolEdit" title="编辑标题 / 描述 / 标签">
+      <button class="lb-tool" id="lbToolEdit" title="编辑标题 / 标签">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
       </button>
       <button class="lb-tool" id="lbToolRot" title="旋转 90°（保存）">

@@ -359,7 +359,6 @@ function indexEntry(m) {
   return {
     id: m.id,
     title: m.title || "",
-    desc: m.desc || "",
     tags: Array.isArray(m.tags) ? m.tags : [],
     categories: Array.isArray(m.categories) ? m.categories : (m.category ? [m.category] : []),
     r18: m.r18 === true,
@@ -608,7 +607,6 @@ async function upload(req) {
   const meta = {
     id,
     title: (body.title || "").trim() || "未命名",
-    desc: (body.desc || "").trim(),
     categories: sanitizeCats(body.categories !== undefined ? body.categories : body.category), // 主分类（v0.19 必选、可多选）
     tags: Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [],
     takenAt: body.takenAt || new Date().toISOString(),
@@ -643,7 +641,7 @@ async function patch(req, id) {
   const meta = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!meta) return notFound("Photo not found");
   if (body.title !== undefined) meta.title = String(body.title).trim() || "未命名";
-  if (body.desc !== undefined) meta.desc = String(body.desc).trim();
+  // v0.41：描述（desc）字段已整体移除，不再接受写入
   if (body.tags !== undefined) meta.tags = Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [];
   if (body.categories !== undefined || body.category !== undefined) {
     // 主分类（v0.19 多选数组；同时接受旧的单值 category 字段）
@@ -757,7 +755,6 @@ async function importStatic(req) {
       const meta = {
         id,
         title: (title || "").trim() || "未命名",
-        desc: "",
         categories: sanitizeCats(item && (item.categories !== undefined ? item.categories : item.category)),
         tags,
         takenAt: new Date().toISOString(),
