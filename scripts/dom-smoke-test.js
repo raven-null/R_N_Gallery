@@ -348,6 +348,24 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       console.log("   （线上跳过相册创建与加图，避免改动真实数据）");
     }
   }
+  /* 收藏已移除、卡片改为「加入相册」（v0.35） */
+  const albAddBtn = doc.querySelector("#grid .card .alb-add");
+  check("卡片有「加入相册」按钮", !!albAddBtn);
+  check("卡片不再有收藏星标", !doc.querySelector("#grid .card .fav-star"));
+  check("灯箱不再有收藏按钮", !doc.getElementById("lbToolFav"));
+  check("筛选菜单不再有收藏行", !doc.querySelector('#tagMenuList [data-tag="__fav"]'));
+  if (albAddBtn) {
+    clickEl(albAddBtn);
+    await wait(400);
+    const albModal = doc.getElementById("albumModal");
+    check("点卡片相册按钮打开相册选择弹窗", !!albModal && albModal.classList.contains("open"));
+    if (albModal && albModal.classList.contains("open")) {
+      const closeBtn = doc.getElementById("albumClose");
+      if (closeBtn) clickEl(closeBtn);
+      await wait(200);
+    }
+  }
+
   /* 标签改名后界面立即更新（v0.31）——用一次性临时标签，写完就删，避免动到真实标签 */
   const uniq = "zz测试" + Math.random().toString(36).slice(2, 6);
   const renamedName = uniq + "改";

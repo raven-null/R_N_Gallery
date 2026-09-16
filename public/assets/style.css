@@ -2581,7 +2581,7 @@ html[data-cols="wide"] { --col-w: 320px; }
 }
 
 /* ============================================================
-   图片浏览与管理 v0.11.2：灯箱工具条 / 收藏 / 选择模式 / 排序 / 批量
+   图片浏览与管理 v0.11.2：灯箱工具条 / 选择模式 / 排序 / 批量（v0.35 起用「加入相册」取代收藏）
    ============================================================ */
 
 /* hidden 属性必须生效（避免被 display:flex/grid 类覆盖，如 batch-bar） */
@@ -2631,14 +2631,13 @@ html[data-cols="wide"] { --col-w: 320px; }
 .lb-tool:active { transform: scale(0.9); }
 .lb-tool svg { width: 17px; height: 17px; }
 .lb-tool.on { color: var(--accent); }
-.lb-tool.fav-on svg { fill: var(--accent); stroke: var(--accent); }
 .lb-tool:disabled { opacity: 0.5; cursor: wait; }
 /* 收起信息面板：图片占满 */
 .lightbox.no-info .lb-info { display: none; }
 .lightbox.no-info { gap: 0; }
 
-/* --- 卡片收藏星标（hover 显现；已收藏常显） --- */
-.card .fav-star {
+/* --- 卡片「加入相册」按钮（hover 显现；已在相册里则常显高亮）—— v0.35 取代原收藏星标 --- */
+.card .alb-add {
   position: absolute;
   top: 10px;
   right: 10px;
@@ -2650,23 +2649,27 @@ html[data-cols="wide"] { --col-w: 320px; }
   display: grid;
   place-items: center;
   color: #fff;
-  background: rgba(0,0,0,0.42);
+  background: rgba(0, 0, 0, 0.42);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   opacity: 0;
   transform: scale(0.8);
-  transition: opacity 0.2s, transform 0.2s var(--ease-spring), color 0.2s;
+  transition: opacity 0.2s, transform 0.2s var(--ease-spring), color 0.2s, background 0.2s;
   cursor: pointer;
 }
-.card .fav-star svg { width: 15px; height: 15px; }
-.card:hover .fav-star { opacity: 1; transform: scale(1); }
-.card .fav-star.on { opacity: 1; transform: scale(1); color: var(--accent); }
-.card .fav-star.on svg { fill: var(--accent); }
-.card .fav-star:active { transform: scale(0.88); }
+.card .alb-add svg { width: 16px; height: 16px; }
+.card:hover .alb-add { opacity: 1; transform: scale(1); }
+.card .alb-add.on {
+  opacity: 1;
+  transform: scale(1);
+  color: var(--accent);
+  background: rgba(255, 159, 10, 0.22);
+}
+.card .alb-add:active { transform: scale(0.88); }
 
 /* --- 批量选择模式 --- */
 body.select-mode .card { cursor: pointer; }
-body.select-mode .card .fav-star { display: none; }
+body.select-mode .card .alb-add { display: none; }
 .card .pick {
   position: absolute;
   top: 10px;

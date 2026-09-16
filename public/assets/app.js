@@ -34,30 +34,17 @@ const DEFAULT_CATEGORIES = [
   { id: "cat-handsome", name: "帅哥", color: "#00c2b8", sort: 5 },
 ];
 let TAGS = { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] };
-let activeTagName = null; // 图库墙当前筛选的标签名（"__fav" = 收藏）
+let activeTagName = null; // 图库墙当前筛选的标签名
 let activeCategory = null; // 图库墙当前筛选的主分类名（"__none" = 未分类）
 let activeGroupId = null; // 图库墙当前筛选的标签组 id（整组筛选：组内任一标签命中即可，v0.16）
 const collapsedGroups = new Set(); // 筛选菜单中折叠的组 id
 
-/* ---------- 收藏 / 排序 / 批量选择（v0.11.2） ---------- */
-const FAV_KEY = "rn_favs";
+/* ---------- 排序 / 批量选择（v0.11.2；收藏功能已在 v0.35 移除，改用「加入相册」） ---------- */
 const SORT_KEY = "rn_sort";
-let favs = new Set();
 let SORT_MODE = "newest"; // newest | oldest | title | size
 let selectMode = false;
 const selected = new Set();
 let aiFilter = null; // AI 语义筛选：{ tags: [names], match: "any"|"all" }
-
-function loadFavs() {
-  try { favs = new Set(JSON.parse(localStorage.getItem(FAV_KEY) || "[]")); }
-  catch (e) { favs = new Set(); }
-}
-function saveFavs() { localStorage.setItem(FAV_KEY, JSON.stringify([...favs])); }
-const isFav = (id) => favs.has(id);
-function toggleFav(id) {
-  if (favs.has(id)) favs.delete(id); else favs.add(id);
-  saveFavs();
-}
 
 function sortPhotos(list) {
   const out = [...list];
@@ -960,8 +947,6 @@ function openLightboxById(id, bustCache) {
   document.getElementById("lbTags").innerHTML =
     (lbCats.length ? lbCats.map(catChip).join("") : `<span class="tg cat" style="--tg:#8e8e93" title="主分类未设置">${t("未分类", "Uncategorized")}</span>`)
     + p.tags.map(tagChip).join("");
-  const favBtn = document.getElementById("lbToolFav");
-  if (favBtn) favBtn.classList.toggle("fav-on", isFav(id));
   const infoBtn = document.getElementById("lbToolInfo");
   const lb = document.getElementById("lightbox");
   lb.classList.add("open");
@@ -1064,9 +1049,7 @@ function renderTagMenuContent() {
   const used = Object.keys(counts);
 
   let html = `<button class="tag-menu-item${!activeTagName && !aiFilter && !activeCategory && !activeGroupId ? " active" : ""}" data-tag="">
-      <span class="nm">${t("全部", "All")}</span><span class="cnt">${PHOTOS.length}</span></button>
-    <button class="tag-menu-item${activeTagName === "__fav" ? " active" : ""}" data-tag="__fav">
-      <span class="nm"><i class="dot" style="--tg:var(--accent)"></i>${t("收藏", "Favorites")}</span><span class="cnt">${favs.size}</span></button>`;
+      <span class="nm">${t("全部", "All")}</span><span class="cnt">${PHOTOS.length}</span></button>`;
 
   // 主分类区（v0.15）：上传必选单选的固定大类，独立于标签体系筛选（互斥单选）；搜索标签词时隐藏聚焦结果
   const catCounts = { __none: 0 };
@@ -1282,7 +1265,7 @@ function initGallery() {
     updateFabDot();
     applyFilter();
   }
-  // 主分类筛选（v0.15）：与标签 / 收藏 / AI 筛选叠加（AND）
+  // 主分类筛选（v0.15）：与标签 / AI 筛选叠加（AND）
   function setCategoryFilter(v) {
     activeCategory = v;
     updateFabDot();
@@ -1292,7 +1275,7 @@ function initGallery() {
     fabDot.classList.toggle("on", !!(activeTagName || activeCategory || activeGroupId));
   }
 
-  // 标签筛选（v0.8.6 / v0.11.2 / v0.12 / v0.15 / v0.16：收藏 / 排序 / AI / 相册 / 主分类 / 整组叠加）
+  // 标签筛选（v0.8.6 / v0.11.2 / v0.12 / v0.15 / v0.16：排序 / AI / 相册 / 主分类 / 整组叠加）
   /* R18 收尾（v0.16）：未解锁时，正在筛选 R18 相关内容才保留（渲染成锁定卡），其余情况一律不显示 */
   function filterHitsR18() {
     const hit = (v) => String(v || "").trim().toLowerCase() === "r18";
@@ -1317,7 +1300,6 @@ function initGallery() {
         ? aiFilter.tags.every((t) => p.tags.includes(t))
         : aiFilter.tags.some((t) => p.tags.includes(t));
     }
-    if (activeTagName === "__fav") return favs.has(p.id);
     return !activeTagName || p.tags.includes(activeTagName);
   }
   function albumPred(p) {
@@ -1336,7 +1318,12 @@ function initGallery() {
   }
   window.__applyFilter = applyFilter;
 
-  const favSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`;
+  // v0.35：卡片右上角按钮改为「加入相册」（原收藏星标已移除）
+  const albumSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>`;
+  /* 该图所在相册（用于按钮高亮提示） */
+  function albumsOfPhoto(id) {
+    return ALBUMS.albums.filter((a) => (a.photoIds || []).includes(id));
+  }
   function cardHTML(p) {
     // R18 未解锁：只渲染锁定占位，不加载任何图片内容
     if (isR18(p) && !r18Unlocked()) {
@@ -1348,10 +1335,11 @@ function initGallery() {
     // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
     // 老数据缺尺寸时不写，退回原来的自然高度
     const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";
+    const inAlbs = albumsOfPhoto(p.id);
     return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true"${ratio}>
       <img loading="lazy" decoding="async" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
       <button class="pick" title="选中">✓</button>
-      <button class="fav-star${isFav(p.id) ? " on" : ""}" title="${isFav(p.id) ? "取消收藏" : "收藏"}">${favSVG}</button>
+      <button class="alb-add${inAlbs.length ? " on" : ""}" title="${inAlbs.length ? `已在相册：${escAttr(inAlbs.map((a) => a.name).join("、"))}（点击继续加入）` : "加入相册"}">${albumSVG}</button>
       <div class="card__content">
         <div class="card__tags">${catChipsOf(p, 2)}${p.tags.slice(0, catsOf(p).length ? 2 : 3).map(tagChip).join("")}</div>
         <p class="card__meta">${fmtDate(p.takenAt)} · ${fmtSize(p.size)}</p>
@@ -1480,15 +1468,13 @@ function initGallery() {
 
   /* 卡片事件委托（v0.13.2：星标 / 选中 / 打开灯箱，避免整批重绑） */
   grid.addEventListener("click", (e) => {
-    const star = e.target.closest(".fav-star");
-    if (star) {
-      const card = star.closest(".card");
+    // v0.35：卡片右上角按钮 = 加入相册（原收藏星标已移除）
+    const albBtn = e.target.closest(".alb-add");
+    if (albBtn) {
+      const card = albBtn.closest(".card");
       const id = card && card.dataset.id;
       if (!id) return;
-      toggleFav(id);
-      star.classList.toggle("on", isFav(id));
-      renderTagMenuContent();
-      if (activeTagName === "__fav" && !isFav(id)) applyFilter(); // 收藏视图取消收藏 → 移除卡片
+      openAlbumPicker([id]);
       return;
     }
     const card = e.target.closest(".card");
@@ -1529,25 +1515,13 @@ function initGallery() {
   });
   window.__stopSlide = stopSlide;
 
-  /* ---------- 灯箱工具条（v0.11.2） ---------- */
-  const lbToolFav = document.getElementById("lbToolFav");
+  /* ---------- 灯箱工具条（v0.11.2；收藏按钮已在 v0.35 移除，改用「加入相册」） ---------- */
   const lbToolInfo = document.getElementById("lbToolInfo");
   const lbToolRot = document.getElementById("lbToolRot");
   const lbToolDl = document.getElementById("lbToolDl");
   const lbToolEdit = document.getElementById("lbToolEdit");
   const curPhoto = () => PHOTOS.find((x) => x.id === lightbox.dataset.cur);
 
-  if (lbToolFav) {
-    lbToolFav.onclick = () => {
-      const p = curPhoto();
-      if (!p) return;
-      toggleFav(p.id);
-      lbToolFav.classList.toggle("fav-on", isFav(p.id));
-      renderTagMenuContent();
-      if (activeTagName === "__fav" && !isFav(p.id)) applyFilter();
-      else window.__renderGallery();
-    };
-  }
   if (lbToolInfo) {
     lbToolInfo.onclick = () => {
       const off = lightbox.classList.toggle("no-info");
@@ -2576,6 +2550,7 @@ async function addToAlbum(aid) {
     await saveAlbums();
     document.getElementById("albumModal").classList.remove("open");
     if (window.__refreshGallery) window.__refreshGallery();
+    if (typeof renderAlbumsView === "function") renderAlbumsView(); // 相册页开着时同步刷新
   } catch (e) {
     const hint = document.getElementById("albumHint");
     hint.textContent = "保存失败：" + e.message;
@@ -2974,7 +2949,7 @@ const I18N_DICT = {
   "开始上传": "Upload now",
   "取消": "Cancel", "关闭": "Close", "保存": "Save", "应用": "Apply", "删除": "Delete", "确认": "Confirm",
   "确认删除": "Delete", "清空": "Clear", "清空日志": "Clear logs",
-  "加标签": "Add Tags", "入相册": "Add to Album", "全部": "All", "收藏": "Favorites",
+  "加标签": "Add Tags", "入相册": "Add to Album", "全部": "All",
   "最新上传": "Newest", "最早上传": "Oldest", "标题 A–Z": "Title A–Z", "文件大小": "Size",
   "标题": "Title", "描述": "Description", "标签": "Tags",
   "加入相册": "Add to Album", "新建相册名称…": "New album name…", "＋ 新建并加入": "Create & add",
@@ -5034,7 +5009,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   /* 访问密码门禁（v0.16）：启用了密码且本机没有凭证时，先登录、不加载任何数据 */
   const __auth = await fetchAuthState();
   if (__auth.gate && !gateToken()) { showGate(); return; }
-  loadFavs();
   initPageSwitch();
   initGallery();
   initSearch();
