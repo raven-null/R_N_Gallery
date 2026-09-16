@@ -1318,12 +1318,6 @@ function initGallery() {
   }
   window.__applyFilter = applyFilter;
 
-  // v0.35：卡片右上角按钮改为「加入相册」（原收藏星标已移除）
-  const albumSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>`;
-  /* 该图所在相册（用于按钮高亮提示） */
-  function albumsOfPhoto(id) {
-    return ALBUMS.albums.filter((a) => (a.photoIds || []).includes(id));
-  }
   function cardHTML(p) {
     // R18 未解锁：只渲染锁定占位，不加载任何图片内容
     if (isR18(p) && !r18Unlocked()) {
@@ -1335,11 +1329,9 @@ function initGallery() {
     // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
     // 老数据缺尺寸时不写，退回原来的自然高度
     const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";
-    const inAlbs = albumsOfPhoto(p.id);
     return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true"${ratio}>
       <img loading="lazy" decoding="async" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
       <button class="pick" title="选中">✓</button>
-      <button class="alb-add${inAlbs.length ? " on" : ""}" title="${inAlbs.length ? `已在相册：${escAttr(inAlbs.map((a) => a.name).join("、"))}（点击继续加入）` : "加入相册"}">${albumSVG}</button>
       <div class="card__content">
         <div class="card__tags">${catChipsOf(p, 2)}${p.tags.slice(0, catsOf(p).length ? 2 : 3).map(tagChip).join("")}</div>
         <p class="card__meta">${fmtDate(p.takenAt)} · ${fmtSize(p.size)}</p>
@@ -1468,15 +1460,6 @@ function initGallery() {
 
   /* 卡片事件委托（v0.13.2：星标 / 选中 / 打开灯箱，避免整批重绑） */
   grid.addEventListener("click", (e) => {
-    // v0.35：卡片右上角按钮 = 加入相册（原收藏星标已移除）
-    const albBtn = e.target.closest(".alb-add");
-    if (albBtn) {
-      const card = albBtn.closest(".card");
-      const id = card && card.dataset.id;
-      if (!id) return;
-      openAlbumPicker([id]);
-      return;
-    }
     const card = e.target.closest(".card");
     if (!card) return;
     const id = card.dataset.id;

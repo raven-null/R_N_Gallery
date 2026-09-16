@@ -2636,40 +2636,8 @@ html[data-cols="wide"] { --col-w: 320px; }
 .lightbox.no-info .lb-info { display: none; }
 .lightbox.no-info { gap: 0; }
 
-/* --- 卡片「加入相册」按钮（hover 显现；已在相册里则常显高亮）—— v0.35 取代原收藏星标 --- */
-.card .alb-add {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 3;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: none;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.42);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
-  opacity: 0;
-  transform: scale(0.8);
-  transition: opacity 0.2s, transform 0.2s var(--ease-spring), color 0.2s, background 0.2s;
-  cursor: pointer;
-}
-.card .alb-add svg { width: 16px; height: 16px; }
-.card:hover .alb-add { opacity: 1; transform: scale(1); }
-.card .alb-add.on {
-  opacity: 1;
-  transform: scale(1);
-  color: var(--accent);
-  background: rgba(255, 159, 10, 0.22);
-}
-.card .alb-add:active { transform: scale(0.88); }
-
 /* --- 批量选择模式 --- */
 body.select-mode .card { cursor: pointer; }
-body.select-mode .card .alb-add { display: none; }
 .card .pick {
   position: absolute;
   top: 10px;
