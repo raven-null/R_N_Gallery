@@ -993,6 +993,11 @@ function renderTagMenuContent() {
 
   if (used.length) {
     const groups = [...TAGS.groups].sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
+    // v0.23 性能：首次渲染把已有组全部折叠，避免几百行标签一次性塞进 DOM（输入搜索时自动展开命中组）
+    if (!window.__menuCollapsedInit && groups.length) {
+      groups.forEach((g) => collapsedGroups.add(g.id));
+      window.__menuCollapsedInit = true;
+    }
     for (const g of groups) {
       const all = TAGS.tags.filter((t) => t.group === g.id);
       const items = all
@@ -1002,7 +1007,7 @@ function renderTagMenuContent() {
       const wholeHit = groupHitCount(all);
       if (!items.length && !(wholeHit && !q)) continue; // 搜索标签词时只显示有命中的组
       const col = g.color || null;
-      const collapsed = collapsedGroups.has(g.id) && activeGroupId !== g.id; // 正在整组筛选时强制展开
+      const collapsed = collapsedGroups.has(g.id) && activeGroupId !== g.id && !q; // 正在整组筛选 / 搜索时强制展开
       html += `<div class="tag-group-head${collapsed ? " collapsed" : ""}${activeGroupId === g.id ? " active" : ""}" data-gid="${escAttr(g.id)}">
         <i class="dot"${col ? ` style="--tg:${col}"` : ""}></i>${esc(g.name)}
         ${wholeHit ? `<button class="gfilter${activeGroupId === g.id ? " on" : ""}" data-gfilter="${escAttr(g.id)}" title="${t("按整组筛选：该组任一标签命中即可（作品级兜底）", "Filter the whole group")}">${t("整组", "group")} ${wholeHit}</button>` : ""}
@@ -1216,7 +1221,7 @@ function initGallery() {
     // 老数据缺尺寸时不写，退回原来的自然高度
     const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";
     return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true"${ratio}>
-      <img loading="lazy" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
+      <img loading="lazy" decoding="async" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
       <button class="pick" title="选中">✓</button>
       <button class="fav-star${isFav(p.id) ? " on" : ""}" title="${isFav(p.id) ? "取消收藏" : "收藏"}">${favSVG}</button>
       <div class="card__content">
@@ -2871,10 +2876,14 @@ function refreshTagManager() {
   const used = Object.keys(counts);
   const savedView = localStorage.getItem(TMGR_VIEW_KEY);
   const view = savedView === "group" ? "group" : (savedView === "review" ? "review" : "classify");
-  // v0.20：离开「整理」视图时摘掉键盘监听
+  // v0.20：离开「整理」视图时摘掉键盘监听（v0.23 起同时管理分类工作台的数字键）
   if (view !== "review" && window.__rvKey) {
     document.removeEventListener("keydown", window.__rvKey, true);
     window.__rvKey = null;
+  }
+  if (view !== "classify" && window.__cwKey) {
+    document.removeEventListener("keydown", window.__cwKey, true);
+    window.__cwKey = null;
   }
 
   let html = `<div class="tmgr-seg">
@@ -2933,6 +2942,7 @@ function refreshTagManager() {
         <div class="uq-panel">
           <div class="uq-panel-title">分类</div>
           <div class="uq-panel-sub">点左侧图片选中 → 点分类槽即打标（也可拖拽）；组头可折叠，一次只展开一个作品组</div>
+          <div class="rv-help" style="margin:2px 0 6px">快捷键：选中图片后按 <b>1-9</b> = 直接打「最近使用」里的标签，可连续按</div>
           <input type="text" id="cwSlotSearch" class="uq-slot-search" placeholder="搜角色 / 作品（支持拼音，如 ht）" autocomplete="off">
           <div class="uq-panel-status" id="cwSelStatus"></div>
           <div class="uq-slots" id="cwSlots"></div>
@@ -3125,9 +3135,15 @@ function initCwView(root) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tags: [...new Set([...(p.tags || []), tag])].slice(0, 10) }),
         })));
-        await loadData();
-        cwSel.clear();
-        if (window.__refreshGallery) window.__refreshGallery(); // 内部含 refreshTagManager
+        pushRecentTags(tag);
+        // v0.23：本地增量更新（不再全量 loadData），拖完可以马上继续拖
+        todo.forEach((p) => {
+          p.tags = [...new Set([...(p.tags || []), tag])].slice(0, 10);
+          updateCwCardBadge(p);
+        });
+        renderCwSlots();
+        updateCwSelStatus(`已给 <span class="cnt">${todo.length}</span> 张加上「${esc(tag)}」· 可继续操作`);
+        if (window.__renderGallery) window.__renderGallery();
       } catch (err) { /* 静默 */ }
     });
     // v0.20：点组头折叠 / 点槽给已选图片打标 / 点「最近使用」同样直接打标
@@ -3137,6 +3153,20 @@ function initCwView(root) {
       const slot = e.target.closest(".uq-slot");
       if (slot && slot.dataset.tag) cwApplyTagToSelection(slot.dataset.tag);
     });
+    // v0.23：选中图片后按 1-9 = 直接打「最近使用」里的标签，连续打标不用鼠标
+    if (window.__cwKey) document.removeEventListener("keydown", window.__cwKey, true);
+    window.__cwKey = (e) => {
+      if (localStorage.getItem(TMGR_VIEW_KEY) !== "classify") return;
+      if (document.querySelector(".modal-mask.open")) return;
+      const tn = e.target && e.target.tagName;
+      if (tn === "INPUT" || tn === "TEXTAREA" || tn === "SELECT") return;
+      if (!/^[1-9]$/.test(e.key)) return;
+      const name = loadRecentTags()[Number(e.key) - 1];
+      if (!name) return;
+      e.preventDefault();
+      cwApplyTagToSelection(name);
+    };
+    document.addEventListener("keydown", window.__cwKey, true);
   }
 }
 function updateCwSelStatus(msg) {
@@ -3175,7 +3205,26 @@ function toggleCwGroup(gid) {
   else { cwOpenGroups.clear(); cwOpenGroups.add(gid); }
   renderCwSlots();
 }
-/* 点分类槽 = 把该标签打到已选图片上（v0.20，免拖拽） */
+/* 打标后只更新这一张卡片的角标与提示，避免整页重绘（v0.23 性能） */
+function updateCwCardBadge(p) {
+  const card = document.querySelector(`#cwCards .cw-card[data-id="${p.id}"]`);
+  if (!card) return;
+  const n = (p.tags || []).length;
+  let badge = card.querySelector(".cw-badge");
+  if (!n) {
+    if (badge) badge.remove();
+    card.title = "无标签";
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "cw-badge";
+    card.appendChild(badge);
+  }
+  badge.textContent = n;
+  card.title = (p.tags || []).join(" · ");
+}
+/* 点分类槽 = 把该标签打到已选图片上（v0.20；v0.23 改为本地增量更新，可连续打标） */
 async function cwApplyTagToSelection(tag) {
   if (!tag) return;
   const ids = [...cwSel];
@@ -3190,10 +3239,16 @@ async function cwApplyTagToSelection(tag) {
       body: JSON.stringify({ tags: [...new Set([...(p.tags || []), tag])].slice(0, 10) }),
     })));
     pushRecentTags(tag);
-    await loadData();
-    cwSel.clear();
-    if (window.__refreshGallery) window.__refreshGallery(); // 内部含 refreshTagManager
-  } catch (e) { /* 静默 */ }
+    todo.forEach((p) => {
+      p.tags = [...new Set([...(p.tags || []), tag])].slice(0, 10); // 本地同步，不重拉
+      updateCwCardBadge(p);
+    });
+    renderCwSlots(); // 槽上的计数跟着变
+    updateCwSelStatus(`已给 <span class="cnt">${todo.length}</span> 张加上「${esc(tag)}」· 可继续点其他标签`);
+    if (window.__renderGallery) window.__renderGallery();
+  } catch (e) {
+    updateCwSelStatus("打标失败：" + esc(e.message));
+  }
 }
 function renderCwCards() {
   const wrap = document.getElementById("cwCards");
@@ -3209,7 +3264,7 @@ function renderCwCards() {
   wrap.innerHTML = cwList.slice(0, cwShown).map((p) => {
     const n = (p.tags || []).length;
     return `<div class="cw-card${cwSel.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true" title="${escAttr((p.tags || []).join(" · ") || "无标签")}">
-      <img loading="lazy" draggable="false" src="${cardImgSrc(p)}" alt="">
+      <img loading="lazy" decoding="async" draggable="false" src="${cardImgSrc(p)}" alt="">
       ${n ? `<span class="cw-badge">${n}</span>` : ""}
     </div>`;
   }).join("");
@@ -3282,7 +3337,18 @@ function rvRender() {
     return;
   }
   img.classList.remove("rv-empty-img");
-  img.src = qualityMode() === "low" ? (p.thumbUrl || p.url) : p.url; // 与原图一致，便于看清角色
+  // v0.23 性能：先用缩略图秒开，再后台换成原图（切换图片不用等大图下载）
+  const thumb = p.thumbUrl || p.url;
+  img.src = thumb;
+  if (p.url && p.url !== thumb) {
+    const full = new Image();
+    const targetId = p.id;
+    full.onload = () => { if (rvIds[rvIdx] === targetId) img.src = p.url; };
+    full.src = p.url;
+  }
+  // 顺手预取下一张的缩略图，切换更跟手
+  const nextP = PHOTOS.find((x) => x.id === rvIds[rvIdx + 1]);
+  if (nextP) { const pre = new Image(); pre.src = nextP.thumbUrl || nextP.url; }
   const cats = catsOf(p);
   meta.innerHTML = `<b>${esc(p.title || "未命名")}</b> · ${p.width}×${p.height} · ${fmtSize(p.size)} · ${fmtDate(p.uploadedAt)}`
     + (cats.length ? ` · 当前分类：${cats.map((c) => esc(c)).join("、")}` : ` · <span style="color:var(--danger)">当前未分类</span>`);
@@ -3405,8 +3471,12 @@ function bindTagDrops(scope) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tags: merged }),
         });
-        await loadData();
-        if (window.__refreshGallery) window.__refreshGallery();
+        // v0.23：本地增量更新，拖完可以马上继续
+        p.tags = merged;
+        pushRecentTags(tag);
+        updateCwCardBadge(p);
+        renderCwSlots();
+        if (window.__renderGallery) window.__renderGallery();
       } catch (err) { /* 静默 */ }
     });
   });
@@ -4069,6 +4139,15 @@ function openTagModal(mode, payload, presetName) {
 
 /* ---------- 外观设置（v0.11.1）：主题（浅/深/跟随系统） + 瀑布流列宽 ---------- */
 const THEME_KEY = "rn_theme";
+/* v0.23 性能模式：关掉毛玻璃（backdrop-filter）与大部分过渡动画。
+   图库很大或设备较弱时，这是最见效的一档开关；尽早生效避免首屏闪烁 */
+const PERF_KEY = "rn_perf_lite";
+function applyPerfLite(on) {
+  document.body.classList.toggle("perf-lite", !!on);
+  if (on) document.documentElement.setAttribute("data-perf", "lite");
+  else document.documentElement.removeAttribute("data-perf");
+}
+try { if (localStorage.getItem(PERF_KEY) === "1") applyPerfLite(true); } catch (e) { /* ignore */ }
 const COLS_KEY = "rn_cols";
 
 function applyTheme(pref) {
@@ -4080,6 +4159,18 @@ function applyTheme(pref) {
 }
 
 function initAppearance() {
+  // 性能模式开关（v0.23）
+  const perfBox = document.getElementById("perfLite");
+  const perfOn = localStorage.getItem(PERF_KEY) === "1";
+  applyPerfLite(perfOn);
+  if (perfBox) {
+    perfBox.checked = perfOn;
+    perfBox.addEventListener("change", () => {
+      localStorage.setItem(PERF_KEY, perfBox.checked ? "1" : "0");
+      applyPerfLite(perfBox.checked);
+    });
+  }
+
   // 主题分段选择
   const segTheme = document.getElementById("themeSeg");
   const themePref = localStorage.getItem(THEME_KEY) || "dark";
@@ -4283,7 +4374,7 @@ function initSearch() {
     }
     results.innerHTML = list.map((p) => `
       <div class="search-card" data-id="${p.id}">
-        <img loading="lazy" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
+        <img loading="lazy" decoding="async" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
         <div class="t">${catChipsOf(p, 2)}${p.tags.length ? p.tags.slice(0, 2).map(tagChip).join(" / ") : ""}</div>
       </div>`).join("");
     results.querySelectorAll(".search-card").forEach((c) => {

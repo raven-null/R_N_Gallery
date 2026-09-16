@@ -3935,3 +3935,44 @@ body.select-mode .card .pick { display: grid; }
   cursor: help;
   white-space: nowrap;
 }
+
+/* ============================================================
+   性能模式（v0.23）：关掉毛玻璃与过渡动画，图库很大时明显更流畅
+   ============================================================ */
+body.perf-lite .page-panel,
+body.perf-lite .tag-menu,
+body.perf-lite .page-menu,
+body.perf-lite .sort-menu,
+body.perf-lite .modal,
+body.perf-lite .lightbox,
+body.perf-lite .lb-info,
+body.perf-lite .fab,
+body.perf-lite .quick-pick,
+body.perf-lite .tag-suggest,
+body.perf-lite .batch-bar,
+body.perf-lite .dock-bar,
+body.perf-lite .ai-chat,
+body.perf-lite .cw-right .uq-panel {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body.perf-lite *,
+body.perf-lite *::before,
+body.perf-lite *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}
+body.perf-lite .card:hover .card__content,
+body.perf-lite .card__content {
+  transform: none !important;
+  transition: none !important;
+}
+/* 设置项里的小字说明 */
+.settings-label .settings-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+}
