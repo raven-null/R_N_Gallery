@@ -133,6 +133,34 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
+  /* 整理视图：应用过的图片刷新后不再回到待整理队列（v0.27） */
+  window.localStorage.setItem("rn_tmgr_view", "review");
+  window.__refreshTagManager();
+  await wait(400);
+  const rv1 = window.__rvState ? window.__rvState() : null;
+  check("整理视图有待整理项", !!(rv1 && rv1.ids.length), rv1 ? `${rv1.ids.length} 张` : "无 __rvState（未切换到整理视图）");
+  if (rv1 && rv1.ids.length) {
+    const firstId = rv1.ids[0];
+    // 保证至少选中一个主分类：挑一个当前未选中的 chip 点（点已选中的是取消）
+    const rvChips = [...doc.querySelectorAll("#rvCats .cat-pick")];
+    const pick = rvChips.find((c) => !c.classList.contains("on")) || rvChips[0];
+    if (pick) pick.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const picked = [...doc.querySelectorAll("#rvCats .cat-pick.on")].map((c) => c.dataset.cat);
+    console.log(`   选中主分类：[${picked.join(",")}]`);
+    doc.getElementById("rvApply").click();
+    await wait(1500);
+    const rv2 = window.__rvState();
+    check("应用后记入整理进度", rv2.done.includes(firstId));
+    check("应用后前进到下一张", rv2.idx === rv1.idx + 1, `idx ${rv1.idx} → ${rv2.idx}`);
+    window.__refreshTagManager(); // 模拟刷新：重新读进度并重算队列
+    await wait(500);
+    const rv3 = window.__rvState();
+    check("重新加载后不再出现", !rv3.ids.includes(firstId), `队列剩 ${rv3.ids.length} 张`);
+    window.localStorage.setItem("rn_tmgr_view", "classify"); // 切回分类视图，供后续检查
+    window.__refreshTagManager();
+    await wait(400);
+  }
+
   const cssText = fs.readFileSync(path.join(ROOT, "public", "assets", "style.css"), "utf8");
   check("CSS 含 content-visibility 规则", /content-visibility:\s*auto/.test(cssText));
 

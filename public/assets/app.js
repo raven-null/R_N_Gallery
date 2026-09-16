@@ -3098,6 +3098,7 @@ function refreshTagManager() {
           <button class="seg-btn sm${rvFilter === "notag" ? " on" : ""}" data-rvf="notag">无标签</button>
           <button class="seg-btn sm${rvFilter === "all" ? " on" : ""}" data-rvf="all">全部</button>
         </span>
+        <button class="btn ghost sm" id="rvReset" type="button" title="清空整理进度：已应用过的图片会重新回到待整理队列">重置进度</button>
       </div>
       <div class="rv-body">
         <div class="rv-photo">
@@ -3505,10 +3506,29 @@ let rvFilter = "todo"; // todo（缺主分类或没打过库内标签）| nocat 
 let rvIds = [];
 let rvIdx = 0;
 let rvBusy = false;
+/* v0.27：整理进度（localStorage 记已「应用」过的图片 id）
+   原先的问题：默认筛选是「缺主分类 或 没有库内标签」，只设了主分类还没打标签的图
+   应用后仍然符合条件，刷新后又回到待整理队列。现在「应用」过的会记下来并跳过，
+   想重新过一遍可以点「重置进度」。 */
+const RV_DONE_KEY = "rn_rv_done";
+let rvDone = new Set();
+function loadRvDone() {
+  try {
+    const a = JSON.parse(localStorage.getItem(RV_DONE_KEY) || "[]");
+    rvDone = new Set(Array.isArray(a) ? a : []);
+  } catch (e) { rvDone = new Set(); }
+}
+function saveRvDone() {
+  try {
+    const arr = [...rvDone].slice(-3000); // 上限 3000，超出丢最早的
+    localStorage.setItem(RV_DONE_KEY, JSON.stringify(arr));
+  } catch (e) { /* ignore */ }
+}
 
 function rvPickIds() {
   const hasLibTag = (p) => (p.tags || []).some((n) => tagByName(n));
   return PHOTOS.filter((p) => {
+    if (rvFilter !== "all" && rvDone.has(p.id)) return false; // 整理过的先跳过（「全部」除外）
     const hasCat = catsOf(p).length > 0;
     if (rvFilter === "nocat") return !hasCat;
     if (rvFilter === "notag") return !(p.tags || []).length;
@@ -3553,15 +3573,18 @@ function rvRender() {
     meta.innerHTML = rvIds.length
       ? `🎉 这一轮 ${rvIds.length} 张都过完了<br><span class="rv-sub">换个筛选条件可以继续；点「分组」或「分类」返回</span>`
       : `这个筛选条件下没有需要整理的图片 🎉<br><span class="rv-sub">试试「全部」或先去上传一些图片</span>`;
-    prog.textContent = rvIds.length ? `已完成 ${rvIds.length} / ${rvIds.length}` : "没有待整理项";
+    prog.textContent = rvIds.length
+      ? `已完成 ${rvIds.length} / ${rvIds.length}${rvDone.size ? ` · 累计已整理 ${rvDone.size} 张` : ""}`
+      : (rvDone.size
+        ? `这批没有待整理项 · 累计已整理 ${rvDone.size} 张（需要重新过一遍就点右上「重置进度」）`
+        : "没有待整理项");
     renderCatPicks(document.getElementById("rvCats"), []);
     if (box) box.querySelectorAll(".t").forEach((el) => el.remove());
     if (hint) hint.textContent = "";
     rvRefreshQuick();
     return;
   }
-  img.classList.remove("rv-empty-img");
-  // v0.23 性能：先用缩略图秒开，再后台换成原图（切换图片不用等大图下载）
+  img.classList.remove("rv-empty-img");  // v0.23 性能：先用缩略图秒开，再后台换成原图（切换图片不用等大图下载）
   const thumb = p.thumbUrl || p.url;
   img.src = thumb;
   if (p.url && p.url !== thumb) {
@@ -3576,7 +3599,8 @@ function rvRender() {
   const cats = catsOf(p);
   meta.innerHTML = `<b>${esc(p.title || "未命名")}</b> · ${p.width}×${p.height} · ${fmtSize(p.size)} · ${fmtDate(p.uploadedAt)}`
     + (cats.length ? ` · 当前分类：${cats.map((c) => esc(c)).join("、")}` : ` · <span style="color:var(--danger)">当前未分类</span>`);
-  prog.textContent = `第 ${rvIdx + 1} / ${rvIds.length} 张 · 还剩 ${rvIds.length - rvIdx} 张`;
+  prog.textContent = `第 ${rvIdx + 1} / ${rvIds.length} 张 · 还剩 ${rvIds.length - rvIdx} 张`
+    + (rvDone.size ? ` · 本轮已整理 ${rvDone.size} 张` : "");
   renderCatPicks(document.getElementById("rvCats"), cats);
   if (box) {
     box.querySelectorAll(".t").forEach((el) => el.remove());
@@ -3595,6 +3619,10 @@ async function rvApply() {
   const hint = document.getElementById("rvHint");
   const cats = selCatsOf(document.getElementById("rvCats"));
   const tags = tagsOfBox(document.getElementById("rvTagBox"));
+  if (!cats.length) { // v0.27：主分类是必选项，防止"空着手点应用"把已有分类清掉
+    if (hint) { hint.style.color = "var(--danger)"; hint.textContent = "请至少选一个主分类（不想改这张就点「跳过」）"; }
+    return;
+  }
   rvBusy = true;
   try {
     const r = await apiFetch(`/api/photos/${p.id}`, {
@@ -3607,6 +3635,8 @@ async function rvApply() {
     p.categories = cats; // 本地同步，免得每张都重拉全量
     p.tags = tags;
     pushRecentTags(tags.slice(-3));
+    rvDone.add(p.id); // v0.27：记下"已整理"，刷新后不再回到待整理队列
+    saveRvDone();
     if (window.__refreshGallery) { /* 图库墙下次筛选时用新数据 */ }
     rvIdx++;
     rvRender();
@@ -3618,10 +3648,22 @@ async function rvApply() {
 function rvSkip() { rvIdx++; rvRender(); }
 
 function initReviewView(root) {
+  loadRvDone(); // v0.27：读回整理进度（已应用过的不再重复出现）
   rvIds = rvPickIds();
   rvIdx = 0;
   rvRender();
+  window.__rvState = () => ({ ids: [...rvIds], idx: rvIdx, done: [...rvDone], filter: rvFilter }); // 测试钩子
   const q = (sel) => root.querySelector(sel);
+  const resetBtn = q("#rvReset");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      rvDone.clear();
+      saveRvDone();
+      rvIds = rvPickIds();
+      rvIdx = 0;
+      rvRender();
+    });
+  }
   const filters = q("#rvFilters");
   if (filters) {
     filters.querySelectorAll("[data-rvf]").forEach((b) => b.addEventListener("click", () => {
