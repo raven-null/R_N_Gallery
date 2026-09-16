@@ -130,6 +130,30 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   const cssText = fs.readFileSync(path.join(ROOT, "public", "assets", "style.css"), "utf8");
   check("CSS 含 content-visibility 规则", /content-visibility:\s*auto/.test(cssText));
 
+  /* 分类工作台：选中一张卡片 → 点主分类 chips → 真能写进图库 */
+  const cwCard = doc.querySelector("#cwCards .cw-card");
+  const cwChip = doc.querySelector("#cwCats .cat-pick");
+  check("分类工作台有主分类面板", !!(doc.getElementById("cwCats") && cwChip), cwChip ? `${doc.querySelectorAll("#cwCats .cat-pick").length} 个分类` : "未渲染（可能不在分类视图）");
+  if (cwCard && cwChip) {
+    const catName = cwChip.dataset.cat;
+    const id = cwCard.dataset.id;
+    cwCard.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await wait(200);
+    const selStatus = () => ((doc.getElementById("cwSelStatus") || {}).textContent || "").trim();
+    console.log(`   选中后：${selStatus()}　（卡片 sel 类：${cwCard.classList.contains("sel")}）`);
+    const chip2 = doc.querySelector("#cwCats .cat-pick"); // 面板会随选中重建，重新取一次
+    console.log(`   点击「${chip2 ? chip2.dataset.cat : "?"}」…`);
+    chip2.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await wait(1500);
+    console.log(`   点主分类后：${selStatus()}`);
+    const headers = TOKEN ? { "X-Auth-Token": TOKEN } : {};
+    const res = await fetch(`${BASE}/api/photos?limit=200&_=${Math.random()}`, { headers });
+    const d = await res.json();
+    const target = (d.photos || []).find((p) => p.id === id);
+    const cats = (target && (target.categories || [])) || [];
+    check("点主分类后已写回图库", cats.includes(catName), `${catName} → [${cats.join(",")}]`);
+  }
+
   const failed = results.filter((x) => !x).length;
   console.log(`\n${failed ? `✗ ${failed} 项未通过` : "✓ 全部通过"}（共 ${results.length} 项）\n`);
   process.exit(failed ? 1 : 0);

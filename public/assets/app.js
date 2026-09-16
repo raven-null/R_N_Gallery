@@ -3040,14 +3040,19 @@ function refreshTagManager() {
       </div>
       <div class="cw-right">
         <div class="uq-panel">
-          <div class="uq-panel-title">分类</div>
-          <div class="uq-panel-sub">点左侧图片选中 → 点分类槽即打标（也可拖拽）；组头可折叠，一次只展开一个作品组</div>
+          <div class="uq-panel-title">主分类 <span class="req">点一下 = 设置到选中图片</span></div>
+          <div class="uq-panel-sub">选中左侧图片后点分类名即可加上；已全部包含时再点 = 取消。也可把图片直接拖到分类名上</div>
+          <div class="uq-cats" id="cwCats" data-multi="1"></div>
+        </div>
+        <div class="uq-panel">
+          <div class="uq-panel-title">标签（作品 / 角色）</div>
+          <div class="uq-panel-sub">点左侧图片选中 → 点标签槽即打标（也可拖拽）；组头可折叠，一次只展开一个作品组</div>
           <div class="rv-help" style="margin:2px 0 6px">快捷键：选中图片后按 <b>1-9</b> = 直接打「最近使用」里的标签，可连续按</div>
           <input type="text" id="cwSlotSearch" class="uq-slot-search" placeholder="搜角色 / 作品（支持拼音，如 ht）" autocomplete="off">
           <div class="uq-panel-status" id="cwSelStatus"></div>
           <div class="uq-slots" id="cwSlots"></div>
           <div class="uq-new-slot">
-            <input type="text" id="cwNewSlotInput" placeholder="+ 新分类标签，回车创建" autocomplete="off">
+            <input type="text" id="cwNewSlotInput" placeholder="+ 新标签，回车创建" autocomplete="off">
           </div>
         </div>
       </div>
@@ -3141,8 +3146,42 @@ function initCwView(root) {
   cwList = PHOTOS.filter((p) => cwFilter === "all" || !(p.tags || []).some((n) => tagByName(n)));
   renderCwCards();
   renderCwSlots();
+  renderCwCats();
   updateCwSelStatus();
   const q = (sel) => root.querySelector(sel);
+  // v0.26：主分类面板——点一下给选中图片设置/取消；也支持把图片拖到分类名上
+  const cwCatsEl = q("#cwCats");
+  if (cwCatsEl) {
+    cwCatsEl.addEventListener("click", (e) => {
+      const b = e.target.closest(".cat-pick");
+      if (b && b.dataset.cat) cwApplyCategory(b.dataset.cat);
+    });
+    cwCatsEl.addEventListener("dragover", (e) => {
+      const b = e.target.closest(".cat-pick");
+      if (!b || !(e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes("text/plain"))) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      cwCatsEl.querySelectorAll(".cat-pick.drop-hover").forEach((x) => { if (x !== b) x.classList.remove("drop-hover"); });
+      b.classList.add("drop-hover");
+    });
+    cwCatsEl.addEventListener("dragleave", (e) => {
+      const b = e.target.closest(".cat-pick");
+      if (b) b.classList.remove("drop-hover");
+    });
+    cwCatsEl.addEventListener("drop", async (e) => {
+      const b = e.target.closest(".cat-pick");
+      if (!b || !b.dataset.cat) return;
+      e.preventDefault();
+      b.classList.remove("drop-hover");
+      let ids = window.__cwDrag && window.__cwDrag.length ? [...window.__cwDrag] : [];
+      window.__cwDrag = null;
+      if (!ids.length) {
+        const id0 = e.dataTransfer.getData("text/plain");
+        if (id0 && PHOTOS.some((p) => p.id === id0)) ids = [id0]; // 图库卡片直接拖入
+      }
+      if (ids.length) await cwApplyCategory(b.dataset.cat, "add", ids);
+    });
+  }
   q("#cwFilters").querySelectorAll("[data-cwf]").forEach((b) => b.addEventListener("click", () => {
     cwFilter = b.dataset.cwf;
     cwShown = 40;
@@ -3179,6 +3218,7 @@ function initCwView(root) {
       else cwSel.add(id);
       card.classList.toggle("sel", cwSel.has(id));
       updateCwSelStatus();
+      renderCwCats(); // v0.26：主分类面板跟随选中项高亮
     });
     cardsEl.addEventListener("dragstart", (e) => {
       const card = e.target.closest(".cw-card");
@@ -3269,6 +3309,56 @@ function initCwView(root) {
     document.addEventListener("keydown", window.__cwKey, true);
   }
 }
+/* 主分类面板：高亮「选中图片共有的主分类」（v0.26） */
+function cwSelCats() {
+  const ids = [...cwSel];
+  if (!ids.length) return [];
+  const list = ids.map((id) => catsOf(PHOTOS.find((p) => p.id === id) || {}));
+  if (!list.length) return [];
+  return list.reduce((acc, cur) => acc.filter((c) => cur.includes(c)), list[0]);
+}
+function renderCwCats() {
+  const wrap = document.getElementById("cwCats");
+  if (!wrap) return;
+  renderCatPicks(wrap, cwSelCats());
+}
+/* 给选中（或指定）图片设置 / 取消主分类（v0.26）
+   mode: "toggle"（默认，全含则取消）| "add" | "remove" */
+async function cwApplyCategory(name, mode = "toggle", idsArg) {
+  if (!name) return;
+  const ids = (idsArg && idsArg.length ? idsArg : [...cwSel]);
+  if (!ids.length) { updateCwSelStatus("先在左侧点选图片，再点主分类即可设置（可多选后一次设）"); return; }
+  const targets = ids.map((id) => PHOTOS.find((p) => p.id === id)).filter(Boolean);
+  if (!targets.length) return;
+  const allHave = targets.every((p) => catsOf(p).includes(name));
+  const adding = mode === "add" ? true : mode === "remove" ? false : !allHave;
+  const todo = targets.filter((p) => (adding ? !catsOf(p).includes(name) : catsOf(p).includes(name)));
+  if (!todo.length) {
+    updateCwSelStatus(`选中的图片都${adding ? "已经有" : "没有"}「${esc(name)}」主分类`);
+    return;
+  }
+  try {
+    await Promise.all(todo.map((p) => {
+      const next = adding ? [...catsOf(p), name].slice(0, 6) : catsOf(p).filter((c) => c !== name);
+      return apiFetch(`/api/photos/${p.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categories: next }),
+      });
+    }));
+    todo.forEach((p) => {
+      p.categories = adding ? [...catsOf(p), name].slice(0, 6) : catsOf(p).filter((c) => c !== name); // 本地同步
+      updateCwCardBadge(p);
+    });
+    renderCwCats();
+    updateCwSelStatus(`已${adding ? "设置" : "取消"}主分类「${esc(name)}」：<span class="cnt">${todo.length}</span> 张 · 可继续操作`);
+    renderTagMenuContent();
+    if (window.__renderGallery) window.__renderGallery();
+  } catch (e) {
+    updateCwSelStatus("设置主分类失败：" + esc(e.message));
+  }
+}
+
 function updateCwSelStatus(msg) {
   const el = document.getElementById("cwSelStatus");
   if (!el) return;
@@ -3309,20 +3399,22 @@ function toggleCwGroup(gid) {
 function updateCwCardBadge(p) {
   const card = document.querySelector(`#cwCards .cw-card[data-id="${p.id}"]`);
   if (!card) return;
-  const n = (p.tags || []).length;
+  const cats = catsOf(p);
+  const tags = p.tags || [];
+  const n = tags.length;
+  card.classList.toggle("no-cat", cats.length === 0); // v0.26：未设主分类的卡片给个视觉提示
   let badge = card.querySelector(".cw-badge");
   if (!n) {
     if (badge) badge.remove();
-    card.title = "无标签";
-    return;
+  } else {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "cw-badge";
+      card.appendChild(badge);
+    }
+    badge.textContent = n;
   }
-  if (!badge) {
-    badge = document.createElement("span");
-    badge.className = "cw-badge";
-    card.appendChild(badge);
-  }
-  badge.textContent = n;
-  card.title = (p.tags || []).join(" · ");
+  card.title = [...cats.map((c) => `【${c}】`), ...tags].join(" · ") || "未分类、无标签";
 }
 /* 点分类槽 = 把该标签打到已选图片上（v0.20；v0.23 改为本地增量更新，可连续打标） */
 async function cwApplyTagToSelection(tag) {
@@ -3363,7 +3455,9 @@ function renderCwCards() {
   }
   wrap.innerHTML = cwList.slice(0, cwShown).map((p) => {
     const n = (p.tags || []).length;
-    return `<div class="cw-card${cwSel.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true" title="${escAttr((p.tags || []).join(" · ") || "无标签")}">
+    const cats = catsOf(p);
+    const title = [...cats.map((c) => `【${c}】`), ...(p.tags || [])].join(" · ") || "未分类、无标签";
+    return `<div class="cw-card${cwSel.has(p.id) ? " sel" : ""}${cats.length ? "" : " no-cat"}" data-id="${p.id}" draggable="true" title="${escAttr(title)}">
       <img loading="lazy" decoding="async" draggable="false" src="${cardImgSrc(p)}" alt="">
       ${n ? `<span class="cw-badge">${n}</span>` : ""}
     </div>`;

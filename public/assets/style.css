@@ -3921,8 +3921,7 @@ body.select-mode .card .pick { display: grid; }
   .rv-panel { min-width: 0; width: 100%; }
 }
 
-/* ---------- 上传队列：相似图片提醒徽标（v0.21） ---------- */
-.uq-item .uq-name-row { display: flex; align-items: center; gap: 8px; }
+/* ---------- 上传队列：相似图片提醒徽标（v0.21） ---------- */.uq-item .uq-name-row { display: flex; align-items: center; gap: 8px; }
 .uq-item .uq-sim {
   flex: none;
   font-size: 10.5px;
@@ -3990,4 +3989,34 @@ body.perf-lite .card__content {
 .search-card {
   content-visibility: auto;
   contain-intrinsic-size: auto 260px;
+}
+
+/* ============================================================
+   分类工作台：主分类 chips（v0.26）
+   ============================================================ */
+/* 图片拖到主分类名上时的反馈 */
+.cat-pick.drop-hover {
+  border-color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 22%, transparent) !important;
+  color: var(--text) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* 还没设主分类的图片：虚线圈提示 */
+.cw-card.no-cat {
+  outline: 1px dashed color-mix(in srgb, var(--danger, #ff453a) 55%, transparent);
+  outline-offset: -2px;
+}
+.cw-card.no-cat::after {
+  content: "未分类";
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #fff;
+  background: color-mix(in srgb, var(--danger, #ff453a) 78%, transparent);
+  border-radius: 99px;
+  padding: 1px 6px;
+  pointer-events: none;
 }
