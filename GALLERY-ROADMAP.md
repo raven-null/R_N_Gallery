@@ -490,3 +490,17 @@ async function aiTagSearch(query) {
 - **批量导入标签**：标签页「⇪ 批量导入标签」→ 选目标组 + 粘贴名单（每行一个，逗号/竖线分隔别名），一次录入原神/绝区零全部角色，已存在的自动跳过
 - 建议策略：作品级兜底（只打作品标签）+ 只在重点图补角色标签 —— 检索靠整组筛选，细化靠角色标签
 - 涉及文件：`public/assets/app.js`（整组筛选 / 槽折叠与搜索 / 最近使用 / 批量导入）、`public/index.html`（槽搜索框）、`public/assets/style.css`（组头按钮 / 槽折叠 / 搜索框样式）
+
+### 批次 11 · 角色标签库与导入脚本（v0.18，2026-09-13）✅
+- 角色名单数据（`scripts/data/`，均为 UTF-8 JSON：`game` / `chars[{name, aliases}]`，另含 `coverageNote` 说明覆盖范围）：
+  - `chars-genshin.json` 原神 102 角色（覆盖到 5.8）
+  - `chars-starrail.json` 崩坏：星穹铁道 59 角色（覆盖到 2.7）
+  - `chars-zzz.json` 绝区零 53 角色（覆盖到 3.1）
+  - `chars-pending.json` **待核对候选** 34 条：原神 6.x 挪德卡莱篇 14、星铁 3.x 翁法罗斯篇 + 4.x 18、绝区零 3.2/3.3 2；带 `confidence` 字段（medium = 有来源标题佐证，low = 仅单条线索/模型记忆）
+  - 名单由子代理用 `web_search` 整理；本次环境搜索只返回标题、且沙箱禁网，故最新版本角色只能进 pending，需人工核对
+- 新脚本 `scripts/import-chars.js`（Node 20+ 内置 fetch，无新依赖）：
+  - 把名单合并进图库标签配置：每个游戏建一个组（带主题色）、每个角色建组内标签（含别名）、并补一个「作品级」同名标签（如「原神」，别名 genshin / 星铁 / 崩铁 / zzz）
+  - 幂等：已存在的标签只补别名与归组，可反复运行；**原样回传 `categories`**，不会覆盖自定义主分类
+  - 参数：`--url` `--token`（线上门禁密码）`--dry-run`（只预览）`--pending`（含候选）`--only=` `--no-work-tag`；写入前自动备份到 `scripts/data/backup-tags-config-*.json`（已在 .gitignore）
+  - 用法：`node scripts/import-chars.js --url=https://<站点> --token=<访问密码>`（本地 dev 直接 `node scripts/import-chars.js`）
+- 实测：dry-run / 首次导入（3 组 217 标签，别名如 胡桃→核桃·Hu Tao）/ 复跑幂等（新增 0）/ 主分类保留，全部通过

@@ -1,0 +1,64 @@
+{
+  "note": "待人工核对的候选角色（默认不导入，需 --pending）。来源：搜索结果标题线索 + 模型知识，未经官方图鉴逐条确认。confidence: medium=有多个来源标题佐证，low=仅一条线索或模型记忆。导入后可在「标签」页改名/删除。",
+  "updatedAt": "2026-09-09",
+  "groups": [
+    {
+      "game": "原神",
+      "note": "6.x 挪德卡莱篇（2025-09 之后上线），主名单覆盖到 5.8",
+      "chars": [
+        { "name": "菈乌玛", "aliases": ["Lauma"], "confidence": "medium" },
+        { "name": "杜林", "aliases": ["Durin"], "confidence": "medium" },
+        { "name": "菲林斯", "aliases": ["Flins"], "confidence": "medium" },
+        { "name": "爱诺", "aliases": ["Aino"], "confidence": "medium" },
+        { "name": "雅珂达", "aliases": ["Jahoda"], "confidence": "medium" },
+        { "name": "奈芙尔", "aliases": ["Nefer"], "confidence": "medium" },
+        { "name": "莉奈娅", "aliases": ["Linnea"], "confidence": "medium" },
+        { "name": "洛恩", "aliases": ["Lohen"], "confidence": "medium" },
+        { "name": "尼可", "aliases": ["Nicole"], "confidence": "medium" },
+        { "name": "兹白", "aliases": ["Zibai"], "confidence": "medium" },
+        { "name": "薇斯纳", "aliases": ["Visenna"], "confidence": "low" },
+        { "name": "法尔伽", "aliases": ["Farga"], "confidence": "low" },
+        { "name": "哥伦比亚", "aliases": ["少女", "Columbina"], "confidence": "medium" },
+        { "name": "木偶", "aliases": ["Marionette"], "confidence": "low" }
+      ]
+    },
+    {
+      "game": "崩坏：星穹铁道",
+      "note": "3.x 翁法罗斯篇（主名单只到 2.7）",
+      "chars": [
+        { "name": "阿格莱雅", "aliases": ["Aglaea"], "confidence": "medium" },
+        { "name": "万敌", "aliases": ["Mydei"], "confidence": "medium" },
+        { "name": "缇宝", "aliases": ["Tribbie"], "confidence": "medium" },
+        { "name": "遐蝶", "aliases": ["Castorice", "暇蝶"], "confidence": "medium" },
+        { "name": "那刻夏", "aliases": ["Anaxa"], "confidence": "medium" },
+        { "name": "风堇", "aliases": ["Hyacine"], "confidence": "medium" },
+        { "name": "赛飞儿", "aliases": ["Cipher"], "confidence": "medium" },
+        { "name": "白厄", "aliases": ["Phainon"], "confidence": "medium" },
+        { "name": "海瑟音", "aliases": ["Hysilens"], "confidence": "medium" },
+        { "name": "刻律德菈", "aliases": ["Cerydra"], "confidence": "medium" },
+        { "name": "丹恒·腾荒", "aliases": ["腾荒", "Dan Heng"], "confidence": "low" },
+        { "name": "昔涟", "aliases": ["Cyrene"], "confidence": "medium" },
+        { "name": "Saber", "aliases": ["阿尔托莉雅", "Fate 联动"], "confidence": "low" },
+        { "name": "Archer", "aliases": ["卫宫", "Fate 联动"], "confidence": "low" }
+      ]
+    },
+    {
+      "game": "崩坏：星穹铁道",
+      "note": "4.x（2026 年）—— 名称把握最低，建议核对后再决定是否保留",
+      "chars": [
+        { "name": "爻光", "aliases": [], "confidence": "low" },
+        { "name": "绯英", "aliases": [], "confidence": "low" },
+        { "name": "真珠", "aliases": [], "confidence": "low" },
+        { "name": "虚照", "aliases": [], "confidence": "low" }
+      ]
+    },
+    {
+      "game": "绝区零",
+      "note": "3.2 / 3.3（主名单覆盖到 3.1）",
+      "chars": [
+        { "name": "菲欧妮", "aliases": ["菲歐妮", "Fione"], "confidence": "medium" },
+        { "name": "赛维里安", "aliases": ["賽維里安", "Severian"], "confidence": "medium" }
+      ]
+    }
+  ]
+}
