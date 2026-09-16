@@ -166,6 +166,39 @@ function askConfirmAsync(title, desc, okLabel) {
     if (!m) return resolve(false);
   });
 }
+/* 多选项确认（v0.22：相似图片提醒用）。choices: [{ value, label, kind }]
+   返回所选 value；点「取消」返回 null。复用同一个 confirmModal 容器 */
+function askChoice(title, desc, choices) {
+  return new Promise((resolve) => {
+    const m = document.getElementById("confirmModal");
+    if (!m) return resolve(null);
+    document.getElementById("confirmTitle").textContent = title;
+    document.getElementById("confirmDesc").textContent = desc;
+    const actions = m.querySelector(".m-actions");
+    const original = actions.innerHTML;
+    actions.innerHTML = "";
+    const finish = (v) => {
+      actions.innerHTML = original; // 还原，供其他确认弹窗继续使用
+      m.classList.remove("open");
+      resolve(v);
+    };
+    (choices || []).forEach((c) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn " + (c.kind || "ghost");
+      b.textContent = c.label;
+      b.onclick = () => finish(c.value);
+      actions.appendChild(b);
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn ghost";
+    cancel.textContent = "取消";
+    cancel.onclick = () => finish(null);
+    actions.appendChild(cancel);
+    m.classList.add("open");
+  });
+}
 
 /* ---------- AI 助手（v0.12）：设置状态 + 调用封装 ---------- */
 const AI_STORE = { on: "rn_ai_on", key: "rn_ai_key", sys: "rn_ai_sys", temp: "rn_ai_temp" };
@@ -1503,6 +1536,17 @@ function initUpload() {
   dz.addEventListener("drop", (e) => addFiles(e.dataTransfer.files));
   fileInput.addEventListener("change", () => addFiles(fileInput.files));
 
+  /* v0.22：把队列项移除（✕ 按钮与相似提醒的「删除这张新图」共用） */
+  function removeUqItem(it) {
+    if (uqSelSet.has(it)) uqSelSet.delete(it);
+    const idx = files.indexOf(it);
+    if (idx >= 0) files.splice(idx, 1);
+    if (it.row) it.row.remove();
+    btnUpload.disabled = !files.length;
+    updateUqSelStatus();
+    refreshUqSlots();
+  }
+
   function addFiles(list) {
     [...list].slice(0, 12 - files.length).forEach((f) => {
       const item = { f, status: "ready", pct: 0 };
@@ -1557,15 +1601,7 @@ function initUpload() {
       });
       // v0.13：逐张编辑 / 移除
       row.querySelector(".u-edit").onclick = () => openUqEdit(item);
-      row.querySelector(".u-del").onclick = () => {
-        if (uqSelSet.has(item)) { uqSelSet.delete(item); }
-        const idx = files.indexOf(item);
-        if (idx >= 0) files.splice(idx, 1);
-        row.remove();
-        btnUpload.disabled = !files.length;
-        updateUqSelStatus();
-        refreshUqSlots();
-      };
+      row.querySelector(".u-del").onclick = () => removeUqItem(item);
       // v0.21：本地算 dHash → 与库里 / 本批其他照片比对，行上给出「相似图片」提醒
       dhashOfFile(f).then((dh) => {
         item.dhash = dh;
@@ -1644,21 +1680,43 @@ function initUpload() {
               }
             } catch (e) { /* 查重失败不阻塞上传 */ }
           }
-          // v0.21：相似图片提醒（与库中近似图片比对，差异越小越像）
+          // v0.21/v0.22：相似图片提醒（可仍然上传 / 删除新图 / 用新图替换库中旧图）
           if (!it.dhash) it.dhash = await dhashOfFile(it.f);
           const sim = findSimilarInLibrary(it.dhash);
           if (sim.length) {
-            const ok = await askConfirmAsync(
+            const target = sim[0];
+            const choice = await askChoice(
               "发现相似图片",
-              `这张与库中「${sim[0].photo.title}」${sim.length > 1 ? ` 等 ${sim.length} 张` : ""}相似（差异 ${sim[0].distance}/64）。仍要上传吗？\n取消 = 跳过这张（可点行右侧 ✕ 从队列移除）。`,
-              "仍然上传"
+              `这张与库中「${target.photo.title}」${sim.length > 1 ? ` 等 ${sim.length} 张` : ""}相似（差异 ${target.distance}/64）。怎么处理？`,
+              [
+                { value: "replace", label: "用新图替换旧图", kind: "danger" },
+                { value: "upload", label: "仍然上传", kind: "primary" },
+                { value: "drop", label: "删除这张新图" },
+              ]
             );
-            if (!ok) {
-              row.querySelector(".status").textContent = "≈";
-              row.querySelector(".status").className = "status ok";
-              setSub(`相似，已跳过（库中「${sim[0].photo.title}」）`);
+            if (choice === "drop") {
+              removeUqItem(it);
+              setUqStatus(`已删除新图（库中保留「${esc(target.photo.title)}」）`);
               resolve();
               return;
+            }
+            if (choice === null) { // 取消 = 跳过这张，保留在队列里
+              row.querySelector(".status").textContent = "≈";
+              row.querySelector(".status").className = "status ok";
+              setSub(`相似，已跳过（库中「${target.photo.title}」）`);
+              resolve();
+              return;
+            }
+            if (choice === "replace") {
+              try {
+                await apiFetch(`/api/photos/${target.photo.id}`, { method: "DELETE" });
+                const bi = PHOTOS.findIndex((x) => x.id === target.photo.id);
+                if (bi >= 0) PHOTOS.splice(bi, 1);
+                if (window.__renderGallery) window.__renderGallery();
+                setSub(`已替换库中「${target.photo.title}」`);
+              } catch (e) {
+                setSub("替换失败，仍按新图上传");
+              }
             }
           }
           setSub("上传中…");

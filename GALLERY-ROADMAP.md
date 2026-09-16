@@ -540,3 +540,13 @@ async function aiTagSearch(query) {
 - 实测：同一张图不同 JPEG 质量（q95 / q55）dHash 距离 **0**（命中）；不同构图距离 **25**（不误报）；`reindex-dhash` 返回 skipped=3
 - 线上：部署后跑 `POST /api/photos/reindex-dhash` → **104 张全部补算成功**（updated=104, failed=0）；`scripts/find-duplicates.js` 改为优先复用 `meta.dhash`（与前端同一套表示，含十六进制存储与距离比较），复扫结果与逐张下载一致（最相似一对仍是距离 9）
 - **R18 与 AI 的结论**：国内合规视觉大模型（智谱 GLM-4V 等）对成人向内容会直接拒答，**"AI 看图给 R18 图片分类"这条路线不成立**；替代方案待用户选择（本地打标模型 / 仅对非 R18 用 AI / 纯键盘流人工整理）
+
+### 批次 15 · 相似提醒选项扩展 + 本地打标工具（v0.22，2026-09-16）✅
+- 相似提醒弹窗升级为多选项（新增 `askChoice()`，复用 confirmModal 容器、用完还原）：
+  「用新图替换旧图」（删掉库中最相似那张再上传）/「仍然上传」/「删除这张新图」（直接从队列移除）/「取消」（跳过但保留在队列）
+  队列项移除逻辑抽成 `removeUqItem()`，与行内 ✕ 共用
+- **新增 `scripts/local-tagger.js`（WD14 Tagger 本地打标）** —— 解决"R18 图 AI 过不了审"：全程本地 ONNX 推理，图片不上传、不经任何内容审核
+  - 能力：识别角色（动漫/游戏角色，配合 `chars-*.json` 的英文别名自动映射成中文角色标签）、画风与画面元素、以及分级倾向（general / sensitive / questionable / explicit）
+  - 用法：`npm install onnxruntime-node` → `node scripts/local-tagger.js --download`（走 hf-mirror 镜像下模型）→ 先 `--image=某张图` 单张试算 → 再 `--url --token --only-untagged`（默认只报告）→ 确认后加 `--write`；`--write-r18` 可把 questionable/explicit 的照片自动标记 R18；R18 图需 `--r18key`
+  - 安全设计：**默认不写回**（必须显式 `--write`）；只写「图库已有且能被映射成中文」的标签，不把英文词典塞进图库；映射表 `scripts/data/tagger-map.json` 可自行编辑
+  - 状态说明：本机未安装 onnxruntime-node、也未下载模型，**脚本未在本地实测**；首次使用务必先用 `--image` 单张试算，若标签异常可调 `--threshold` / 检查模型文件
