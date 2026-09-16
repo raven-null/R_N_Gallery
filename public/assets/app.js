@@ -640,6 +640,102 @@ async function sha1HexOf(dataUrl) {
   } catch (e) { return null; }
 }
 
+/* ---------- 感知哈希 / 相似图片（v0.21） ----------
+   上传前在本地算 dHash（9×8 灰度、逐行比较相邻亮度 → 64 位），
+   与库中照片（meta.dhash，上传时由服务端算好）比对汉明距离，提示「与某张相似」 */
+const DHASH_THRESHOLD = 8; // 64 位里差异 ≤ 8 视为相似（实测不同构图约 ≥ 9）
+
+/* 两个 16 位十六进制 dHash 的汉明距离 */
+function hammingHex(a, b) {
+  if (!a || !b || a.length !== b.length) return 64;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) {
+    let x = (parseInt(a[i], 16) || 0) ^ (parseInt(b[i], 16) || 0);
+    while (x) { x &= x - 1; d++; }
+  }
+  return d;
+}
+
+/* 从本地文件算 dHash（算法与服务端 genDHash 一致） */
+function dhashOfFile(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const c = document.createElement("canvas");
+          c.width = 9;
+          c.height = 8;
+          const ctx = c.getContext("2d");
+          ctx.drawImage(img, 0, 0, 9, 8);
+          const d = ctx.getImageData(0, 0, 9, 8).data;
+          let hex = "";
+          for (let y = 0; y < 8; y++) {
+            for (let x = 0; x < 8; x += 4) {
+              let nib = 0;
+              for (let k = 0; k < 4; k++) {
+                const i0 = (y * 9 + x + k) * 4;
+                const i1 = (y * 9 + x + k + 1) * 4;
+                const g0 = d[i0] * 0.299 + d[i0 + 1] * 0.587 + d[i0 + 2] * 0.114;
+                const g1 = d[i1] * 0.299 + d[i1 + 1] * 0.587 + d[i1 + 2] * 0.114;
+                nib = (nib << 1) | (g0 < g1 ? 1 : 0);
+              }
+              hex += nib.toString(16);
+            }
+          }
+          resolve(hex);
+        } catch (err) { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+/* 库中与给定 dHash 相似的照片（按差异升序，最多 limit 条） */
+function findSimilarInLibrary(dhash, limit = 3) {
+  if (!dhash) return [];
+  const out = [];
+  PHOTOS.forEach((p) => {
+    if (!p.dhash) return;
+    const d = hammingHex(dhash, p.dhash);
+    if (d <= DHASH_THRESHOLD) out.push({ photo: p, distance: d });
+  });
+  return out.sort((a, b) => a.distance - b.distance).slice(0, limit);
+}
+
+/* 同一批队列里互相比对（还没上传就能发现重复） */
+function findSimilarInQueue(item, all) {
+  if (!item.dhash) return [];
+  return all.filter((x) => x !== item && x.dhash && hammingHex(item.dhash, x.dhash) <= DHASH_THRESHOLD);
+}
+
+/* 上传队列行上的「相似」徽标（悬停看具体是哪几张） */
+function updateUqSimilarBadge(it) {
+  const row = it.row;
+  if (!row) return;
+  const nameRow = row.querySelector(".uq-name-row");
+  if (!nameRow) return;
+  const lib = (it.similar && it.similar.lib) || [];
+  const q = (it.similar && it.similar.queue) || [];
+  let badge = nameRow.querySelector(".uq-sim");
+  if (!lib.length && !q.length) { if (badge) badge.remove(); return; }
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "uq-sim";
+    nameRow.appendChild(badge);
+  }
+  const parts = [];
+  if (lib.length) parts.push(`库中相似：${lib.map((x) => `「${x.photo.title}」差异 ${x.distance}/64`).join("；")}`);
+  if (q.length) parts.push(`本批相似：${q.map((x) => x.f.name).join("、")}`);
+  badge.textContent = lib.length && q.length ? `⚠️ 相似 ${lib.length + q.length} 张`
+    : (lib.length ? `⚠️ 库中 ${lib.length} 张相似` : `⚠️ 本批 ${q.length} 张相似`);
+  badge.title = parts.join("\n") + "\n（上传时会再确认一次；不想留可以点右侧 ✕ 从队列移除）";
+}
+
 /* ---------- 通用：键盘快捷键 ---------- */
 document.addEventListener("keydown", (e) => {
   if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
@@ -1470,6 +1566,12 @@ function initUpload() {
         updateUqSelStatus();
         refreshUqSlots();
       };
+      // v0.21：本地算 dHash → 与库里 / 本批其他照片比对，行上给出「相似图片」提醒
+      dhashOfFile(f).then((dh) => {
+        item.dhash = dh;
+        item.similar = { lib: findSimilarInLibrary(dh), queue: findSimilarInQueue(item, files) };
+        if (item.similar.lib.length || item.similar.queue.length) updateUqSimilarBadge(item);
+      });
     });
     btnUpload.disabled = !files.length;
     btnUpload.textContent = "开始上传";
@@ -1541,6 +1643,23 @@ function initUpload() {
                 }
               }
             } catch (e) { /* 查重失败不阻塞上传 */ }
+          }
+          // v0.21：相似图片提醒（与库中近似图片比对，差异越小越像）
+          if (!it.dhash) it.dhash = await dhashOfFile(it.f);
+          const sim = findSimilarInLibrary(it.dhash);
+          if (sim.length) {
+            const ok = await askConfirmAsync(
+              "发现相似图片",
+              `这张与库中「${sim[0].photo.title}」${sim.length > 1 ? ` 等 ${sim.length} 张` : ""}相似（差异 ${sim[0].distance}/64）。仍要上传吗？\n取消 = 跳过这张（可点行右侧 ✕ 从队列移除）。`,
+              "仍然上传"
+            );
+            if (!ok) {
+              row.querySelector(".status").textContent = "≈";
+              row.querySelector(".status").className = "status ok";
+              setSub(`相似，已跳过（库中「${sim[0].photo.title}」）`);
+              resolve();
+              return;
+            }
           }
           setSub("上传中…");
           const xhr = new XMLHttpRequest();

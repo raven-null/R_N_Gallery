@@ -79,6 +79,31 @@ async function genThumbBuf(buf) {
     .toBuffer();
   return out;
 }
+/* dHash 感知哈希（v0.21）：缩放到 9×8 灰度、逐行比较相邻像素，64 位 → 16 位十六进制
+   与前端 dhashOfFile 算法保持一致（拉伸到 9×8、左<右记 1），用于「相似图片」提醒 */
+async function genDHash(buf) {
+  try {
+    const raw = await sharp(buf, { failOn: "none", animated: false })
+      .rotate()
+      .resize(9, 8, { fit: "fill" })
+      .grayscale()
+      .raw()
+      .toBuffer();
+    let hex = "";
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x += 4) {
+        let nibble = 0;
+        for (let k = 0; k < 4; k++) {
+          nibble = (nibble << 1) | (raw[y * 9 + x + k] < raw[y * 9 + x + k + 1] ? 1 : 0);
+        }
+        hex += nibble.toString(16);
+      }
+    }
+    return hex;
+  } catch (e) {
+    return null; // 算不出来不影响主流程
+  }
+}
 /* 保存缩略图到 meta（有前端 thumb 用前端的，否则服务端生成） */
 async function saveThumb(s, meta, id, origBuf, frontThumb) {
   try {
@@ -148,6 +173,7 @@ exports.default = async (req) => {
     if (method === "GET" && path.endsWith("/api/photos/check")) return checkHash(url);
     if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 1) return getMeta(rest[0]);
     if (method === "POST" && path.endsWith("/api/photos")) return upload(req);
+    if (method === "POST" && path.endsWith("/api/photos/reindex-dhash")) return reindexDHash(req); // v0.21 补算感知哈希
     if (method === "PATCH" && path.startsWith("/api/photos/") && rest.length === 1) return patch(req, rest[0]);
     if (method === "DELETE" && path.endsWith("/api/photos")) return clearAll(req);
     if (method === "DELETE" && path.startsWith("/api/photos/") && rest.length === 1) return remove(req, rest[0]);
@@ -169,6 +195,7 @@ exports.config = {
     "/api/photos/:id/raw",
     "/api/photos/:id/thumb",
     "/api/photos/check",
+    "/api/photos/reindex-dhash",
     "/api/photos/:id/image",
     "/api/meta/stats",
     "/api/export",
@@ -335,8 +362,7 @@ async function list(url) {
 }
 
 /* ---------- 单张元数据 ---------- */
-async function getMeta(id) {
-  const m = await store().get(`${PREFIX_META}${id}.json`, { type: "json" });
+async function getMeta(id) {  const m = await store().get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
   return json({ photo: { ...m, r18: isR18Photo(m) } });
 }
@@ -388,6 +414,7 @@ async function replaceImage(req, id) {
   meta.height = dims.height;
   meta.mime = mime;
   meta.hash = sha1hex(buf);
+  meta.dhash = await genDHash(buf); // v0.21：替换原图后重算感知哈希
   await saveThumb(s, meta, id, buf, thumb); // 前端缩略图优先，否则服务端生成
   meta.updatedAt = new Date().toISOString();
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
@@ -447,6 +474,33 @@ async function checkHash(url) {
   return json({ duplicate: false });
 }
 
+/* ---------- POST /api/photos/reindex-dhash：为老照片补算感知哈希（v0.21，一次性） ---------- */
+async function reindexDHash(req) {
+  const s = store();
+  let cursor;
+  let updated = 0;
+  let failed = 0;
+  let skipped = 0;
+  do {
+    const res = await s.list({ prefix: PREFIX_META, cursor, limit: 100 });
+    for (const item of res.blobs) {
+      const m = await s.get(item.key, { type: "json" });
+      if (!m) continue;
+      if (m.dhash) { skipped++; continue; }
+      const buf = await s.get(m.origKey || `${PREFIX_IMG}${m.id}`, { type: "arrayBuffer" });
+      if (!buf) { failed++; continue; }
+      const dh = await genDHash(Buffer.from(buf));
+      if (!dh) { failed++; continue; }
+      m.dhash = dh;
+      await s.set(item.key, JSON.stringify(m));
+      updated++;
+    }
+    cursor = res.nextCursor;
+  } while (cursor);
+  logAction(req, "补算感知哈希", `${updated} 张已补算 / ${skipped} 张已有 / ${failed} 张失败`);
+  return json({ ok: true, updated, skipped, failed });
+}
+
 /* ---------- 上传 ---------- */
 async function upload(req) {
   let body;
@@ -482,6 +536,7 @@ async function upload(req) {
     mime,
     origKey,
     hash: sha1hex(buf), // 内容哈希（v0.12 重复检测）
+    dhash: await genDHash(buf), // 感知哈希（v0.21 相似图片提醒）
   };
 
   const s = store();
@@ -636,6 +691,7 @@ async function importStatic(req) {
         origKey,
         src,
         hash: sha1hex(buf),
+        dhash: await genDHash(buf), // v0.21 感知哈希
       };
       await s.set(origKey, buf);
       await saveThumb(s, meta, id, buf, null); // 导入图无前端缩略图 → 服务端生成（v0.13.8）
