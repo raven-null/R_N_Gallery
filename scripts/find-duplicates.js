@@ -55,24 +55,37 @@ async function fetchPhotos(a) {
   return out;
 }
 
-async function dHashOf(a, id) {
+/* 优先用库里已存的 meta.dhash（上传/补算时由服务端算好，与前端比对用同一套表示）；
+   缺失时才下载缩略图现算（算法与后端 genDHash 一致：9×8 灰度 → 64 位 → 16 位十六进制） */
+async function dHashOf(a, photo) {
+  if (photo.dhash) return photo.dhash;
   const qs = new URLSearchParams();
   if (a.token) qs.set("token", a.token);
   if (a.r18key) qs.set("r18Key", a.r18key);
-  const res = await fetch(`${a.url}/api/photos/${id}/thumb?${qs}`);
+  const res = await fetch(`${a.url}/api/photos/${photo.id}/thumb?${qs}`);
   if (!res.ok) throw new Error(`thumb HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   const raw = await sharp(buf, { failOn: "none" }).resize(9, 8, { fit: "fill" }).grayscale().raw().toBuffer();
-  let hash = 0n;
+  let hex = "";
   for (let y = 0; y < 8; y++) {
-    for (let x = 0; x < 8; x++) {
-      if (raw[y * 9 + x] < raw[y * 9 + x + 1]) hash |= 1n << BigInt(y * 8 + x);
+    for (let x = 0; x < 8; x += 4) {
+      let nib = 0;
+      for (let k = 0; k < 4; k++) nib = (nib << 1) | (raw[y * 9 + x + k] < raw[y * 9 + x + k + 1] ? 1 : 0);
+      hex += nib.toString(16);
     }
   }
-  return hash;
+  return hex;
 }
 
-const popcount = (v) => { let n = 0; while (v) { v &= v - 1n; n++; } return n; };
+const hammingHex = (a, b) => {
+  if (!a || !b || a.length !== b.length) return 64;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) {
+    let x = (parseInt(a[i], 16) || 0) ^ (parseInt(b[i], 16) || 0);
+    while (x) { x &= x - 1; d++; }
+  }
+  return d;
+};
 
 async function main() {
   const a = parseArgs(process.argv);
@@ -85,7 +98,7 @@ async function main() {
   for (let i = 0; i < photos.length; i += CONCURRENCY) {
     const batch = photos.slice(i, i + CONCURRENCY);
     await Promise.all(batch.map(async (p) => {
-      try { hashes.set(p.id, await dHashOf(a, p.id)); }
+      try { hashes.set(p.id, await dHashOf(a, p)); }
       catch (e) { failed.push({ id: p.id, title: p.title, error: e.message }); }
     }));
     if (!a.json) process.stdout.write(`\r已处理 ${Math.min(i + CONCURRENCY, photos.length)}/${photos.length} 张…`);
@@ -101,7 +114,7 @@ async function main() {
   const allPairs = [];
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
-      const d = popcount(hashes.get(ids[i]) ^ hashes.get(ids[j]));
+      const d = hammingHex(hashes.get(ids[i]), hashes.get(ids[j]));
       allPairs.push({ a: ids[i], b: ids[j], distance: d });
       if (d <= a.threshold) { union(ids[i], ids[j]); pairs.push({ a: ids[i], b: ids[j], distance: d }); }
     }
