@@ -466,6 +466,29 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(200);
   }
 
+  /* 清道夫（v0.39）：本测试会新建 / 改名 / 删除临时标签，而改名与删除后的 `apiSaveTags()`
+     是全量 PUT —— 若当时 `loadTags()` 读到的是含历史临时标签的旧副本（Blobs 读延迟 1~2 分钟），
+     这些残留就会被写回配置。这里统一过滤掉 `zz测试*` 再 PUT 一次，保证跑完不留垃圾。 */
+  try {
+    const h = TOKEN ? { "X-Auth-Token": TOKEN } : {};
+    const cfg = await (await fetch(`${BASE}/api/tags?_=${Math.random()}`, { headers: h })).json();
+    const junk = (cfg.tags || []).filter((t) => String(t.name || "").startsWith("zz测试"));
+    if (junk.length) {
+      cfg.tags = (cfg.tags || []).filter((t) => !String(t.name || "").startsWith("zz测试"));
+      const pr = await fetch(`${BASE}/api/tags`, {
+        method: "PUT",
+        headers: Object.assign({ "Content-Type": "application/json" }, h),
+        body: JSON.stringify(cfg),
+      });
+      const pd = await pr.json().catch(() => ({}));
+      check("清道夫：清掉历史残留测试标签", pd.ok !== false, `清掉 ${junk.length} 个（${junk.map((t) => t.name).join(", ")}）`);
+    } else {
+      check("清道夫：无历史残留测试标签", true);
+    }
+  } catch (e) {
+    check("清道夫：无历史残留测试标签", false, e.message);
+  }
+
   const failed = results.filter((x) => !x).length;
   console.log(`\n${failed ? `✗ ${failed} 项未通过` : "✓ 全部通过"}（共 ${results.length} 项）\n`);
   process.exit(failed ? 1 : 0);
