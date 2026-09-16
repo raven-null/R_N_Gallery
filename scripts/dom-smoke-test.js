@@ -25,6 +25,7 @@ try {
 
 const ROOT = path.join(__dirname, "..");
 const BASE = (process.env.GALLERY_URL || "http://localhost:8787").replace(/\/+$/, "");
+const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填这个
 
 (async () => {
   const html = fs.readFileSync(path.join(ROOT, "public", "index.html"), "utf8");
@@ -41,14 +42,35 @@ const BASE = (process.env.GALLERY_URL || "http://localhost:8787").replace(/\/+$/
   };
   window.matchMedia = window.matchMedia || (() => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
-  window.fetch = (url, opts) => fetch(String(url).startsWith("http") ? String(url) : BASE + String(url), opts);
+  window.fetch = (url, opts) => {
+    const abs = String(url).startsWith("http") ? String(url) : BASE + String(url);
+    const o = Object.assign({}, opts);
+    if (TOKEN) o.headers = Object.assign({}, o.headers, { "X-Auth-Token": TOKEN });
+    return fetch(abs, o);
+  };
   window.localStorage.setItem("rn_perf_lite", "1"); // 打开性能模式，覆盖图片回收分支
+  if (TOKEN) window.localStorage.setItem("rn_token", TOKEN); // 线上门禁：预置访问凭证，否则会停在登录页
 
   window.eval(fs.readFileSync(path.join(ROOT, "public", "assets", "app.js"), "utf8"));
-  window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
-  await new Promise((r) => setTimeout(r, 2500)); // 等首屏数据
 
   const doc = window.document;
+  /* jsdom 自己也会派发一次 DOMContentLoaded；先等它，避免重复初始化 */
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  await wait(1200);
+  if (!doc.getElementById("gridSentinel")) {
+    doc.dispatchEvent(new window.Event("DOMContentLoaded")); // jsdom 没触发时补一次
+  }
+
+  /* 等首屏数据（线上冷启动可能几秒）：轮询直到出现卡片或超时 */
+  const waitFor = async (fn, timeout = 20000) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeout) {
+      try { if (fn()) return true; } catch (e) { /* ignore */ }
+      await wait(300);
+    }
+    return false;
+  };
+  const gotCards = await waitFor(() => doc.querySelectorAll("#grid .card").length > 0);
   const results = [];
   const check = (name, ok, extra = "") => {
     results.push(ok);
@@ -56,17 +78,35 @@ const BASE = (process.env.GALLERY_URL || "http://localhost:8787").replace(/\/+$/
   };
 
   const cards0 = doc.querySelectorAll("#grid .card").length;
-  check("首屏渲染出卡片", cards0 > 0, `${cards0} 张`);
+  check("首屏渲染出卡片", cards0 > 0, `${cards0} 张${gotCards ? "" : "（等待超时）"}`);
 
   const sentinel = doc.getElementById("gridSentinel");
   check("滚动加载哨兵已创建", !!sentinel);
   const sentObserver = observers.find((o) => o.targets.has(sentinel));
   check("哨兵已被观察", !!sentObserver);
   if (sentObserver) {
-    sentObserver.cb([{ target: sentinel, isIntersecting: true }]);
-    await new Promise((r) => setTimeout(r, 500));
+    const loadMoreText = () => {
+      const lm = doc.getElementById("loadMore");
+      return lm && lm.querySelector("span") ? lm.querySelector("span").textContent.trim() : "(无 loadMore)";
+    };
+    console.log(`   追加前进度提示：${loadMoreText()}`);
+    if (window.__galleryState) console.log(`   内部状态：${JSON.stringify(window.__galleryState())}`);
+    console.log(`   观察器：${observers.map((o) => `[${String(o.opts.rootMargin || "默认")}]×${o.targets.size}`).join(" ")}`);
+    if (window.__appendMore) {
+      window.__appendMore();
+      await new Promise((r) => setTimeout(r, 300));
+      console.log(`   直接调用 __appendMore 后卡片：${doc.querySelectorAll("#grid .card").length}`);
+    }
+    try {
+      sentObserver.cb([{ target: sentinel, isIntersecting: true }]);
+    } catch (err) {
+      console.log(`   ✗ 追加时抛出异常：${err && err.message}`);
+      console.log(String((err && err.stack) || "").split("\n").slice(0, 6).join("\n"));
+    }
+    await new Promise((r) => setTimeout(r, 600));
     const cards1 = doc.querySelectorAll("#grid .card").length;
     check("哨兵触发后追加卡片", cards1 > cards0, `${cards0} → ${cards1}`);
+    console.log(`   追加后进度提示：${loadMoreText()}`);
   }
 
   const releaseIO = observers.find((o) => String(o.opts.rootMargin || "").includes("150%"));

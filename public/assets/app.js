@@ -1365,6 +1365,8 @@ function initGallery() {
     updateLoadMore();
     scrollBusy = false;
   }
+  window.__appendMore = appendMore; // 调试/测试钩子：手动触发追加
+  window.__galleryState = () => ({ shown, filtered: filtered.length, total: PHOTOS.length, busy: scrollBusy });
 
   /* 无限滚动（v0.25：改用 IntersectionObserver 哨兵。
      原先监听 scroll 事件并每次读 document.body.offsetHeight，会强制同步布局，
@@ -1373,6 +1375,8 @@ function initGallery() {
   sentinel.id = "gridSentinel";
   sentinel.setAttribute("aria-hidden", "true");
   sentinel.style.cssText = "height:1px;width:100%;pointer-events:none";
+  const oldSentinel = document.getElementById("gridSentinel"); // 幂等：重复初始化时先移除旧的
+  if (oldSentinel && oldSentinel !== sentinel) oldSentinel.remove();
   grid.parentNode.insertBefore(sentinel, grid.nextSibling);
   if ("IntersectionObserver" in window) {
     new IntersectionObserver((entries) => {
