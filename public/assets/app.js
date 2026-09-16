@@ -4380,8 +4380,18 @@ function openCatModal(mode, payload) {
       b.disabled = true;
       b.textContent = "删除中…";
       try {
-        await apiRemoveCategory(name);
-        removeCategoryLocally(name); // v0.31：本地立即生效（不等 Blobs 重读）
+        // v0.39：先本地删（界面立即响应），服务端失败则回滚
+        removeCategoryLocally(name);
+        refreshTagUI();
+        if (window.__renderGallery) window.__renderGallery();
+        try {
+          await apiRemoveCategory(name);
+        } catch (e) {
+          await loadTags();
+          refreshTagUI();
+          if (window.__renderGallery) window.__renderGallery();
+          throw e;
+        }
         await apiSaveTags();         // v0.33：用本地配置覆盖服务端
         refreshTagUI();
         if (window.__renderGallery) window.__renderGallery();
@@ -4453,8 +4463,20 @@ function openCatModal(mode, payload) {
         if (name !== target.name) {
           if (catByName(name)) { busy(fSave, null); return showErr(`主分类「${name}」已存在`); }
           const from = target.name;
-          await apiRenameCategory(from, name); // 后端同步照片
-          renameCategoryLocally(from, name);   // v0.31：本地立即生效
+          // v0.39：先本地改名并立即刷新界面（不再等服务端），失败则回滚
+          renameCategoryLocally(from, name);
+          const nt0 = catByName(name);
+          if (nt0) nt0.color = color;
+          refreshTagUI();
+          if (window.__renderGallery) window.__renderGallery();
+          try {
+            await apiRenameCategory(from, name); // 后端同步照片
+          } catch (e) {
+            renameCategoryLocally(name, from);
+            refreshTagUI();
+            if (window.__renderGallery) window.__renderGallery();
+            throw e;
+          }
           const nt = catByName(name);
           if (nt) nt.color = color;
         } else {
@@ -4604,8 +4626,18 @@ function openTagModal(mode, payload, presetName, presetGroup) {
       b.disabled = true;
       b.textContent = "删除中…";
       try {
-        await apiRemoveTag(name);
-        removeTagLocally(name); // v0.31：本地立即生效（不等 Blobs 重读）
+        // v0.39：先本地删（界面立即响应），服务端失败则回滚
+        removeTagLocally(name);
+        refreshTagUI();
+        if (window.__renderGallery) window.__renderGallery();
+        try {
+          await apiRemoveTag(name);
+        } catch (e) {
+          await loadTags(); // 回滚：拉回服务端真实配置
+          refreshTagUI();
+          if (window.__renderGallery) window.__renderGallery();
+          throw e;
+        }
         await apiSaveTags();    // v0.33：用本地（已删）的完整配置覆盖服务端，避免读延迟把标签带回来
         refreshTagUI();
         if (window.__renderGallery) window.__renderGallery();
@@ -4740,9 +4772,20 @@ function openTagModal(mode, payload, presetName, presetGroup) {
           if (name !== target.name) {
             renamed = true;
             const from = target.name;
-            // 改名：后端同步照片引用（名称即引用键）
-            await apiRenameTag(from, name);
-            renameTagLocally(from, name); // v0.31：本地立即生效，不等 Blobs 重读
+            // v0.39：先本地改名并立即刷新界面（不再等服务端），失败则回滚
+            renameTagLocally(from, name);
+            const nt0 = tagByName(name);
+            if (nt0) { nt0.color = color; nt0.group = gid; nt0.aliases = aliases; }
+            refreshTagUI();
+            if (window.__renderGallery) window.__renderGallery();
+            try {
+              await apiRenameTag(from, name); // 后端同步照片引用（名称即引用键）
+            } catch (e) {
+              renameTagLocally(name, from); // 回滚本地改名
+              refreshTagUI();
+              if (window.__renderGallery) window.__renderGallery();
+              throw e;
+            }
             const nt = tagByName(name);
             if (nt) { nt.color = color; nt.group = gid; nt.aliases = aliases; }
           } else {
