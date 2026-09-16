@@ -4098,3 +4098,104 @@ body.perf-lite .card__content {
 }
 .tmgr-head.foldable .act { margin-left: 0; }
 .tmgr-head .cnt + .act { margin-left: 8px; }
+
+/* ============================================================
+   相册窗口（v0.32）：左右两栏 + 从右侧滑入
+   ============================================================ */
+#panelAlbums.slide-in { animation: albumsSlideIn 0.46s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes albumsSlideIn {
+  from { transform: translateX(72px) scale(0.98); opacity: 0; }
+  to { transform: translateX(0) scale(1); opacity: 1; }
+}
+.alb-split { display: flex; gap: 18px; align-items: flex-start; }
+.alb-left { flex: 0 0 210px; display: flex; flex-direction: column; gap: 8px; }
+.alb-new input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 11px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px dashed var(--w016);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+}
+.alb-new input:focus { border-color: rgba(255, 159, 10, 0.55); border-style: solid; }
+[data-theme="light"] .alb-new input { background: rgba(255, 255, 255, 0.7); }
+.alb-list { display: flex; flex-direction: column; gap: 4px; max-height: 62vh; overflow-y: auto; }
+.alb-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--w008);
+  border-radius: 10px;
+  background: var(--w004);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-dim);
+  transition: all 0.16s var(--ease-out);
+}
+.alb-item:hover { color: var(--text); background: var(--w006); }
+.alb-item.on {
+  color: var(--text);
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.alb-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alb-item .cnt { flex: none; font-size: 11px; color: var(--text-faint); }
+.alb-item .act {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.alb-item:hover .act { opacity: 0.8; }
+.alb-item .act:hover { opacity: 1; color: var(--accent); }
+.alb-item .act.danger:hover { color: var(--danger); }
+.alb-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.alb-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.alb-head .t { font-size: 15px; font-weight: 600; color: var(--text); }
+.alb-head .cnt { font-size: 12px; color: var(--text-faint); }
+.alb-head .hint { font-size: 11.5px; color: var(--text-faint); }
+.alb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.alb-card {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--w010);
+  background: var(--w004);
+  cursor: pointer;
+}
+.alb-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.alb-card .alb-out {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.alb-card:hover .alb-out { opacity: 1; }
+.alb-empty { padding: 18px 6px; font-size: 12.5px; line-height: 1.7; color: var(--text-faint); }
+.alb-empty .sub { font-size: 11.5px; opacity: 0.8; }
+@media (max-width: 860px) {
+  .alb-split { flex-direction: column; }
+  .alb-left { flex: none; width: 100%; }
+  .alb-list { max-height: 30vh; }
+}

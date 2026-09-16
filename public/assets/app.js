@@ -2584,8 +2584,130 @@ async function addToAlbum(aid) {
   }
 }
 
-function initAlbumModal() {
-  const modal = document.getElementById("albumModal");
+/* ---------- 相册视图（v0.32）：左右两栏，FAB 上方相册按钮进入 ---------- */
+let albCurrentId = null;
+function albumsSorted() {
+  return [...ALBUMS.albums].sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
+}
+/* 与当前已加载的 PHOTOS 求交集（保持图库顺序：新 → 旧） */
+function albumPhotoIds(a) {
+  const set = new Set((a && a.photoIds) || []);
+  return PHOTOS.filter((p) => set.has(p.id)).map((p) => p.id);
+}
+function renderAlbumsView() {
+  const listEl = document.getElementById("albList");
+  const gridEl = document.getElementById("albGrid");
+  const headEl = document.getElementById("albHead");
+  if (!listEl || !gridEl || !headEl) return;
+  const albums = albumsSorted();
+  if (!albCurrentId || !albums.some((a) => a.id === albCurrentId)) {
+    albCurrentId = albums.length ? albums[0].id : null;
+  }
+  listEl.innerHTML = albums.length ? albums.map((a) => {
+    const n = albumPhotoIds(a).length;
+    return `<div class="alb-item${a.id === albCurrentId ? " on" : ""}" data-aid="${escAttr(a.id)}">
+      <span class="nm">${esc(a.name)}</span>
+      <span class="cnt">${n}</span>
+      <button class="act" data-alb-act="rename" title="重命名">✎</button>
+      <button class="act danger" data-alb-act="del" title="删除相册">×</button>
+    </div>`;
+  }).join("") : `<div class="alb-empty">还没有相册<br><span class="sub">在上方输入名字回车即可创建</span></div>`;
+
+  const cur = albums.find((a) => a.id === albCurrentId) || null;
+  if (!cur) {
+    headEl.innerHTML = "";
+    gridEl.innerHTML = `<div class="alb-empty">左边还没有相册</div>`;
+    return;
+  }
+  const ids = albumPhotoIds(cur);
+  headEl.innerHTML = `<span class="t">${esc(cur.name)}</span><span class="cnt">${ids.length} 张</span>
+    <span class="hint">在图库里选中图片 →「＋ 入相册」可加入；点图片看大图，✕ 移出相册</span>`;
+  gridEl.innerHTML = ids.length ? ids.map((id) => {
+    const p = PHOTOS.find((x) => x.id === id);
+    if (!p) return "";
+    return `<div class="alb-card" data-id="${escAttr(id)}" title="${escAttr(p.title || "")}">
+      <img loading="lazy" decoding="async" src="${cardImgSrc(p)}" alt="">
+      <button class="alb-out" data-alb-out="1" title="从相册移除">✕</button>
+    </div>`;
+  }).join("") : `<div class="alb-empty">这个相册还是空的<br><span class="sub">在图库里选中图片后用「＋ 入相册」加进来</span></div>`;
+}
+function initAlbumsView() {
+  const input = document.getElementById("albNewName2");
+  if (input && !input.dataset.bound) {
+    input.dataset.bound = "1";
+    input.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) return;
+      ALBUMS.albums.push({ id: "", name, photoIds: [], sort: ALBUMS.albums.length });
+      try {
+        await saveAlbums();
+        const last = ALBUMS.albums[ALBUMS.albums.length - 1];
+        albCurrentId = (last && last.id) || albCurrentId;
+        input.value = "";
+      } catch (err) { alert("新建相册失败：" + err.message); }
+      renderAlbumsView();
+    });
+  }
+  const listEl = document.getElementById("albList");
+  if (listEl && !listEl.dataset.bound) {
+    listEl.dataset.bound = "1";
+    listEl.addEventListener("click", async (e) => {
+      const row = e.target.closest(".alb-item");
+      if (!row) return;
+      const a = albumOf(row.dataset.aid);
+      if (!a) return;
+      const act = e.target.closest("[data-alb-act]");
+      if (!act) { albCurrentId = a.id; renderAlbumsView(); return; }
+      if (act.dataset.albAct === "del") {
+        const ok = await askConfirmAsync(`删除相册「${a.name}」？`, "相册会被删除，其中的图片不受影响。", "删除");
+        if (!ok) return;
+        ALBUMS.albums = ALBUMS.albums.filter((x) => x.id !== a.id);
+        try { await saveAlbums(); } catch (err) { alert("删除失败：" + err.message); }
+        if (activeAlbumId === a.id) activeAlbumId = null;
+        renderAlbumsView();
+        renderTagMenuContent();
+        if (window.__applyFilter) window.__applyFilter();
+      } else if (act.dataset.albAct === "rename") {
+        const nm = prompt("相册名称", a.name);
+        if (nm === null) return;
+        const v = nm.trim();
+        if (!v || v === a.name) return;
+        a.name = v;
+        try { await saveAlbums(); } catch (err) { alert("重命名失败：" + err.message); }
+        renderAlbumsView();
+        renderTagMenuContent();
+      }
+    });
+  }
+  const gridEl = document.getElementById("albGrid");
+  if (gridEl && !gridEl.dataset.bound) {
+    gridEl.dataset.bound = "1";
+    gridEl.addEventListener("click", async (e) => {
+      const card = e.target.closest(".alb-card");
+      if (!card) return;
+      const id = card.dataset.id;
+      if (e.target.closest("[data-alb-out]")) {
+        const a = albumOf(albCurrentId);
+        if (!a) return;
+        a.photoIds = a.photoIds.filter((x) => x !== id);
+        try { await saveAlbums(); } catch (err) { alert("移出失败：" + err.message); }
+        renderAlbumsView();
+        renderTagMenuContent();
+        if (window.__applyFilter) window.__applyFilter();
+        return;
+      }
+      openLightboxById(id);
+    });
+  }
+  renderAlbumsView();
+}
+/* 调试 / 测试钩子（与项目里 __refreshGallery 等一致） */
+window.__albumsState = () => ({ albums: ALBUMS.albums, current: albCurrentId });
+window.__reloadAlbums = async () => { await loadAlbums(); renderAlbumsView(); };
+
+function initAlbumModal() {  const modal = document.getElementById("albumModal");
   if (!modal) return;
   document.getElementById("albumClose").addEventListener("click", () => modal.classList.remove("open"));
   document.getElementById("albumNewBtn").addEventListener("click", async () => {
@@ -4860,18 +4982,21 @@ function initPageSwitch() {
     settings: document.getElementById("panelSettings"),
     search: document.getElementById("panelSearch"),
     tags: document.getElementById("panelTags"),
+    albums: document.getElementById("panelAlbums"), // v0.32
   };
   const btnBack = {
     upload: document.getElementById("btnBackUpload"),
     settings: document.getElementById("btnBackSettings"),
     search: document.getElementById("btnBackSearch"),
     tags: document.getElementById("btnBackTags"),
+    albums: document.getElementById("btnBackAlbums"),
   };
   const btnClose = {
     upload: document.getElementById("closeUpload"),
     settings: document.getElementById("closeSettings"),
     search: document.getElementById("closeSearch"),
     tags: document.getElementById("closeTags"),
+    albums: document.getElementById("closeAlbums"),
   };
   const menuItems = pageMenu.querySelectorAll(".page-menu-item");
   const displacement = document.getElementById("genieDisplacement");
@@ -4994,11 +5119,20 @@ function initPageSwitch() {
     if (!existed) {
       openStack.push(page);
       refreshStack();
-      genie(el, 1, () => {});
+      // v0.32：相册窗口从右侧滑入（其余窗口仍是右下角 genie 展开）
+      if (page === "albums") {
+        el.classList.add("open");
+        el.classList.add("slide-in");
+        setTimeout(() => el.classList.remove("slide-in"), 520);
+        if (typeof initAlbumsView === "function") initAlbumsView();
+      } else {
+        genie(el, 1, () => {});
+      }
     } else {
       openStack.splice(openStack.indexOf(page), 1);
       openStack.push(page);
       refreshStack();
+      if (page === "albums" && typeof initAlbumsView === "function") initAlbumsView();
     }
   }
 
@@ -5062,6 +5196,23 @@ function initPageSwitch() {
 
   // 供快捷键等外部调用
   window.__openWindow = openWindow;
+  // v0.32：FAB 上方的相册按钮 —— 点击右滑进入相册窗口
+  const fabAlbumsBtn = document.getElementById("fabAlbumsBtn");
+  if (fabAlbumsBtn) {
+    fabAlbumsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (selectMode) exitSelectMode();
+      const tm = document.getElementById("tagMenu");
+      const fb = document.getElementById("fabBtn");
+      if (tm) tm.classList.remove("open");
+      if (fb) fb.classList.remove("open");
+      pageMenu.classList.remove("open");
+      fabPageBtn.classList.remove("open");
+      flyoutOpenCount = 0;
+      syncFabGroup();
+      openWindow("albums");
+    });
+  }
 
   // 返回按钮与红点关闭
   Object.entries(panels).forEach(([id]) => {

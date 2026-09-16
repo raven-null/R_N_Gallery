@@ -278,7 +278,53 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
   }
 
-  /* 标签改名后界面立即更新（v0.31）——用一次性临时标签，最后删掉，避免动到真实标签 */
+  /* 相册窗口（v0.32）：FAB 上方按钮进入，左右两栏 */
+  const fabAlb = doc.getElementById("fabAlbumsBtn");
+  check("FAB 有相册按钮", !!fabAlb);
+  check("页面切换菜单已移除「图库」项", !doc.querySelector('#pageMenu [data-page="gallery"]'));
+  const clickEl = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  if (fabAlb) {
+    clickEl(fabAlb);
+    await wait(700);
+    const panel = doc.getElementById("panelAlbums");
+    check("点击后相册窗口打开", !!panel && panel.classList.contains("open"));
+    check("左栏有新建相册输入框", !!doc.getElementById("albNewName2"));
+    if (!TOKEN) {
+      const inp = doc.getElementById("albNewName2");
+      if (inp) {
+        const albName = "zz测试相册" + Math.random().toString(36).slice(2, 5);
+        inp.value = albName;
+        inp.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        await wait(1500);
+        const st = window.__albumsState ? window.__albumsState() : { albums: [] };
+        const created = st.albums[st.albums.length - 1];
+        check("新建相册出现在左栏", !!created && doc.querySelectorAll("#albList .alb-item").length > 0, created ? created.name : "");
+        const firstCard = doc.querySelector("#grid .card");
+        const photoId = firstCard && firstCard.dataset.id;
+        if (created && photoId) {
+          const headers = TOKEN ? { "X-Auth-Token": TOKEN } : {};
+          const list = await (await fetch(`${BASE}/api/albums?_=${Math.random()}`, { headers })).json();
+          const albums = list.albums || [];
+          const target = albums.find((a) => a.id === created.id);
+          if (target) {
+            target.photoIds = [photoId];
+            await fetch(`${BASE}/api/albums`, {
+              method: "PUT",
+              headers: Object.assign({ "Content-Type": "application/json" }, headers),
+              body: JSON.stringify({ albums }),
+            });
+            await window.__reloadAlbums();
+            await wait(500);
+            const n = doc.querySelectorAll("#albGrid .alb-card").length;
+            check("右栏显示相册内图片", n > 0, `${n} 张`);
+          }
+        }
+      }
+    } else {
+      console.log("   （线上跳过相册创建与加图，避免改动真实数据）");
+    }
+  }
+  /* 标签改名后界面立即更新（v0.31）——用一次性临时标签，写完就删，避免动到真实标签 */
   const uniq = "zz测试" + Math.random().toString(36).slice(2, 6);
   const renamedName = uniq + "改";
   const clickBtn = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));

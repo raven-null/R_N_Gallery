@@ -444,6 +444,37 @@
       </div>
     </div>
   </div>
+  <!-- ======= 相册窗口（v0.32：左右两栏；FAB 上方的相册按钮右滑进入） ======= -->
+  <div class="page-panel" id="panelAlbums">
+    <div class="panel-header">
+      <div class="traffic">
+        <span class="dot red" id="closeAlbums" title="关闭窗口"></span>
+        <span class="dot yellow"></span>
+        <span class="dot green"></span>
+      </div>
+      <h1>相册</h1>
+      <div class="spacer"></div>
+      <button class="btn ghost panel-back" id="btnBackAlbums">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        返回图库
+      </button>
+    </div>
+    <div class="panel-content settings-scroll">
+      <div class="alb-split">
+        <aside class="alb-left">
+          <div class="alb-new">
+            <input type="text" id="albNewName2" placeholder="＋ 新建相册，回车创建" maxlength="30" autocomplete="off">
+          </div>
+          <div class="alb-list" id="albList"></div>
+        </aside>
+        <section class="alb-right">
+          <div class="alb-head" id="albHead"></div>
+          <div class="alb-grid" id="albGrid"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <!-- 清空确认弹窗 -->
   <div class="modal-mask" id="wipeModal">
     <div class="modal" style="border-color: rgba(229,72,77,.4)">
@@ -641,8 +672,15 @@
 
   <!-- 悬浮按钮组（v0.13.3：上分支=切换页面，左分支=标签筛选/批量选择/排序） -->
   <div class="fab-group" id="fabGroup">
-    <!-- 上分支：切换页面（紧贴主按钮上方 = 最下面） -->
+    <!-- 上分支：相册（最上）+ 切换页面（紧贴主按钮上方） -->
     <div class="fab-branch up">
+      <button class="fab fab-page" id="fabAlbumsBtn" title="相册">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2"/>
+          <circle cx="8.5" cy="9.5" r="1.5"/>
+          <path d="M21 15l-5-5L5 20"/>
+        </svg>
+      </button>
       <button class="fab fab-page" id="fabPageBtn" title="切换页面">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <rect x="3" y="3" width="7" height="7" rx="1"/>
@@ -706,12 +744,8 @@
     <button class="btn danger sm" id="batchDel">删除</button>
   </div>
 
-  <!-- 页面切换下拉菜单 -->
+  <!-- 页面切换下拉菜单（v0.32：移除「图库」项，返回图库请用窗口上的「返回图库」按钮） -->
   <div class="page-menu" id="pageMenu">
-    <button class="page-menu-item active" data-page="gallery">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-      图库
-    </button>
     <button class="page-menu-item" data-page="search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
       搜索
