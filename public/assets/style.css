@@ -3938,8 +3938,7 @@ body.select-mode .card .pick { display: grid; }
 
 /* ============================================================
    性能模式（v0.23）：关掉毛玻璃与过渡动画，图库很大时明显更流畅
-   ============================================================ */
-body.perf-lite .page-panel,
+   ============================================================ */body.perf-lite .page-panel,
 body.perf-lite .tag-menu,
 body.perf-lite .page-menu,
 body.perf-lite .sort-menu,
@@ -3975,4 +3974,20 @@ body.perf-lite .card__content {
   font-size: 11px;
   font-weight: 400;
   color: var(--text-faint);
+}
+
+/* ============================================================
+   渲染层优化（v0.25）：屏外卡片跳过渲染
+   content-visibility: auto 让浏览器跳过视口外卡片的布局/绘制，
+   contain-intrinsic-size 用「记住上次高度」的方式占位，避免瀑布流重排。
+   若发现卡片首次滚动时高度异常，把这两行删掉即可（纯性能优化、非功能）
+   ============================================================ */
+.card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+/* 搜索结果卡片较少，同样受益 */
+.search-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 260px;
 }

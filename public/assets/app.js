@@ -874,12 +874,25 @@ function openLightboxById(id, bustCache) {
   const p = PHOTOS.find((x) => x.id === id);
   if (!p) return;
   const img = document.getElementById("lbImg");
-  const src = qualityMode() === "low" ? (p.thumbUrl || p.url) : p.url;
   img.dataset.orig = p.url;
-  img.src = bustCache ? `${src}?t=${Date.now()}` : src;
+  // v0.25：缩略图秒开 → 原图渐进替换（大图不再白屏等下载）
+  const thumb = p.thumbUrl || p.url;
+  const wantFull = qualityMode() !== "low";
+  const busted = (u) => (bustCache ? `${u}${u.includes("?") ? "&" : "?"}t=${Date.now()}` : u);
   img.onerror = () => {
-    if (img.src !== img.dataset.orig) img.src = img.dataset.orig;
+    if (img.dataset.orig && !String(img.src).includes(img.dataset.orig)) img.src = img.dataset.orig;
   };
+  if (wantFull && p.thumbUrl) {
+    img.src = busted(thumb);
+    const full = new Image();
+    full.onload = () => {
+      const lb = document.getElementById("lightbox");
+      if (lb && lb.dataset.cur === p.id) img.src = busted(p.url);
+    };
+    full.src = p.url;
+  } else {
+    img.src = busted(wantFull ? p.url : thumb);
+  }
   const d = document.getElementById("lbDesc");
   if (p.desc && p.desc.trim()) {
     d.textContent = p.desc;
@@ -905,6 +918,37 @@ function openLightboxById(id, bustCache) {
   if (infoBtn) infoBtn.classList.toggle("on", !lb.classList.contains("no-info"));
 }
 
+/* ---------- 性能模式：释放滚出很远的卡片图片（v0.25）----------
+   几千张时，每张缩略图解码后要占几百 KB 内存；性能模式下把离开视口 1.5 屏
+   以外的卡片图片换成 1×1 占位（DOM 与布局不变，滚回来再加载），显著降内存 */
+const IMG_PLACEHOLDER = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+function initImgRelease() {
+  if (!document.body.classList.contains("perf-lite") || !("IntersectionObserver" in window)) return;
+  if (!window.__imgReleaseIO) {
+    window.__imgReleaseIO = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        const img = en.target.querySelector("img");
+        if (!img) return;
+        if (en.isIntersecting) {
+          if (img.dataset.released === "1" && img.dataset.cardSrc) {
+            img.src = img.dataset.cardSrc;
+            img.dataset.released = "0";
+          }
+        } else if (img.dataset.released !== "1" && img.complete && img.naturalWidth > 0) {
+          img.dataset.cardSrc = img.src;
+          img.src = IMG_PLACEHOLDER;
+          img.dataset.released = "1";
+        }
+      });
+    }, { rootMargin: "150% 0px 150% 0px" });
+  }
+  document.querySelectorAll("#grid .card").forEach((el) => window.__imgReleaseIO.observe(el));
+}
+window.__observeNewCards = (cards) => {
+  if (!window.__imgReleaseIO || !cards) return;
+  cards.forEach((el) => window.__imgReleaseIO.observe(el));
+};
+
 /* ---------- 通用：视口出现动画（v0.8.11）刷新交错浮现 + 滚动进出视口触发 ---------- */
 function initReveal(container, selector) {
   if (!container) return;
@@ -915,24 +959,27 @@ function initReveal(container, selector) {
     items.forEach((el) => el.classList.add("visible"));
     return;
   }
-  const io = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          const el = entry.target;
-          el.classList.add("visible");
-          io.unobserve(el);
-          // 过渡完成后清除 stagger delay，避免影响后续 hover 动画
-          setTimeout(() => { el.style.transitionDelay = "0s"; }, 700);
-        }
-      });
-    },
-    { rootMargin: "0px 0px 120px 0px" } // 提前 120px 触发，滚动更跟手
-  );
+  // v0.25：复用一个观察器（原先每次渲染都 new 一个，卡片多时是额外的开销）
+  if (!window.__revealIO) {
+    window.__revealIO = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const el = entry.target;
+            el.classList.add("visible");
+            window.__revealIO.unobserve(el);
+            // 过渡完成后清除 stagger delay，避免影响后续 hover 动画
+            setTimeout(() => { el.style.transitionDelay = "0s"; }, 700);
+          }
+        });
+      },
+      { rootMargin: "0px 0px 120px 0px" } // 提前 120px 触发，滚动更跟手
+    );
+  }
   items.forEach((el, i) => {
     // 同一批进入视口时按顺序交错浮现（每批最多 12 张，每张 40ms）
     el.style.transitionDelay = `${Math.min(i % 12, 11) * 40}ms`;
-    io.observe(el);
+    window.__revealIO.observe(el);
   });
 }
 
@@ -1264,10 +1311,11 @@ function initGallery() {
     const lm = document.getElementById("loadMore");
     if (!lm) return;
     lm.style.display = shown < filtered.length ? "block" : "none";
-    lm.querySelector("span").textContent =
-      shown < filtered.length
-        ? t("已加载", "Loaded") + ` ${shown} / ${filtered.length} · ${t("滚动加载更多…", "scroll for more…")}`
-        : t("已全部加载", "All loaded") + `（${filtered.length} ${t("张", "photos")}）`;
+    let text = shown < filtered.length
+      ? t("已加载", "Loaded") + ` ${shown} / ${filtered.length} · ${t("滚动加载更多…", "scroll for more…")}`
+      : t("已全部加载", "All loaded") + `（${filtered.length} ${t("张", "photos")}）`;
+    if (filtered.length > 800) text += t("　· 数据较多，用筛选或搜索能更快定位", "　· many items, try filters or search");
+    lm.querySelector("span").textContent = text;
   }
 
   /* 全量渲染（初始 / 筛选 / 排序 / 数据变化时；滚动加载走 appendMore） */
@@ -1289,6 +1337,7 @@ function initGallery() {
     updateLoadMore();
     // 视口出现动画（仅首次整批；滚动加载的新卡直接可见，避免闪屏）
     initReveal(grid, ".card");
+    initImgRelease(); // v0.25：性能模式下回收屏外卡片图片
   }
   window.__renderGallery = () => render();
   // v0.24：后台补齐照片后，把新数据纳入当前筛选；显示数量不多时直接重建列表（保留已显示张数）
@@ -1299,26 +1348,37 @@ function initGallery() {
     else updateLoadMore();
   };
 
-  /* 无限滚动（v0.13.2：增量追加，不再清空重建，杜绝整页闪屏） */
+  /* 增量追加一页（v0.13.2 增量而非重建；v0.25 抽成函数供哨兵复用） */
   let scrollBusy = false;
-  window.addEventListener("scroll", () => {
-    if (scrollBusy) return;
-    if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 420) {
-      if (shown < filtered.length) {
-        scrollBusy = true;
-        const start = grid.querySelectorAll(".card").length;
-        shown = Math.min(shown + PAGE, filtered.length);
-        const more = filtered.slice(start, shown);
-        if (more.length) {
-          grid.insertAdjacentHTML("beforeend", more.map(cardHTML).join(""));
-          const newCards = [...grid.querySelectorAll(".card")].slice(start);
-          newCards.forEach((c) => c.classList.add("visible"));
-        }
-        updateLoadMore();
-        scrollBusy = false;
-      }
+  function appendMore() {
+    if (scrollBusy || shown >= filtered.length) return;
+    scrollBusy = true;
+    const start = grid.querySelectorAll(".card").length;
+    shown = Math.min(shown + PAGE, filtered.length);
+    const more = filtered.slice(start, shown);
+    if (more.length) {
+      grid.insertAdjacentHTML("beforeend", more.map(cardHTML).join(""));
+      const newCards = [...grid.querySelectorAll(".card")].slice(start);
+      newCards.forEach((c) => c.classList.add("visible"));
+      if (window.__observeNewCards) window.__observeNewCards(newCards);
     }
-  });
+    updateLoadMore();
+    scrollBusy = false;
+  }
+
+  /* 无限滚动（v0.25：改用 IntersectionObserver 哨兵。
+     原先监听 scroll 事件并每次读 document.body.offsetHeight，会强制同步布局，
+     卡片多时滚动明显掉帧；哨兵方案的判断成本几乎为零 */
+  const sentinel = document.createElement("div");
+  sentinel.id = "gridSentinel";
+  sentinel.setAttribute("aria-hidden", "true");
+  sentinel.style.cssText = "height:1px;width:100%;pointer-events:none";
+  grid.parentNode.insertBefore(sentinel, grid.nextSibling);
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) appendMore();
+    }, { rootMargin: "800px 0px" }).observe(sentinel);
+  }
 
   /* 卡片拖拽（v0.14：拖到标签管理窗口的标签上打标） */
   grid.addEventListener("dragstart", (e) => {
@@ -4182,6 +4242,7 @@ function applyPerfLite(on) {
   document.body.classList.toggle("perf-lite", !!on);
   if (on) document.documentElement.setAttribute("data-perf", "lite");
   else document.documentElement.removeAttribute("data-perf");
+  if (on) setTimeout(() => { try { initImgRelease(); } catch (e) { /* ignore */ } }, 0); // v0.25 回收屏外图片
 }
 try { if (localStorage.getItem(PERF_KEY) === "1") applyPerfLite(true); } catch (e) { /* ignore */ }
 const COLS_KEY = "rn_cols";

@@ -574,3 +574,13 @@ async function aiTagSearch(query) {
 - 本地端到端验证（5 张）：上传→索引同步、分页（`limit=2` 三页、total 正确）、PATCH 后立即反映、DELETE 后 total 减少、`reindex` 返回 count、stats 走索引 —— 全部通过
 - 已知限制：索引是单个 Blob，到几万张时需要分片；多标签页并发上传可能丢条目（用 `POST /api/photos/reindex` 修复即可）
 - 下一批（B）：渲染层优化 —— 只保留可视区卡片、`content-visibility` 跳过屏外渲染、缩略图预取、灯箱渐进加载
+
+### 批次 18 · 渲染层优化（B 批）（v0.25，2026-09-16）✅
+- **无限滚动改用 IntersectionObserver 哨兵**：原实现监听 `scroll` 事件并每次读 `document.body.offsetHeight`（强制同步布局，卡片多时滚动掉帧）。现在在网格后插一个 1px 哨兵元素，`rootMargin: 800px` 时触发 `appendMore()`，判断成本几乎为零；追加逻辑抽成 `appendMore()` 供哨兵复用
+- **`content-visibility: auto` + `contain-intrinsic-size: auto 320px`**（卡片 / 搜索结果卡片）：浏览器跳过视口外卡片的布局与绘制；用 `auto` 关键字记住上次高度，避免瀑布流重排（若高度异常可直接删这两行，属纯性能优化）
+- **性能模式下回收屏外图片**（`initImgRelease`）：把离开视口 1.5 屏以外卡片的图片换成 1×1 占位（DOM 与布局不变），滚回来再恢复 —— 几千张时每张缩略图解码后要几百 KB 内存，这一项省的是内存而非 CPU；仅在「性能模式」开启时生效，风险可控
+- **灯箱渐进加载**：先显示缩略图秒开，原图加载完成后自动替换（大图不再白屏等下载）
+- `initReveal` 复用**单个** IntersectionObserver（原先每次渲染都新建一个）
+- 图库超过 800 张时，「已加载」提示会附带"用筛选或搜索更快定位"的建议
+- **新增前端冒烟测试** `scripts/dom-smoke-test.js`：用 jsdom 真跑 `index.html` + `app.js`（stub 掉 IntersectionObserver / fetch 转发到本地服务），验证首屏渲染、哨兵追加、图片回收的离开/恢复、CSS 规则在位 —— 本次 8 项全部通过；用法见文件头（需要 `npm install --no-save --no-package-lock --cache .npm-cache jsdom`）
+- `package.json` 增加便捷脚本：`npm run test:dom` / `import:chars` / `find:dups` / `migrate` / `tagger`
