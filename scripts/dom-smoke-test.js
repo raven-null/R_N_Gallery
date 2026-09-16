@@ -350,25 +350,42 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         n2.value = renamedName;
         const t0 = Date.now();
         clickBtn(s2);
-        await wait(500); // 只等本地渲染，刻意不等服务端重读
-        const shown = !!pillEditByName(renamedName);
+        // 轮询等本地渲染（线上要发两个请求，给足 4s；若走"等服务端重读"的老路会因 Blobs 延迟远超这个时间）
+        let shown = false;
+        while (Date.now() - t0 < 4000) {
+          if (pillEditByName(renamedName)) { shown = true; break; }
+          await wait(200);
+        }
+        const errEl = doc.querySelector("#tagModalBody #fErr");
+        const stillOpen = doc.getElementById("tagModal").classList.contains("open");
+        console.log(`   弹窗仍打开：${stillOpen}　提示：${errEl && errEl.style.display !== "none" ? errEl.textContent : "(无)"}`);
         check("改名后界面立即更新（不等服务端）", shown, `耗时 ${Date.now() - t0}ms`);
       }
-      // 清理：删除这个临时标签
+      // 清理：删除这个临时标签（线上要等两个请求回来，轮询确认）
       window.__refreshTagManager();
       await wait(300);
       const delBtn = [...doc.querySelectorAll("#tagMgrRoot .tmgr-pill .act[data-tact='remove']")].find((b) => b.dataset.tname === renamedName);
       if (delBtn) {
         clickBtn(delBtn);
-        await wait(300);
+        await wait(400);
         const confirm = doc.querySelector("#tagModalBody #fConfirm");
-        if (confirm) { clickBtn(confirm); await wait(1500); }
-        check("临时标签已清理", !pillEditByName(renamedName));
+        if (confirm) clickBtn(confirm);
+        let cleaned = false;
+        const t1 = Date.now();
+        while (Date.now() - t1 < 5000) {
+          if (!pillEditByName(renamedName)) { cleaned = true; break; }
+          await wait(200);
+        }
+        check("临时标签已清理", cleaned);
       }
+      closeModal(); // 万一还开着，关掉以免影响后续断言
+      await wait(200);
     }
   }
 
   /* 组头旁「＋」= 直接在该组新建标签，所属组预选（v0.30） */
+  window.__refreshTagManager(); // 先刷新，确保取到带事件监听的最新元素
+  await wait(300);
   const gnewBtn = doc.querySelector("#tagMgrRoot [data-gnew]");
   check("组头有「＋」新建标签入口", !!gnewBtn);
   if (gnewBtn) {
