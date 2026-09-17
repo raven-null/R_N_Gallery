@@ -644,6 +644,22 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(200);
     check("切回管理员模式", doc.body.classList.contains("mode-admin") && doc.getElementById("editModal") !== null);
   }
+  /* v0.50：设置里的「访问密码」「R18 密钥」入口与对应后端接口都已删除 */
+  check("设置页不再有修改访问密码入口", !doc.getElementById("authPwdNew") && !doc.getElementById("btnSetPwd"));
+  check("设置页不再有 R18 密钥入口", !doc.getElementById("authR18New") && !doc.getElementById("btnSetR18"));
+  for (const [name, path] of [["修改密码接口", "/api/auth/password"], ["R18 密钥接口", "/api/auth/r18"], ["R18 校验接口", "/api/auth/r18/verify"]]) {
+    try {
+      const r = await fetch(`${BASE}${path}`, {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, TOKEN ? { "X-Auth-Token": TOKEN } : {}),
+        body: "{}",
+      });
+      check(`${name}已删除（404）`, r.status === 404, `HTTP ${r.status}`);
+    } catch (e) {
+      check(`${name}已删除（404）`, false, e.message);
+    }
+  }
+
   /* 服务端 safe=1：观光模式的列表里不返回带 r18 / r16 标签的图片 */
   try {
     const all = await (await fetch(`${BASE}/api/photos?limit=300${TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""}`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} })).json();
@@ -653,6 +669,13 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("safe=1 列表里没有 R18 / R16 图片",
       adultInSafe.length === 0 && (safe.total || 0) === (all.total || 0) - adult.length,
       `全部 ${all.total} · 成人向 ${adult.length} · safe ${safe.total}`);
+    // v0.50：管理员读成人向图片不再需要额外密钥
+    if (adult.length) {
+      const rr = await fetch(`${BASE}/api/photos/${adult[0].id}/raw${TOKEN ? "?token=" + encodeURIComponent(TOKEN) : ""}`, {
+        headers: TOKEN ? { "X-Auth-Token": TOKEN } : {},
+      });
+      check("管理员读 R18 图不再需要密钥", rr.status === 200, `HTTP ${rr.status}`);
+    }
   } catch (e) {
     check("safe=1 列表里没有 R18 / R16 图片", false, e.message);
   }

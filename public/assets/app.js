@@ -543,12 +543,10 @@ const fmtDate = (s) => {
   return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`;
 };
 
-/* ---------- 缩略图 / 哈希（v0.12） ---------- */
-/* ---------- 访问密码 / R18 保护（v0.16） ---------- */
+/* ---------- 访问密码 / 图片可见性（v0.16；v0.50 移除 R18 密钥） ---------- */
 const TOKEN_KEY = "rn_token";
-const R18_KEY_STORE = "rn_r18";
+const R18_KEY_STORE = "rn_r18"; // 仅用于清除历史遗留值，不再读写
 function gateToken() { return localStorage.getItem(TOKEN_KEY) || ""; }
-function r18Key() { return localStorage.getItem(R18_KEY_STORE) || ""; }
 function authState() { return window.__authState || { gate: false, hasR18: false }; }
 async function fetchAuthState() {
   try {
@@ -560,13 +558,12 @@ async function fetchAuthState() {
   }
   return window.__authState;
 }
-/* 图片是 <img> 直接加载、带不了请求头，因此把凭证放进 URL 参数 */
+/* 图片是 <img> 直接加载、带不了请求头，因此把凭证放进 URL 参数
+   v0.50：R18 密钥参数已移除（密钥机制删除），只保留访问密码 */
 function mediaUrl(id, kind) {
   const q = new URLSearchParams();
   const t = gateToken();
   if (t) q.set("token", t);
-  const k = r18Key();
-  if (k) q.set("r18Key", k);
   const qs = q.toString();
   return `/api/photos/${id}/${kind}` + (qs ? "?" + qs : "");
 }
@@ -577,30 +574,8 @@ function isR18(p) {
   if (Array.isArray(p.tags) && p.tags.some((t) => String(t).trim().toLowerCase() === "r18")) return true;
   return catsOf(p).some((c) => String(c).trim().toLowerCase() === "r18");
 }
-/* R18 是否已解锁：后端没设 R18 密钥时视为不限制 */
-function r18Unlocked() { return !authState().hasR18 || !!r18Key(); }
-
-/* 未解锁时请求 R18 密钥（校验通过后写入本地并刷新，使图片 URL 带上 r18Key） */
-async function requestR18Key() {
-  if (r18Unlocked()) return true;
-  const k = window.prompt("该内容为 R18，请输入 R18 密钥后查看：");
-  if (!k) return false;
-  try {
-    const r = await fetch("/api/auth/r18/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...apiHeaders() },
-      body: JSON.stringify({ r18Key: k.trim() }),
-    });
-    if (!r.ok) { window.alert("R18 密钥错误"); return false; }
-    localStorage.setItem(R18_KEY_STORE, k.trim());
-    location.reload();
-    return true;
-  } catch (e) {
-    window.alert("验证失败：" + (e && e.message ? e.message : e));
-    return false;
-  }
-}
-window.requestR18Key = requestR18Key;
+/* v0.50：R18 密钥的输入 / 校验流程与锁定占位卡都已删除；
+   R18 / R16 的可见性现在只由观光模式的 adultHidden() 决定 */
 
 /* ---------- 观光 / 管理员模式（v0.49） ----------
    观光模式（默认）：只能看图与下载（外加筛选/搜索/排序/布局切换这些纯浏览辅助），
@@ -798,66 +773,13 @@ function showGate() {
   setTimeout(() => input.focus(), 60);
 }
 
-/* 设置页：访问与保护（修改密码 / R18 密钥 / 退出登录） */
+/* 设置页：访问与保护（v0.50：修改密码 / R18 密钥两块已删除，只留模式切换与退出登录） */
 function initAuthSettings() {
-  const gateState = document.getElementById("authGateState");
-  const r18State = document.getElementById("authR18State");
-  const pwdInput = document.getElementById("authPwdNew");
-  const r18Input = document.getElementById("authR18New");
-  const btnPwd = document.getElementById("btnSetPwd");
-  const btnR18 = document.getElementById("btnSetR18");
   const btnLogout = document.getElementById("btnLogoutGate");
-  const paint = () => {
-    const st = authState();
-    if (gateState) gateState.textContent = st.gate ? "已启用" : "未启用（任何人可访问）";
-    if (r18State) r18State.textContent = st.hasR18 ? "已设置（R18 内容受保护）" : "未设置（R18 不额外限制）";
-  };
-  paint();
-  window.__refreshAuthState = async () => { await fetchAuthState(); paint(); };
-
-  if (btnPwd) btnPwd.onclick = async () => {
-    const v = (pwdInput.value || "").trim();
-    if (v.length < 4) { window.alert("密码至少 4 位"); return; }
-    if (!window.confirm("确定修改访问密码？修改后其它设备需要用新密码重新登录。")) return;
-    try {
-      await apiFetch("/api/auth/password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ next: v }),
-      });
-      localStorage.setItem(TOKEN_KEY, v); // 本机同步为新密码，避免自己立刻被登出
-      try { localStorage.removeItem(GUEST_VISIT_KEY); } catch (e) { /* ignore */ }
-      pwdInput.value = "";
-      window.alert("访问密码已更新");
-      if (window.__refreshAuthState) window.__refreshAuthState();
-    } catch (e) {
-      window.alert("修改失败：" + (e && e.message ? e.message : e));
-    }
-  };
-
-  if (btnR18) btnR18.onclick = async () => {
-    const v = (r18Input.value || "").trim();
-    if (v && v.length < 4) { window.alert("R18 密钥至少 4 位"); return; }
-    const tip = v ? "确定设置 / 修改 R18 密钥？" : "留空保存会清除 R18 密钥，之后 R18 内容不再额外限制，确定？";
-    if (!window.confirm(tip)) return;
-    try {
-      await apiFetch("/api/auth/r18", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ r18Key: v }),
-      });
-      if (v) localStorage.setItem(R18_KEY_STORE, v);
-      else localStorage.removeItem(R18_KEY_STORE);
-      r18Input.value = "";
-      window.alert(v ? "R18 密钥已更新" : "R18 密钥已清除");
-      if (window.__refreshAuthState) window.__refreshAuthState();
-    } catch (e) {
-      window.alert("操作失败：" + (e && e.message ? e.message : e));
-    }
-  };
+  window.__refreshAuthState = async () => { await fetchAuthState(); };
 
   if (btnLogout) btnLogout.onclick = () => {
-    if (!window.confirm("退出登录会清除本机保存的访问密码与 R18 密钥，确定？")) return;
+    if (!window.confirm("退出登录会清除本机保存的访问密码，确定？")) return;
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(R18_KEY_STORE);
     location.reload();
@@ -2036,14 +1958,8 @@ function initGallery() {
   }
 
   // 标签筛选（v0.8.6 / v0.11.2 / v0.12 / v0.15 / v0.16：排序 / AI / 相册 / 主分类 / 整组叠加）
-  /* R18 收尾（v0.16）：未解锁时，正在筛选 R18 相关内容才保留（渲染成锁定卡），其余情况一律不显示 */
-  function filterHitsR18() {
-    const hit = (v) => String(v || "").trim().toLowerCase() === "r18";
-    if (hit(activeCategory) || hit(activeTagName)) return true;
-    return !!(aiFilter && Array.isArray(aiFilter.tags) && aiFilter.tags.some(hit));
-  }
   function basePred(p) {
-    if (isR18(p) && !r18Unlocked() && !filterHitsR18()) return false;
+    // v0.50：R18 密钥机制已移除，R18 图片正常参与筛选（观光模式由 adultHidden 层面统一隐藏）
     // 主分类（v0.19 多选数组：命中任一所选分类即可；空 = 未分类）
     if (activeCategory) {
       const cats = catsOf(p);
@@ -2079,13 +1995,6 @@ function initGallery() {
   window.__applyFilter = applyFilter;
 
   function cardHTML(p) {
-    // R18 未解锁：只渲染锁定占位，不加载任何图片内容
-    if (isR18(p) && !r18Unlocked()) {
-      return `<div class="card card-r18-locked" data-id="${p.id}" onclick="requestR18Key()" title="R18 内容，点击输入密钥查看">
-        <span class="r18-badge">R18</span>
-        <span class="r18-lock-tip">需要密钥</span>
-      </div>`;
-    }
     // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
     // 老数据缺尺寸时不写，退回原来的自然高度
     const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";

@@ -377,28 +377,12 @@
               <span class="slider"></span>
             </label>
           </div>
-          <div class="settings-row">
-            <span class="settings-label">访问密码</span>
-            <span class="settings-value" id="authGateState">检测中…</span>
-          </div>
-          <div class="settings-row-wrap auth-col">
-            <input type="password" id="authPwdNew" class="settings-input" placeholder="新访问密码（至少 4 位）" autocomplete="new-password">
-            <button class="btn ghost" id="btnSetPwd">修改访问密码</button>
-          </div>
-          <div class="settings-row">
-            <span class="settings-label">R18 密钥</span>
-            <span class="settings-value" id="authR18State">检测中…</span>
-          </div>
-          <div class="settings-row-wrap auth-col">
-            <input type="password" id="authR18New" class="settings-input" placeholder="R18 密钥（至少 4 位；留空保存 = 清除）" autocomplete="new-password">
-            <button class="btn ghost" id="btnSetR18">保存 R18 密钥</button>
-          </div>
           <button class="settings-row settings-row-action" id="btnLogoutGate">
             <span class="settings-label">退出登录（清除本机凭据）</span>
             <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </div>
-        <div class="settings-footer">访问密码保护整个图库，同时也是「管理员模式」的密码；R18 密钥只锁 R18 内容（标签 r18 / 主分类 R18 / 编辑里勾选 R18）。初始密码取自 Netlify 环境变量 ADMIN_TOKEN，忘记时可在 Netlify 改环境变量后清空 Blobs 的 auth-config 重新初始化。</div>
+        <div class="settings-footer">访问密码同时是「管理员模式」的密码，初始值取自 Netlify 环境变量 ADMIN_TOKEN（v0.50 起不再提供界面修改入口：忘记时可在 Netlify 改环境变量并清空 Blobs 的 auth-config 重新初始化）。</div>
       </div>
 
       <!-- 危险区 -->

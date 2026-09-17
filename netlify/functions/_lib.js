@@ -228,10 +228,6 @@ function tokenFrom(req, url) {
   const h = (req && req.headers && (req.headers.get("X-Auth-Token") || req.headers.get("x-auth-token"))) || "";
   return String(h || (url ? url.searchParams.get("token") || "" : "")).trim();
 }
-function r18KeyFrom(req, url) {
-  const h = (req && req.headers && (req.headers.get("X-R18-Key") || req.headers.get("x-r18-key"))) || "";
-  return String(h || (url ? url.searchParams.get("r18Key") || "" : "")).trim();
-}
 
 /* 返回 { ok, gate }：gate 表示是否启用了门禁 */
 async function checkAuth(req, url) {
@@ -241,13 +237,8 @@ async function checkAuth(req, url) {
   return { ok: !!t && sha256hex(t) === cfg.accessHash, gate: true };
 }
 
-/* R18 图片是否放行（未设置 R18 密钥时一律放行） */
-async function checkR18(req, url, cfg) {
-  const c = cfg || (await authConfig());
-  if (!c.r18Hash) return true;
-  const k = r18KeyFrom(req, url);
-  return !!k && sha256hex(k) === c.r18Hash;
-}
+/* v0.50：R18 密钥机制（r18KeyFrom / checkR18）已整体删除 ——
+   R18 / R16 内容现在只由「观光模式」（safe=1 + authorized 判断）区分可见性 */
 
 /* R18 判定：独立字段 r18 === true，或标签含 r18，或主分类含 r18（v0.19 主分类为多选数组） */
 function isR18Photo(p) {
@@ -285,11 +276,9 @@ module.exports = {
   authConfig,
   saveAuthConfig,
   checkAuth,
-  checkR18,
   isR18Photo,
   isR16Photo,
   isAdultPhoto,
   tokenFrom,
-  r18KeyFrom,
   sha256hex,
 };

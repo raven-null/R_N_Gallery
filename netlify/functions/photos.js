@@ -22,7 +22,7 @@
 const {
   store, json, notFound, badRequest, serverError, unauthorized,
   nanoid, imageSize, sniffMime,
-  authConfig, saveAuthConfig, checkAuth, checkR18, isR18Photo, isR16Photo, isAdultPhoto, sha256hex,
+  authConfig, saveAuthConfig, checkAuth, isR18Photo, isR16Photo, isAdultPhoto, sha256hex,
 } = require("./_lib");
 const crypto = require("crypto");
 const sharp = require("sharp"); // v0.13.8：服务端缩略图（列表秒开）
@@ -153,10 +153,6 @@ exports.default = async (req) => {
     const guest = !auth.ok && guestReadOK(method, path, url, rest);
     if (!auth.ok && !guest) return unauthorized("需要访问密码，或密码已失效");
 
-    if (method === "POST" && path.endsWith("/api/auth/password")) return authPassword(req);
-    if (method === "POST" && path.endsWith("/api/auth/r18")) return authR18(req);
-    if (method === "POST" && path.endsWith("/api/auth/r18/verify")) return authR18Verify(req);
-
     if (method === "GET" && path.endsWith("/api/photos")) return list(url);
     if (method === "GET" && path.endsWith("/api/tags")) return tagsGet();
     if (method === "PUT" && path.endsWith("/api/tags")) return tagsPut(req);
@@ -215,9 +211,6 @@ exports.config = {
     "/api/meta/logs",
     "/api/auth/state",
     "/api/auth/login",
-    "/api/auth/password",
-    "/api/auth/r18",
-    "/api/auth/r18/verify",
   ],
 };
 
@@ -238,45 +231,8 @@ async function authLogin(req) {
   return json({ ok: true, gate: true });
 }
 
-/* 修改访问密码（调用方必须是已登录状态，路由层已校验） */
-async function authPassword(req) {
-  const body = await req.json().catch(() => ({}));
-  const next = String(body.next || "").trim();
-  if (next.length < 4) return badRequest("密码至少 4 位");
-  const cfg = await authConfig();
-  cfg.accessHash = sha256hex(next);
-  await saveAuthConfig(cfg);
-  logAction(req, "修改访问密码", "");
-  return json({ ok: true });
-}
-
-/* 设置 / 清除 R18 密钥（r18Key 传空串即清除，清除后 R18 不再额外保护） */
-async function authR18(req) {
-  const body = await req.json().catch(() => ({}));
-  const k = String(body.r18Key || "").trim();
-  const cfg = await authConfig();
-  if (!k) {
-    delete cfg.r18Hash;
-    await saveAuthConfig(cfg);
-    logAction(req, "清除 R18 密钥", "");
-    return json({ ok: true, hasR18: false });
-  }
-  if (k.length < 4) return badRequest("R18 密钥至少 4 位");
-  cfg.r18Hash = sha256hex(k);
-  await saveAuthConfig(cfg);
-  logAction(req, "设置 R18 密钥", "");
-  return json({ ok: true, hasR18: true });
-}
-
-/* 校验 R18 密钥（前端输入后调用，通过则本地记住用于图片 URL） */
-async function authR18Verify(req) {
-  const body = await req.json().catch(() => ({}));
-  const cfg = await authConfig();
-  if (!cfg.r18Hash) return json({ ok: true, hasR18: false });
-  const k = String(body.r18Key || "").trim();
-  if (!k || sha256hex(k) !== cfg.r18Hash) return unauthorized("R18 密钥错误");
-  return json({ ok: true, hasR18: true });
-}
+/* v0.50：修改访问密码 / 设置 R18 密钥的接口已删除 ——
+   访问密码只能通过 Netlify 环境变量 ADMIN_TOKEN + 清空 auth-config 重新初始化 */
 
 /* ---------- 操作日志（v0.12） ---------- */
 async function logAction(req, action, detail) {
@@ -429,7 +385,7 @@ async function list(url) {
   const s = store();
   let arr = await indexEnsure(s);
   // v0.49 观光模式（?safe=1）：列表里直接剔除 R18 / R16 的图片
-  // （前端观光模式请求时带这个参数；图片字节本身另有 checkR18 的 R18 密钥保护）
+  // （前端观光模式请求时带这个参数；图片字节由 raw / thumb 的 authorized 判断兜底）
   if (safeMode(q)) arr = arr.filter((e) => !isAdultPhoto(e));
   const start = Math.max(parseInt(q.get("cursor"), 10) || 0, 0);
   const page = arr.slice(start, start + limit).map((e) => ({ ...e, r18: isR18Photo(e) }));
@@ -467,10 +423,9 @@ async function raw(id, req, url, authorized) {
   const s = store();
   const m = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
-  // 成人向内容：观光访客（未通过访问密码）一律拒绝；管理员仍需 R18 密钥读 R18
+  // 成人向内容：观光访客（未通过访问密码）一律拒绝（v0.50：R18 密钥机制已移除，管理员不再需要额外密钥）
   if (isAdultPhoto(m)) {
     if (!authorized) return unauthorized("观光模式不可查看该内容");
-    if (isR18Photo(m) && !(await checkR18(req, url))) return unauthorized("R18 内容需要密钥");
   }
   const buf = await s.get(m.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" });
   if (!buf) return notFound("Image data not found");
@@ -526,10 +481,9 @@ async function thumb(id, req, url, authorized) {
   const s = store();
   const meta = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!meta) return notFound("Photo not found");
-  // v0.49：观光访客不可看成人向；管理员看 R18 仍需密钥
+  // v0.49：观光访客不可看成人向；v0.50 起 R18 密钥机制已移除，管理员直接可见
   if (isAdultPhoto(meta)) {
     if (!authorized) return unauthorized("观光模式不可查看该内容");
-    if (isR18Photo(meta) && !(await checkR18(req, url))) return unauthorized("R18 内容需要密钥");
   }
   let buf = null;
   if (meta.thumbKey) buf = await s.get(meta.thumbKey, { type: "arrayBuffer" });
