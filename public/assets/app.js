@@ -1169,6 +1169,7 @@ function openLightboxById(id, bustCache) {
     clearTimeout(lbHideTimer);
     lbToolsVisible(false);
   }
+  resetLbRotation(); // v0.45：换图即复位预览旋转
   syncSlideBtn();
 }
 
@@ -1270,49 +1271,26 @@ function toggleSlide() {
 }
 window.__stopSlide = stopSlide;
 
-/* 旋转 90°：本地 canvas 旋转后覆盖原图（POST /api/photos/:id/image） */
-function lbRotatePhoto() {
-  const p = lbCurrentPhoto();
-  if (!p) return;
-  const btn = document.getElementById("lbToolRot");
-  if (btn) btn.disabled = true;
-  const img = new Image();
-  img.crossOrigin = "anonymous";
-  img.onload = async () => {
-    try {
-      const c = document.createElement("canvas");
-      c.width = img.naturalHeight;
-      c.height = img.naturalWidth;
-      const ctx = c.getContext("2d");
-      ctx.translate(c.width / 2, c.height / 2);
-      ctx.rotate(Math.PI / 2);
-      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
-      const keepPng = p.mime === "image/png";
-      const mime = keepPng ? "image/png" : (c.toDataURL("image/webp").startsWith("data:image/webp") ? "image/webp" : "image/jpeg");
-      const dataUrl = c.toDataURL(mime, 0.92);
-      let thumbDataUrl = null;
-      try { thumbDataUrl = await makeThumbDataUrl(dataUrl); } catch (e) { /* 缩略图失败可继续 */ }
-      const r = await apiFetch(`/api/photos/${p.id}/image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataBase64: dataUrl, thumbBase64: thumbDataUrl }),
-      });
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error || "旋转失败");
-      await loadData();
-      if (window.__refreshGallery) window.__refreshGallery();
-      openLightboxById(p.id, true); // 带时间戳重取，绕开浏览器缓存
-      lbShowTools();
-    } catch (e) {
-      alert("旋转失败：" + e.message);
-    }
-    if (btn) btn.disabled = false;
-  };
-  img.onerror = () => {
-    alert("旋转失败：原图无法读取");
-    if (btn) btn.disabled = false;
-  };
-  img.src = p.url + (p.url.includes("?") ? "&" : "?") + "r=" + Date.now();
+/* 旋转（v0.45）：只旋转**灯箱里的预览**，不改动原图、不发请求；
+   切换图片 / 重新打开灯箱时自动复位（想看旋转后的效果请下载后自行处理） */
+let lbRotateDeg = 0;
+function applyLbRotation() {
+  const img = document.getElementById("lbImg");
+  if (!img) return;
+  const deg = ((lbRotateDeg % 360) + 360) % 360;
+  img.style.transform = deg ? `rotate(${deg}deg)` : "";
+  const side = deg === 90 || deg === 270; // 竖图转横图时按视口高宽反过来限制，避免溢出屏幕
+  img.style.maxWidth = side ? "85vh" : "";
+  img.style.maxHeight = side ? "90vw" : "";
+}
+function resetLbRotation() {
+  lbRotateDeg = 0;
+  applyLbRotation();
+}
+function lbRotateView() {
+  lbRotateDeg = (lbRotateDeg + 90) % 360;
+  applyLbRotation();
+  lbShowTools();
 }
 
 /* 下载原图 */
@@ -1353,7 +1331,7 @@ function initLightboxTools() {
   };
   bind("lbToolPlay", toggleSlide);
   bind("lbToolEdit", () => { const p = lbCurrentPhoto(); if (p) openEditModal(p.id); });
-  bind("lbToolRot", lbRotatePhoto);
+  bind("lbToolRot", lbRotateView);
   bind("lbToolDl", lbDownload);
   bind("lbToolAlbum", () => { const p = lbCurrentPhoto(); if (p) openAlbumPicker([p.id]); });
 

@@ -404,6 +404,15 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await wait(100);
     check("再按空格停止幻灯片", !!playBtn && !playBtn.classList.contains("playing"));
+    // v0.45：旋转只作用于灯箱预览（不保存原图），切换图片即复位
+    const rotBtn = doc.getElementById("lbToolRot");
+    if (rotBtn) {
+      clickEl(rotBtn);
+      await wait(250);
+      check("点旋转 = 仅预览旋转 90°", /rotate\(90deg\)/.test(lbImgEl.style.transform || ""), `transform="${lbImgEl.style.transform}"`);
+      await clickAt(lbImgEl, Math.round(w * 0.65)); // 切到下一张
+      check("切换图片后旋转自动复位", !lbImgEl.style.transform, `transform="${lbImgEl.style.transform}"`);
+    }
     // v0.44：点图片以外的空白 → 关闭灯箱
     lbBox.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: Math.round(w * 0.5), clientY: 60 }));
     await wait(300);
