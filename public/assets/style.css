@@ -860,6 +860,38 @@ body[data-page="gallery"] .page {
   column-gap: 16px; 
 }
 
+/* ---- 正方形网格展示（v0.46：像手机相册那样等比方格排列） ---- */
+.masonry.grid-square {
+  columns: unset;
+  column-gap: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 4px;
+  align-content: start;
+}
+.masonry.grid-square .card {
+  margin-bottom: 0;
+  break-inside: auto;
+  border-radius: 4px;
+  /* 卡片的内联 style 里写着原图宽高比（瀑布流用），方格模式要压成 1:1 */
+  aspect-ratio: 1 / 1 !important;
+  contain-intrinsic-size: auto 168px;
+}
+.masonry.grid-square .card:hover {
+  transform: scale(1.02);
+  z-index: 3;
+}
+.masonry.grid-square .card__content { padding: 28px 10px 8px; }
+.masonry.grid-square .card__tags span { font-size: 10px; padding: 2px 7px; }
+@media (max-width: 700px) {
+  .masonry.grid-square {
+    grid-template-columns: repeat(auto-fill, minmax(31vw, 1fr));
+    gap: 3px;
+  }
+  .masonry.grid-square .card { border-radius: 2px; contain-intrinsic-size: auto 31vw; }
+}
+body.perf-lite .masonry.grid-square .card { transition: none; }
+
 .card {
   break-inside: avoid;
   margin-bottom: 18px;

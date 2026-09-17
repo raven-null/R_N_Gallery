@@ -1882,6 +1882,7 @@ function initGallery() {
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(maybeFillViewport);
     else setTimeout(maybeFillViewport, 16);
   }
+  window.__fillViewport = maybeFillViewport; // v0.46：切换正方形网格后把视口补满
   let fillQueued = false;
   window.addEventListener("scroll", () => {
     if (fillQueued) return;
@@ -5068,6 +5069,42 @@ function applyPerfLite(on) {
 try { if (localStorage.getItem(PERF_KEY) === "1") applyPerfLite(true); } catch (e) { /* ignore */ }
 const COLS_KEY = "rn_cols";
 
+/* ---------- 展示方式：瀑布流 / 正方形网格（v0.46） ----------
+   正方形模式给 #grid 加 .grid-square，CSS 把多列瀑布流换成等比方格网格
+   （像手机相册那样排列）；选择记在 localStorage，刷新后保持。 */
+const LAYOUT_KEY = "rn_layout";
+function layoutMode() {
+  try { return localStorage.getItem(LAYOUT_KEY) === "square" ? "square" : "masonry"; } catch (e) { return "masonry"; }
+}
+function applyLayout() {
+  const grid = document.getElementById("grid");
+  const square = layoutMode() === "square";
+  if (grid) grid.classList.toggle("grid-square", square);
+  const btn = document.getElementById("fabLayoutBtn");
+  if (btn) {
+    btn.title = square ? "切换为瀑布流展示" : "切换为正方形网格展示";
+    btn.classList.toggle("on", square);
+    const g = btn.querySelector(".ico-square");
+    const m = btn.querySelector(".ico-masonry");
+    if (g) g.style.display = square ? "" : "none";
+    if (m) m.style.display = square ? "none" : "";
+  }
+  // 方格一屏能放更多张 → 让图库把视口补满（沿用 v0.26 的补足逻辑）
+  if (window.__fillViewport) window.__fillViewport();
+}
+function initLayoutSwitch() {
+  const btn = document.getElementById("fabLayoutBtn");
+  if (btn && btn.dataset.bound !== "1") {
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation(); // 别让 FAB 主按钮把分支收起来
+      try { localStorage.setItem(LAYOUT_KEY, layoutMode() === "square" ? "masonry" : "square"); } catch (err) { /* ignore */ }
+      applyLayout();
+    });
+  }
+  applyLayout();
+}
+
 function applyTheme(pref) {
   const mq = window.matchMedia("(prefers-color-scheme: light)");
   const resolved = pref === "auto" ? (mq.matches ? "light" : "dark") : pref;
@@ -5318,6 +5355,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (__auth.gate && !gateToken()) { showGate(); return; }
   initPageSwitch();
   initGallery();
+  initLayoutSwitch(); // v0.46：瀑布流 / 正方形网格切换（图库初始化后立即应用，避免闪一下）
   initSearch();
   initUpload();
   initSettings();

@@ -512,6 +512,23 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(200);
   }
 
+  /* 展示方式切换（v0.46）：瀑布流 ↔ 正方形网格 */
+  const layoutBtn = doc.getElementById("fabLayoutBtn");
+  const gridEl = doc.getElementById("grid");
+  check("FAB 分支有展示方式切换按钮", !!layoutBtn && !!gridEl);
+  if (layoutBtn && gridEl) {
+    const before = gridEl.classList.contains("grid-square");
+    clickEl(layoutBtn);
+    await wait(400);
+    const afterFirst = gridEl.classList.contains("grid-square");
+    check("点一下切换展示方式", afterFirst !== before, `${before ? "方格" : "瀑布流"} → ${afterFirst ? "方格" : "瀑布流"}`);
+    check("切换后卡片仍在（布局变化不影响渲染）", doc.querySelectorAll("#grid .card").length > 0);
+    check("选择已写入 localStorage", window.localStorage.getItem("rn_layout") === (afterFirst ? "square" : "masonry"));
+    clickEl(layoutBtn);
+    await wait(400);
+    check("再点一下切回原样", gridEl.classList.contains("grid-square") === before);
+  }
+
   /* 库内查重（v0.42）：筛选菜单入口 + 扫描弹窗（本地 seed 里放了两张相同的图） */
   const dupEntry = doc.querySelector('#tagMenuList [data-dupopen]');
   check("筛选菜单有查重入口", !!dupEntry);

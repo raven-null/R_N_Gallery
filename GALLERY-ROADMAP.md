@@ -830,6 +830,20 @@ async function aiTagSearch(query) {
 - 后端 `POST /api/photos/:id/image`（覆盖原图字节）**保留但前端已无调用者** —— 需要真正永久旋转时还能用
 - 测试：新增 2 项断言 —— 「点旋转 = 仅预览旋转 90°（`transform="rotate(90deg)"`）/ 切换图片后旋转自动复位（`transform=""`）」；本地 60/61（未通过项仍是本地数据依赖的那 1 项）
 
+### 批次 40 · 正方形网格展示 + 一键切换（v0.46，2026-09-16）✅
+> 用户要求：除了瀑布流，还要有「全部正方形」的排列（类似手机相册），切换按钮放在 FAB 左分支里（筛选 / 批量选择 / 排序 旁边）。
+- `index.html`：FAB 左分支新增 `#fabLayoutBtn`，内置两个图标（`.ico-masonry` 三列高低块 / `.ico-square` 四宫格），按当前模式显示对应那个
+- `app.js`：
+  - `layoutMode()`（localStorage `rn_layout` = `square` / `masonry`，默认瀑布流）+ `applyLayout()`
+  - 切换时给 `#grid` 加 / 去 `.grid-square`，按钮 title 在「切换为正方形网格展示 / 切换为瀑布流展示」之间切换，并调 `window.__fillViewport()` 把视口补满（方格一屏能放更多张）
+  - 新增 `window.__fillViewport` 钩子（把 v0.26 的 `maybeFillViewport` 暴露出来），供布局切换后复用
+  - 点击切换按钮 `stopPropagation()`，不会把 FAB 分支意外收起
+- `style.css`：`.masonry.grid-square` 把 `columns` 换成 `display: grid` + `repeat(auto-fill, minmax(168px, 1fr))` + `gap: 4px`（手机相册那种紧密方格）；卡片 `aspect-ratio: 1/1 !important` 覆盖掉内联的原图宽高比、圆角收到 4px、`contain-intrinsic-size` 跟着改成方格高度（避免滚动时高度估算错）
+  - 窄屏（≤700px）：`minmax(31vw, 1fr)` + `gap: 3px` → 约 3 列，接近手机相册
+  - 悬停信息条（标签 / 日期）与选中、拖拽、双击编辑、多选等交互在两种模式下都照旧工作
+- 测试：新增 5 项断言 —— 「FAB 分支有展示方式切换按钮 / 点一下切换展示方式 / 切换后卡片仍在（布局变化不影响渲染）/ 选择已写入 localStorage / 再点一下切回原样」；本地 65/66（未通过项仍是本地数据依赖的那 1 项）
+
+
 
 
 
