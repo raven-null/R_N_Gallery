@@ -1218,6 +1218,8 @@ body[data-page="gallery"] .page {
   align-items: center;
   justify-content: center;
   padding: 40px;
+  /* v0.43：横向手势留给「左右滑动切图」，纵向滚动与双指缩放仍交给浏览器 */
+  touch-action: pan-y pinch-zoom;
 }
 .lightbox.open { 
   display: flex; 
@@ -1294,8 +1296,8 @@ body[data-page="gallery"] .page {
   transform: translateY(-50%) scale(0.95);
   transition-duration: 0.1s;
 }
-.lightbox .lb-prev { left: 20px; }
-.lightbox .lb-next { right: 20px; }
+/* v0.43：‹ › 按钮已删除 —— 切图改为点左 / 右区域、左右滑动 */
+.lightbox .lb-img-wrap { cursor: pointer; }
 .lightbox .lb-close { 
   top: 20px; 
   transform: none; 
@@ -2065,8 +2067,6 @@ input.settings-value:focus {
   .lightbox { flex-direction: column; padding: 20px; gap: 16px; }
   .lightbox .lb-img-wrap { max-height: 50vh; }
   .lightbox img { max-height: 50vh; }
-  .lightbox .lb-prev { left: 8px; }
-  .lightbox .lb-next { right: 8px; }
   .fab-group { right: 16px; bottom: 20px; }
   .fab-main { width: 48px; height: 48px; }
   .fab-main svg { width: 22px; height: 22px; }

@@ -1369,6 +1369,44 @@ function initLightboxTools() {
   });
 }
 
+/* v0.43：灯箱切换改为「点击左右区域」+ 移动端左右滑动（原先的 ‹ › 按钮已删除） */
+function initLightboxNav() {
+  const lb = lbEl();
+  if (!lb || lb.dataset.navBound === "1") return;
+  lb.dataset.navBound = "1";
+  let suppressClick = 0;
+
+  lb.addEventListener("click", (e) => {
+    if (e.target.closest("button")) return;          // 关闭按钮 / 右下角工具条按钮
+    if (e.target.closest(".lb-tools-float")) return;
+    if (Date.now() < suppressClick) return;          // 刚滑动过 → 忽略尾随的 click
+    const w = lb.clientWidth || window.innerWidth || 1;
+    if ((e.clientX || 0) < w / 2) lbStep(-1);        // 点左半边 = 上一张
+    else lbStep(1);                                  // 点右半边 = 下一张
+  });
+
+  let sx = 0, sy = 0, tracking = false;
+  const pt = (e) => (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || null;
+  lb.addEventListener("touchstart", (e) => {
+    const t = pt(e);
+    if (!t) return;
+    sx = t.clientX;
+    sy = t.clientY;
+    tracking = true;
+  }, { passive: true });
+  lb.addEventListener("touchend", (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const t = pt(e);
+    if (!t) return;
+    const dx = t.clientX - sx, dy = t.clientY - sy;
+    if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.4) return; // 太短或偏纵向 → 不算滑动
+    suppressClick = Date.now() + 400;
+    if (dx < 0) lbStep(1);   // 左滑 = 下一张
+    else lbStep(-1);         // 右滑 = 上一张
+  }, { passive: true });
+}
+
 /* 幻灯片间隔设置（v0.13，v0.38 随工具条恢复） */
 function initSlideSetting() {
   const seg = document.getElementById("slideSeg");
@@ -1915,16 +1953,12 @@ function initGallery() {
     openLightbox(id);
   });
 
-  // 灯箱（全局实现 openLightboxById；←→ / 幻灯片按当前筛选视图顺序切换）
+  // 灯箱（全局实现 openLightboxById；←→ / 点击左右区域 / 左右滑动 按当前筛选视图顺序切换）
   const openLightbox = openLightboxById;
   const lbCloseEl = document.querySelector(".lb-close");
-  const lbPrevEl = document.querySelector(".lb-prev");
-  const lbNextEl = document.querySelector(".lb-next");
   const step = (d) => lbStep(d); // v0.38：切图逻辑抽到全局，灯箱悬浮工具条 / 幻灯片共用
   window.__lbStepList = () => (filtered.length && filtered.some((x) => x.id === lightbox.dataset.cur) ? filtered : PHOTOS);
   if (lbCloseEl) lbCloseEl.onclick = () => closeLightbox();
-  if (lbPrevEl) lbPrevEl.onclick = () => step(-1);
-  if (lbNextEl) lbNextEl.onclick = () => step(1);
   document.addEventListener("keydown", (e) => {
     if (!lightbox.classList.contains("open")) return;
     if (e.key === "ArrowLeft") step(-1);
@@ -3015,7 +3049,8 @@ function initAlbumPage() {
 
   let gx = 0, gy = 0, gtrack = false;
   document.addEventListener("touchstart", (e) => {
-    if (albOpenFlag || e.touches.length !== 1) return;
+    // v0.43：灯箱打开时手势归灯箱（左右滑动切图），不要同时触发「左滑进相册」
+    if (albOpenFlag || lbIsOpen() || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (window.innerWidth - t.clientX > 60) return; // 仅右边缘 60px 内起手
     gx = t.clientX; gy = t.clientY; gtrack = true;
@@ -5311,6 +5346,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initSortMenu();
   initEditModal();
   initLightboxTools(); // v0.38：灯箱右下角悬浮工具条 + 幻灯片
+  initLightboxNav();   // v0.43：点击左右区域 / 左右滑动切换
   initSlideSetting();
   initDupFinder(); // v0.42：库内重复 / 相似图片扫描
   initUqModal();

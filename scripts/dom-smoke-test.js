@@ -367,6 +367,34 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     lbBox.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 400, clientY: 300 }));
     await wait(100);
     check("鼠标移动后工具条浮现", lbBox.classList.contains("tools-visible"));
+    // v0.43：‹ › 按钮删除，改点左 / 右区域 + 左右滑动切图
+    check("灯箱不再有上一张 / 下一张按钮", !doc.querySelector(".lightbox .lb-prev") && !doc.querySelector(".lightbox .lb-next"));
+    const cur0 = lbBox.dataset.cur;
+    const clickAt = async (x) => {
+      lbBox.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: x, clientY: 400 }));
+      await wait(300);
+      return lbBox.dataset.cur;
+    };
+    const w = window.innerWidth || 1024;
+    const afterLeft = await clickAt(Math.round(w * 0.15));
+    check("点灯箱左侧切到上一张", !!afterLeft && afterLeft !== cur0, `${cur0} → ${afterLeft}`);
+    const afterRight = await clickAt(Math.round(w * 0.85));
+    check("点灯箱右侧切回下一张", afterRight === cur0, `${afterLeft} → ${afterRight}`);
+    // 左右滑动（移动端）：模拟 touch 事件
+    const mkTouch = (type, x) => {
+      const ev = new window.Event(type, { bubbles: true });
+      ev.changedTouches = [{ clientX: x, clientY: 400 }];
+      ev.touches = [{ clientX: x, clientY: 400 }];
+      return ev;
+    };
+    lbBox.dispatchEvent(mkTouch("touchstart", Math.round(w * 0.7)));
+    lbBox.dispatchEvent(mkTouch("touchend", Math.round(w * 0.2))); // 左滑 → 下一张
+    await wait(300);
+    check("左滑切到下一张", lbBox.dataset.cur !== cur0, `${cur0} → ${lbBox.dataset.cur}`);
+    lbBox.dispatchEvent(mkTouch("touchstart", Math.round(w * 0.2)));
+    lbBox.dispatchEvent(mkTouch("touchend", Math.round(w * 0.7))); // 右滑 → 上一张
+    await wait(300);
+    check("右滑切回上一张", lbBox.dataset.cur === cur0, `→ ${lbBox.dataset.cur}`);
     doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await wait(100);
     const playBtn = doc.getElementById("lbToolPlay");
