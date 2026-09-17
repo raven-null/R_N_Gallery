@@ -219,6 +219,7 @@ exports.config = {
     "/api/meta/logs",
     "/api/auth/state",
     "/api/auth/login",
+    "/api/auth/tagger", // v0.51：设置整理模式密码（漏加这个会让请求直接 404）
   ],
 };
 

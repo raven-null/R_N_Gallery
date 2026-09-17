@@ -710,6 +710,33 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("safe=1 列表里没有 R18 / R16 图片", false, e.message);
   }
 
+  /* v0.53：所有前端会用到的接口都必须挂载在函数的 config.path 里（漏加会直接 404） */
+  {
+    const hdr = Object.assign({ "Content-Type": "application/json" }, TOKEN ? { "X-Auth-Token": TOKEN } : {});
+    const q = TOKEN ? `token=${encodeURIComponent(TOKEN)}` : "";
+    const withToken = (p) => `${BASE}${p}${q ? (p.includes("?") ? "&" : "?") + q : ""}`;
+    const probes = [
+      ["GET", "/api/auth/state"],
+      ["POST", "/api/auth/login"],
+      ["POST", "/api/auth/tagger"],
+      ["GET", "/api/photos?limit=1"],
+      ["GET", "/api/tags"],
+      ["GET", "/api/albums"],
+      ["GET", "/api/meta/stats"],
+      ["GET", "/api/meta/logs"],
+    ];
+    const missing = [];
+    for (const [m, p] of probes) {
+      try {
+        const r = await fetch(withToken(p), { method: m, headers: hdr, body: m === "POST" ? "{}" : undefined });
+        if (r.status === 404) missing.push(`${m} ${p}`);
+      } catch (e) {
+        missing.push(`${m} ${p}(${e.message})`);
+      }
+    }
+    check("接口都已挂载（没有 404）", missing.length === 0, missing.length ? `404：${missing.join(" / ")}` : `${probes.length} 个接口均可达`);
+  }
+
   /* v0.52：设置页输入框里打字不该被键盘快捷键抢走（整理视图的 1-9 曾吞掉密码里的数字） */
   if (window.__refreshTagManager) {
     window.localStorage.setItem("rn_tmgr_view", "review"); // 让整理视图的键盘流挂上
