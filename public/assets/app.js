@@ -481,6 +481,7 @@ const mapPhoto = (p) => ({
 async function fetchPhotosPage(cursor, limit) {
   const qs = new URLSearchParams({ limit: String(limit) });
   if (cursor) qs.set("cursor", String(cursor));
+  if (adultHidden()) qs.set("safe", "1"); // v0.49 观光模式：服务端列表里也剔除成人向图片
   const res = await fetch(`/api/photos?${qs}`, { headers: apiHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error("api unavailable");
   return res.json();
@@ -494,8 +495,9 @@ async function backgroundLoad(cursor) {
   try {
     while (c) {
       const page = await fetchPhotosPage(c, NEXT_PAGE);
-      const items = (page.photos || []).map(mapPhoto);
-      if (!items.length) break;
+      const raw = (page.photos || []).map(mapPhoto);
+      if (!raw.length) break; // 用原始条数判断是否还有下一页（v0.49：过滤成人向不能让分页提前结束）
+      const items = adultHidden() ? raw.filter((p) => !isAdult(p)) : raw; // v0.49 观光模式双保险
       const known = new Set(PHOTOS.map((p) => p.id));
       PHOTOS.push(...items.filter((p) => !known.has(p.id)));
       c = page.cursor || null;
@@ -510,7 +512,7 @@ async function loadData() {
   showGalleryState("loading");
   try {
     const first = await fetchPhotosPage(null, FIRST_PAGE);
-    PHOTOS = (first.photos || []).map(mapPhoto);
+    PHOTOS = (first.photos || []).map(mapPhoto).filter((p) => !adultHidden() || !isAdult(p)); // v0.49 观光模式双保险
     USE_API = true;
     showGalleryState(null); // 由 render 决定显示图片或空态
     if (first.hasMore) backgroundLoad(first.cursor); // 剩余的后台补齐
@@ -600,6 +602,154 @@ async function requestR18Key() {
 }
 window.requestR18Key = requestR18Key;
 
+/* ---------- 观光 / 管理员模式（v0.49） ----------
+   观光模式（默认）：只能看图与下载（外加筛选/搜索/排序/布局切换这些纯浏览辅助），
+   带 R18 / R16 标签的图片直接隐藏 —— 除非管理员打开了「允许观光观看」。
+   管理员模式：全部功能、全部图片。切换需要输入「访问密码」（复用 v0.16 的登录接口）。 */
+const MODE_KEY = "rn_mode";
+const GUEST_ADULT_KEY = "rn_guest_adult";
+const GUEST_VISIT_KEY = "rn_guest_visit"; // 观光访客：没有访问密码也允许只读浏览
+function guestVisiting() {
+  try { return localStorage.getItem(GUEST_VISIT_KEY) === "1"; } catch (e) { return false; }
+}
+function modeValue() {
+  try { return localStorage.getItem(MODE_KEY) === "admin" ? "admin" : "guest"; } catch (e) { return "guest"; }
+}
+function isAdmin() { return modeValue() === "admin"; }
+function guestAdultAllowed() {
+  try { return localStorage.getItem(GUEST_ADULT_KEY) === "1"; } catch (e) { return false; }
+}
+/* R16 判定：独立字段 r16 / 标签含 r16 / 主分类含 r16（与 R18 同一套规则） */
+function isR16(p) {
+  if (!p) return false;
+  if (p.r16 === true) return true;
+  if (Array.isArray(p.tags) && p.tags.some((t) => String(t).trim().toLowerCase() === "r16")) return true;
+  return catsOf(p).some((c) => String(c).trim().toLowerCase() === "r16");
+}
+function isAdult(p) { return isR18(p) || isR16(p); }
+/* 现在是否需要隐藏成人向图片 */
+function adultHidden() { return !isAdmin() && !guestAdultAllowed(); }
+
+function applyMode() {
+  const guest = !isAdmin();
+  document.body.classList.toggle("mode-guest", guest);
+  document.body.classList.toggle("mode-admin", !guest);
+  const btn = document.getElementById("fabModeBtn");
+  if (btn) {
+    btn.title = guest ? "观光模式 · 点此输入访问密码进入管理员模式" : "管理员模式 · 点此退出到观光模式";
+    btn.classList.toggle("on", !guest);
+    const g = btn.querySelector(".ico-guest");
+    const a = btn.querySelector(".ico-admin");
+    if (g) g.style.display = guest ? "" : "none";
+    if (a) a.style.display = guest ? "none" : "";
+  }
+  const state = document.getElementById("modeState");
+  if (state) state.textContent = guest ? "观光模式" : "管理员模式";
+  const box = document.getElementById("guestAdult");
+  if (box) box.checked = guestAdultAllowed();
+}
+
+/* 初始化：优先用上次的选择；首次访问时——已通过门禁登录算管理员，否则观光 */
+function initMode() {
+  let saved = null;
+  try { saved = localStorage.getItem(MODE_KEY); } catch (e) { /* ignore */ }
+  if (saved !== "admin" && saved !== "guest") {
+    saved = gateToken() ? "admin" : "guest";
+    try { localStorage.setItem(MODE_KEY, saved); } catch (e) { /* ignore */ }
+  }
+  applyMode();
+}
+function setMode(mode) {
+  try { localStorage.setItem(MODE_KEY, mode); } catch (e) { /* ignore */ }
+  applyMode();
+}
+/* 观光模式下拦住管理类操作；返回 true 表示已拦下 */
+function guestBlocked(what) {
+  if (isAdmin()) return false;
+  alert(`观光模式下${what ? "不能" + what : "此功能不可用"}。\n输入访问密码切换到管理员模式后即可使用。`);
+  return true;
+}
+window.__modeState = () => ({
+  mode: modeValue(),
+  guestAdultAllowed: guestAdultAllowed(),
+  photos: PHOTOS.length,
+  adultVisible: PHOTOS.filter(isAdult).length,
+});
+window.__setMode = setMode; // 测试钩子：切换观光 / 管理员
+window.__guestBlocked = guestBlocked;
+
+/* 模式切换弹窗：观光 → 输访问密码；管理员 → 确认退出 */
+function openModeModal() {
+  if (isAdmin()) {
+    askConfirm("退出管理员模式？", "将回到观光模式：管理功能隐藏，带 R18 / R16 标签的图片也会隐藏（除非已允许观光观看）。", "退出", () => {
+      setMode("guest");
+      location.reload();
+    });
+    return;
+  }
+  const m = document.getElementById("modeModal");
+  if (!m) return;
+  const inp = document.getElementById("modePwd");
+  const err = document.getElementById("modeErr");
+  if (inp) inp.value = "";
+  if (err) { err.textContent = ""; err.style.display = "none"; }
+  m.classList.add("open");
+  setTimeout(() => { if (inp) inp.focus(); }, 80);
+}
+async function submitModeLogin() {
+  const inp = document.getElementById("modePwd");
+  const err = document.getElementById("modeErr");
+  const btn = document.getElementById("modeOk");
+  const v = (inp && inp.value || "").trim();
+  if (!v) {
+    if (err) { err.textContent = "请输入访问密码"; err.style.display = "block"; }
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: v }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || "密码错误");
+    }
+    localStorage.setItem(TOKEN_KEY, v); // 管理类操作需要凭证
+    try { localStorage.removeItem(GUEST_VISIT_KEY); } catch (e) { /* ignore */ }
+    setMode("admin");
+    location.reload();
+  } catch (e) {
+    if (err) { err.textContent = e.message || "验证失败"; err.style.display = "block"; }
+  }
+  if (btn) btn.disabled = false;
+}
+function initModeModal() {
+  const m = document.getElementById("modeModal");
+  if (!m || m.dataset.bound === "1") return;
+  m.dataset.bound = "1";
+  const close = () => m.classList.remove("open");
+  const c = document.getElementById("modeCancel");
+  if (c) c.onclick = close;
+  const ok = document.getElementById("modeOk");
+  if (ok) ok.onclick = submitModeLogin;
+  const inp = document.getElementById("modePwd");
+  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") submitModeLogin(); });
+  const fbtn = document.getElementById("fabModeBtn");
+  if (fbtn) fbtn.addEventListener("click", (e) => { e.stopPropagation(); openModeModal(); });
+  const sbtn = document.getElementById("btnModeSwitch");
+  if (sbtn) sbtn.onclick = openModeModal;
+  const adult = document.getElementById("guestAdult");
+  if (adult) {
+    adult.addEventListener("change", () => {
+      if (guestBlocked("修改该开关")) { adult.checked = guestAdultAllowed(); return; }
+      try { localStorage.setItem(GUEST_ADULT_KEY, adult.checked ? "1" : "0"); } catch (e) { /* ignore */ }
+      applyMode();
+    });
+  }
+}
+
 /* 门禁页：登录成功后写入 token 并重载（让所有请求与图片 URL 都带上凭证） */
 function showGate() {
   const page = document.getElementById("gatePage");
@@ -634,6 +784,17 @@ function showGate() {
   };
   btn.onclick = submit;
   input.onkeydown = (e) => { if (e.key === "Enter") submit(); };
+  // v0.49：不输密码也能进——观光模式（只读 + 隐藏 R18 / R16）
+  const guestBtn = document.getElementById("gateGuestBtn");
+  if (guestBtn) {
+    guestBtn.onclick = () => {
+      try {
+        localStorage.setItem(GUEST_VISIT_KEY, "1");
+        localStorage.setItem(MODE_KEY, "guest");
+      } catch (e) { /* ignore */ }
+      location.reload();
+    };
+  }
   setTimeout(() => input.focus(), 60);
 }
 
@@ -665,6 +826,7 @@ function initAuthSettings() {
         body: JSON.stringify({ next: v }),
       });
       localStorage.setItem(TOKEN_KEY, v); // 本机同步为新密码，避免自己立刻被登出
+      try { localStorage.removeItem(GUEST_VISIT_KEY); } catch (e) { /* ignore */ }
       pwdInput.value = "";
       window.alert("访问密码已更新");
       if (window.__refreshAuthState) window.__refreshAuthState();
@@ -1034,6 +1196,7 @@ function dupKeepNewest(gi) {
 }
 
 async function openDupFinder() {
+  if (guestBlocked("查重")) return; // v0.49
   const m = document.getElementById("dupModal");
   if (!m) return;
   m.classList.add("open");
@@ -1723,7 +1886,7 @@ function renderTagMenuContent() {
     // 无任何可筛选项时的空态提示 + AI 智能搜索入口（启用时）
     const noFilterable = !groups.some((g) => TAGS.tags.some((t) => t.group === g.id && counts[t.name] > 0)) && !freeList.length;
     if (noFilterable) {
-      if (q && aiEnabled()) {
+      if (q && aiEnabled() && isAdmin()) { // v0.49：观光模式不给 AI 入口
         html += `<button class="tag-menu-item ai-run" data-ai-q="${escAttr(q)}" title="${t("用 AI 理解自然语言", "Ask AI")}">
           <span class="nm">🤖 ${t("AI 智能搜索", "AI search")}「${esc(q)}」</span><span class="cnt">›</span></button>`;
       } else {
@@ -1731,9 +1894,11 @@ function renderTagMenuContent() {
       }
     }
   }
-  // 查重入口（v0.42）：扫描库内完全相同 / 相似的图片（不受当前筛选影响）
-  html += `<button class="tag-menu-item dup-entry" data-dupopen="1" title="${t("扫描库内完全相同 / 相似的图片", "Scan for duplicate / similar photos")}">
-    <span class="nm">🔍 ${t("查找重复 / 相似图片", "Find duplicates")}</span><span class="cnt">›</span></button>`;
+  // 查重入口（v0.42）：扫描库内完全相同 / 相似的图片（不受当前筛选影响；v0.49 仅管理员可用）
+  if (isAdmin()) {
+    html += `<button class="tag-menu-item dup-entry" data-dupopen="1" title="${t("扫描库内完全相同 / 相似的图片", "Scan for duplicate / similar photos")}">
+      <span class="nm">🔍 ${t("查找重复 / 相似图片", "Find duplicates")}</span><span class="cnt">›</span></button>`;
+  }
   list.innerHTML = html;
 }
 
@@ -1924,7 +2089,7 @@ function initGallery() {
     // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
     // 老数据缺尺寸时不写，退回原来的自然高度
     const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";
-    return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="true" title="单击看大图 · 双击编辑"${ratio}>
+    return `<div class="card${selected.has(p.id) ? " sel" : ""}" data-id="${p.id}" draggable="${isAdmin()}" title="单击看大图 · 双击编辑"${ratio}>
       <img loading="lazy" decoding="async" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
       <button class="pick" title="选中">✓</button>
       <div class="card__content">
@@ -2610,6 +2775,7 @@ async function applyBatchTag() {
 /* ---------- 单张编辑弹窗（v0.11.2：标签 / 删除；v0.41 描述已移除） ---------- */
 let editTargetId = null;
 function openEditModal(id) {
+  if (guestBlocked("编辑图片")) return; // v0.49 观光模式只能看图
   const p = PHOTOS.find((x) => x.id === id);
   if (!p) return;
   editTargetId = id;
@@ -2947,6 +3113,7 @@ function renderAlbumList() {
 }
 
 function openAlbumPicker(ids) {
+  if (guestBlocked("加入相册")) return; // v0.49
   albumPickerIds = ids;
   renderAlbumList();
   const hint = document.getElementById("albumHint");
@@ -3072,6 +3239,7 @@ function initAlbumPage() {
   const addBtn = document.getElementById("albAddBtn");
   if (addBtn) {
     addBtn.addEventListener("click", () => {
+      if (guestBlocked("新建相册")) return; // v0.49 观光模式只能浏览相册
       if (!newBar) return;
       newBar.hidden = !newBar.hidden;
       if (!newBar.hidden && newInput) { newInput.value = ""; newInput.focus(); }
@@ -3083,6 +3251,7 @@ function initAlbumPage() {
     newInput.addEventListener("keydown", async (e) => {
       if (e.key !== "Enter") return;
       e.preventDefault();
+      if (guestBlocked("新建相册")) return;
       const name = newInput.value.trim();
       if (!name) return;
       ALBUMS.albums.push({ id: "", name, photoIds: [], sort: ALBUMS.albums.length });
@@ -3106,6 +3275,7 @@ function initAlbumPage() {
     }
     const actBtn = e.target.closest("[data-alb-act]");
     if (actBtn && albLevel === "album") {
+      if (guestBlocked("管理相册")) return; // v0.49
       const cur = albumOf(albCurrentId);
       if (!cur) return;
       if (actBtn.dataset.albAct === "del") {
@@ -3134,6 +3304,7 @@ function initAlbumPage() {
     if (!photo) return;
     const id = photo.dataset.id;
     if (e.target.closest("[data-alb-out]")) {
+      if (guestBlocked("管理相册")) return; // v0.49
       const cur = albumOf(albCurrentId);
       if (!cur) return;
       cur.photoIds = cur.photoIds.filter((x) => x !== id);
@@ -3515,8 +3686,9 @@ let aiChatHistory = [];
 function updateAiFab() {
   const fab = document.getElementById("aiFab");
   if (!fab) return;
-  fab.hidden = !aiEnabled();
-  if (!aiEnabled()) closeAiChat();
+  const on = aiEnabled() && isAdmin(); // v0.49：观光模式不显示 AI 助手
+  fab.hidden = !on;
+  if (!on) closeAiChat();
 }
 function closeAiChat() {
   aiChatOpen = false;
@@ -5453,7 +5625,7 @@ function initSearch() {
     count.hidden = false;
     count.textContent = `${t("找到", "Found")} ${list.length} ${t("张", "photos")}`;
     if (!list.length) {
-      const aiPart = aiEnabled()
+      const aiPart = (aiEnabled() && isAdmin())
         ? `<div style="grid-column:1/-1;display:flex;justify-content:center;margin-top:-6px"><button class="btn ghost sm ai-empty-btn" id="aiNlBtn">✨ 让 AI 理解这句搜索</button></div>`
         : "";
       results.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></div>没有找到与「${esc(q)}」相关的图片</div>${aiPart}`;
@@ -5486,7 +5658,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   showGalleryState("loading");
   /* 访问密码门禁（v0.16）：启用了密码且本机没有凭证时，先登录、不加载任何数据 */
   const __auth = await fetchAuthState();
-  if (__auth.gate && !gateToken()) { showGate(); return; }
+  if (__auth.gate && !gateToken() && !guestVisiting()) { showGate(); return; }
+  // v0.49：观光访客（没输密码点了「以观光模式浏览」）→ 固定为观光模式
+  if (__auth.gate && !gateToken() && guestVisiting()) {
+    try { localStorage.setItem(MODE_KEY, "guest"); } catch (e) { /* ignore */ }
+  }
+  initMode();          // v0.49：观光 / 管理员模式（必须在加载数据前定好，观光模式要过滤成人向图片）
+  initModeModal();
   initPageSwitch();
   initGallery();
   initLayoutSwitch(); // v0.46：瀑布流 / 正方形网格切换（图库初始化后立即应用，避免闪一下）
@@ -5670,6 +5848,11 @@ function initPageSwitch() {
   function openWindow(page) {
     const el = panels[page];
     if (!el || animating) return;
+    // v0.49 观光模式：上传 / 标签管理 / 设置这些管理窗口一律不给开（搜索是只读的，放行）
+    if (!isAdmin() && page !== "search") {
+      guestBlocked(page === "upload" ? "上传图片" : page === "tags" ? "管理标签" : "打开设置");
+      return;
+    }
     const existed = openStack.includes(page);
     if (!existed) {
       openStack.push(page);

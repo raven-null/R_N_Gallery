@@ -2899,6 +2899,25 @@ body.select-mode .card .pick { display: grid; }
 .tag-menu-item.dup-entry { margin-top: 6px; border-top: 1px solid var(--w008); border-radius: 0 0 10px 10px; }
 body.perf-lite .dup-modal { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
+/* ============================================================
+   观光模式（v0.49）：只留「看图 + 下载」，管理类入口整块隐藏
+   保留：筛选 / 搜索 / 排序 / 布局切换 / 相册浏览 / 灯箱（旋转缩放下载幻灯片）
+   ============================================================ */
+body.mode-guest #fabSelectBtn,        /* 批量选择 */
+body.mode-guest #aiFab,               /* AI 助手 */
+body.mode-guest .ai-empty-btn,        /* 搜索里的 AI 入口 */
+body.mode-guest .page-menu-item[data-page="upload"],
+body.mode-guest .page-menu-item[data-page="tags"],
+body.mode-guest .page-menu-item[data-page="settings"],
+body.mode-guest #lbToolEdit,          /* 灯箱：编辑 */
+body.mode-guest #lbToolAlbum,         /* 灯箱：加入相册 */
+body.mode-guest #albAddBtn,           /* 相册页：新建相册 */
+body.mode-guest #albNewBar,
+body.mode-guest [data-alb-act],       /* 相册：重命名 / 删除 */
+body.mode-guest [data-alb-out],       /* 相册：移出图片 */
+body.mode-guest #batchBar             /* 底部批量操作条 */
+{ display: none !important; }
+
 /* ---------- 日志弹窗（v0.12） ---------- */
 .logs-modal { max-width: 560px; }.logs-list {
   display: flex;

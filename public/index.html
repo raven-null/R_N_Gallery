@@ -18,6 +18,8 @@
       <input type="password" id="gateInput" class="gate-input" placeholder="访问密码" autocomplete="current-password">
       <div class="gate-err" id="gateErr"></div>
       <button class="btn primary gate-btn" id="gateEnter">进入</button>
+      <button class="btn ghost gate-btn" id="gateGuestBtn" type="button" style="margin-top:10px">以观光模式浏览</button>
+      <p class="gate-sub" style="margin-top:8px;font-size:12px">观光模式：只能看图与下载，带 r18 / r16 标签的内容不显示</p>
     </div>
   </div>
 
@@ -357,10 +359,24 @@
         </div>
       </div>
 
-      <!-- 访问与保护（v0.16：访问密码 / R18 密钥） -->
+      <!-- 访问与保护（v0.16：访问密码 / R18 密钥；v0.49：观光 / 管理员模式） -->
       <div class="settings-section">
         <div class="settings-section-title">访问与保护</div>
         <div class="settings-group">
+          <div class="settings-row">
+            <span class="settings-label">当前模式<span class="settings-sub">观光模式只能看图与下载，并隐藏 R18 / R16</span></span>
+            <span class="settings-value">
+              <b id="modeState">观光模式</b>
+              <button class="btn ghost sm" id="btnModeSwitch" type="button" style="margin-left:10px">切换</button>
+            </span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">允许观光模式观看 R18 / R16<span class="settings-sub">关闭时，观光模式下带 r18 / r16 标签的图片一律隐藏</span></span>
+            <label class="switch" title="仅管理员可修改">
+              <input type="checkbox" id="guestAdult">
+              <span class="slider"></span>
+            </label>
+          </div>
           <div class="settings-row">
             <span class="settings-label">访问密码</span>
             <span class="settings-value" id="authGateState">检测中…</span>
@@ -382,7 +398,7 @@
             <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </div>
-        <div class="settings-footer">访问密码保护整个图库；R18 密钥只锁 R18 内容（标签 r18 / 主分类 R18 / 编辑里勾选 R18）。初始密码取自 Netlify 环境变量 ADMIN_TOKEN，忘记时可在 Netlify 改环境变量后清空 Blobs 的 auth-config 重新初始化。</div>
+        <div class="settings-footer">访问密码保护整个图库，同时也是「管理员模式」的密码；R18 密钥只锁 R18 内容（标签 r18 / 主分类 R18 / 编辑里勾选 R18）。初始密码取自 Netlify 环境变量 ADMIN_TOKEN，忘记时可在 Netlify 改环境变量后清空 Blobs 的 auth-config 重新初始化。</div>
       </div>
 
       <!-- 危险区 -->
@@ -604,6 +620,25 @@
     </div>
   </div>
 
+  <!-- 管理员模式密码弹窗（v0.49） -->
+  <div class="modal-mask" id="modeModal">
+    <div class="modal">
+      <h3>进入管理员模式</h3>
+      <div class="hint" style="margin:-2px 0 12px">输入访问密码即可使用全部功能（上传 / 编辑 / 删除 / 标签管理），并能查看 R18 / R16 图片。</div>
+      <form class="tag-form" onsubmit="return false">
+        <div class="field">
+          <label>访问密码</label>
+          <input type="password" id="modePwd" autocomplete="current-password" placeholder="输入访问密码">
+        </div>
+        <div class="hint" id="modeErr" style="display:none;color:var(--danger)"></div>
+      </form>
+      <div class="m-actions">
+        <button class="btn ghost" id="modeCancel" type="button">取消</button>
+        <button class="btn" id="modeOk" type="button">进入管理员模式</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 重复 / 相似图片（v0.42） -->
   <div class="modal-mask" id="dupModal">
     <div class="modal dup-modal">
@@ -720,6 +755,11 @@
       <button class="fab fab-page" id="fabLayoutBtn" title="切换为正方形网格展示">
         <svg class="ico-masonry" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="11" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="17" width="7" height="4" rx="1.5"/><rect x="14" y="13" width="7" height="8" rx="1.5"/></svg>
         <svg class="ico-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
+      </button>
+      <!-- 观光 / 管理员模式（v0.49） -->
+      <button class="fab fab-page" id="fabModeBtn" title="观光模式 · 点此输入访问密码进入管理员模式">
+        <svg class="ico-guest" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 12S5 5.5 12 5.5 22.5 12 22.5 12 19 18.5 12 18.5 1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="ico-admin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M12 2.5l7.5 3v6c0 4.6-3.1 8.6-7.5 10-4.4-1.4-7.5-5.4-7.5-10v-6z"/><path d="M9 12l2 2 4-4"/></svg>
       </button>
     </div>
     <!-- 主按钮（悬停展开两支） -->

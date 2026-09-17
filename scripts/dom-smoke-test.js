@@ -59,6 +59,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     return fetch(abs, o);
   };
   window.localStorage.setItem("rn_perf_lite", "1"); // 打开性能模式，覆盖图片回收分支
+  window.localStorage.setItem("rn_mode", "admin");   // v0.49：测试以管理员模式跑（观光模式另有专门断言）
   if (TOKEN) window.localStorage.setItem("rn_token", TOKEN); // 线上门禁：预置访问凭证，否则会停在登录页
 
   window.eval(fs.readFileSync(path.join(ROOT, "public", "assets", "app.js"), "utf8"));
@@ -619,6 +620,41 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   } catch (e) {
     check("清道夫：无历史残留测试标签", false, e.message);
+  }
+
+  /* 观光 / 管理员模式（v0.49） */
+  const modeSt = window.__modeState ? window.__modeState() : null;
+  check("默认以管理员模式运行（测试前置）", !!modeSt && modeSt.mode === "admin", modeSt ? modeSt.mode : "无");
+  if (modeSt) {
+    // 观光模式下：管理入口被拦、编辑弹窗打不开
+    window.__setMode("guest");
+    await wait(200);
+    check("切换到观光模式后 body 带 mode-guest", doc.body.classList.contains("mode-guest") && !doc.body.classList.contains("mode-admin"));
+    check("观光模式拦下管理操作", window.__guestBlocked("编辑图片") === true);
+    const modalBefore = doc.getElementById("editModal").classList.contains("open");
+    if (firstCard) {
+      firstCard.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
+      await wait(300);
+      check("观光模式双击卡片不会打开编辑弹窗",
+        !modalBefore && !doc.getElementById("editModal").classList.contains("open"));
+    }
+    check("观光模式查重入口被拦", window.__guestBlocked("查重") === true);
+    // 恢复管理员模式（后续断言依赖）
+    window.__setMode("admin");
+    await wait(200);
+    check("切回管理员模式", doc.body.classList.contains("mode-admin") && doc.getElementById("editModal") !== null);
+  }
+  /* 服务端 safe=1：观光模式的列表里不返回带 r18 / r16 标签的图片 */
+  try {
+    const all = await (await fetch(`${BASE}/api/photos?limit=300${TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""}`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} })).json();
+    const safe = await (await fetch(`${BASE}/api/photos?limit=300&safe=1${TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""}`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} })).json();
+    const adult = (all.photos || []).filter((p) => (p.tags || []).some((t) => ["r18", "r16"].includes(String(t).trim().toLowerCase())));
+    const adultInSafe = (safe.photos || []).filter((p) => (p.tags || []).some((t) => ["r18", "r16"].includes(String(t).trim().toLowerCase())));
+    check("safe=1 列表里没有 R18 / R16 图片",
+      adultInSafe.length === 0 && (safe.total || 0) === (all.total || 0) - adult.length,
+      `全部 ${all.total} · 成人向 ${adult.length} · safe ${safe.total}`);
+  } catch (e) {
+    check("safe=1 列表里没有 R18 / R16 图片", false, e.message);
   }
 
   const failed = results.filter((x) => !x).length;

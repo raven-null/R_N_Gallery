@@ -22,7 +22,7 @@
 const {
   store, json, notFound, badRequest, serverError, unauthorized,
   nanoid, imageSize, sniffMime,
-  authConfig, saveAuthConfig, checkAuth, checkR18, isR18Photo, sha256hex,
+  authConfig, saveAuthConfig, checkAuth, checkR18, isR18Photo, isR16Photo, isAdultPhoto, sha256hex,
 } = require("./_lib");
 const crypto = require("crypto");
 const sharp = require("sharp"); // v0.13.8：服务端缩略图（列表秒开）
@@ -146,9 +146,12 @@ exports.default = async (req) => {
     if (method === "GET" && path.endsWith("/api/auth/state")) return authState();
     if (method === "POST" && path.endsWith("/api/auth/login")) return authLogin(req);
 
-    /* ---- 其余全部端点都需要访问密码（未设置密码时自动放行） ---- */
+    /* ---- 其余端点默认都需要访问密码（未设置密码时自动放行）----
+       v0.49 观光模式例外：未通过密码时，仍放行「只读 + 已做安全过滤」的请求，
+       让访客能只看非成人向的内容（写操作一律仍需密码） */
     const auth = await checkAuth(req, url);
-    if (!auth.ok) return unauthorized("需要访问密码，或密码已失效");
+    const guest = !auth.ok && guestReadOK(method, path, url, rest);
+    if (!auth.ok && !guest) return unauthorized("需要访问密码，或密码已失效");
 
     if (method === "POST" && path.endsWith("/api/auth/password")) return authPassword(req);
     if (method === "POST" && path.endsWith("/api/auth/r18")) return authR18(req);
@@ -169,8 +172,8 @@ exports.default = async (req) => {
     if (method === "DELETE" && path.endsWith("/api/meta/logs")) {
       return logsClear();
     }
-    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(rest[0], req, url);
-    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "thumb") return thumb(rest[0], req, url);
+    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "raw") return raw(rest[0], req, url, auth.ok);
+    if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "thumb") return thumb(rest[0], req, url, auth.ok);
     if (method === "GET" && path.endsWith("/api/photos/check")) return checkHash(url);
     if (method === "GET" && path.startsWith("/api/photos/") && rest.length === 1) return getMeta(rest[0]);
     if (method === "POST" && path.endsWith("/api/photos")) return upload(req);
@@ -424,12 +427,32 @@ async function list(url) {
   const q = url.searchParams;
   const limit = Math.min(parseInt(q.get("limit"), 10) || 60, 500);
   const s = store();
-  const arr = await indexEnsure(s);
+  let arr = await indexEnsure(s);
+  // v0.49 观光模式（?safe=1）：列表里直接剔除 R18 / R16 的图片
+  // （前端观光模式请求时带这个参数；图片字节本身另有 checkR18 的 R18 密钥保护）
+  if (safeMode(q)) arr = arr.filter((e) => !isAdultPhoto(e));
   const start = Math.max(parseInt(q.get("cursor"), 10) || 0, 0);
   const page = arr.slice(start, start + limit).map((e) => ({ ...e, r18: isR18Photo(e) }));
   const nextStart = start + limit;
   const next = nextStart < arr.length ? String(nextStart) : null;
   return json({ photos: page, cursor: next, hasMore: !!next, total: arr.length });
+}
+
+/* ---------- 观光模式（v0.49） ---------- */
+/* 是否属于「观光访客可读」的请求：只读、且不涉及成人向内容 */
+function safeMode(q) {
+  const v = String((q && q.get && q.get("safe")) || "").toLowerCase();
+  return v === "1" || v === "true";
+}
+function guestReadOK(method, path, url, rest) {
+  if (method !== "GET") return false;
+  // 图片列表：必须显式带 safe=1（服务端会剔除 R18 / R16）
+  if (path.endsWith("/api/photos")) return safeMode(url.searchParams);
+  // 标签配置与相册列表：不含成人向内容，可读
+  if (path.endsWith("/api/tags") || path.endsWith("/api/albums")) return true;
+  // 图片字节：放行到这里，raw / thumb 内部再按「成人向」判断
+  if (path.startsWith("/api/photos/") && rest.length === 2 && (rest[1] === "raw" || rest[1] === "thumb")) return true;
+  return false;
 }
 
 /* ---------- 单张元数据 ---------- */
@@ -440,12 +463,15 @@ async function getMeta(id) {
 }
 
 /* ---------- 图片字节输出（v0.9.20：必须用 arrayBuffer 读，v8 默认返回字符串会损坏二进制） ---------- */
-async function raw(id, req, url) {
+async function raw(id, req, url, authorized) {
   const s = store();
   const m = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
-  // R18 图片：即使已通过访问密码，也需要 R18 密钥才能读取字节
-  if (isR18Photo(m) && !(await checkR18(req, url))) return unauthorized("R18 内容需要密钥");
+  // 成人向内容：观光访客（未通过访问密码）一律拒绝；管理员仍需 R18 密钥读 R18
+  if (isAdultPhoto(m)) {
+    if (!authorized) return unauthorized("观光模式不可查看该内容");
+    if (isR18Photo(m) && !(await checkR18(req, url))) return unauthorized("R18 内容需要密钥");
+  }
   const buf = await s.get(m.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" });
   if (!buf) return notFound("Image data not found");
   return new Response(buf, {
@@ -496,11 +522,15 @@ async function replaceImage(req, id) {
 }
 
 /* ---------- 缩略图输出（v0.12/0.13.8：无缩略图时服务端即时生成并缓存，旧图自动补齐） ---------- */
-async function thumb(id, req, url) {
+async function thumb(id, req, url, authorized) {
   const s = store();
   const meta = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!meta) return notFound("Photo not found");
-  if (isR18Photo(meta) && !(await checkR18(req, url))) return unauthorized("R18 内容需要密钥");
+  // v0.49：观光访客不可看成人向；管理员看 R18 仍需密钥
+  if (isAdultPhoto(meta)) {
+    if (!authorized) return unauthorized("观光模式不可查看该内容");
+    if (isR18Photo(meta) && !(await checkR18(req, url))) return unauthorized("R18 内容需要密钥");
+  }
   let buf = null;
   if (meta.thumbKey) buf = await s.get(meta.thumbKey, { type: "arrayBuffer" });
   if (!buf) {

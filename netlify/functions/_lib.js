@@ -258,6 +258,20 @@ function isR18Photo(p) {
   return cats.some((c) => String(c).trim().toLowerCase() === "r18");
 }
 
+/* R16 判定（v0.49 观光模式）：标签 / 字段 / 主分类里带 r16 即算 */
+function isR16Photo(p) {
+  if (!p) return false;
+  if (p.r16 === true) return true;
+  if (Array.isArray(p.tags) && p.tags.some((t) => String(t).trim().toLowerCase() === "r16")) return true;
+  const cats = Array.isArray(p.categories) ? p.categories : (p.category ? [p.category] : []);
+  return cats.some((c) => String(c).trim().toLowerCase() === "r16");
+}
+
+/* 成人向（R18 / R16 任一）：观光模式要整体隐藏 */
+function isAdultPhoto(p) {
+  return isR18Photo(p) || isR16Photo(p);
+}
+
 module.exports = {
   store,
   json,
@@ -273,6 +287,8 @@ module.exports = {
   checkAuth,
   checkR18,
   isR18Photo,
+  isR16Photo,
+  isAdultPhoto,
   tokenFrom,
   r18KeyFrom,
   sha256hex,
