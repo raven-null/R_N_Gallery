@@ -1275,23 +1275,28 @@ window.__stopSlide = stopSlide;
    切换图片 / 重新打开灯箱时自动复位（想看旋转后的效果请下载后自行处理） */
 let lbRotateDeg = 0;
 let lbZoom = 1; // v0.47：桌面端滚轮缩放，1 = 适屏铺满
+let lbPanX = 0; // v0.48：放大后按住拖动的平移量（屏幕像素）
+let lbPanY = 0;
 function applyLbView() {
   const img = document.getElementById("lbImg");
   if (!img) return;
   const deg = ((lbRotateDeg % 360) + 360) % 360;
   const parts = [];
+  if (lbPanX || lbPanY) parts.push(`translate(${Math.round(lbPanX)}px, ${Math.round(lbPanY)}px)`);
   if (deg) parts.push(`rotate(${deg}deg)`);
   if (lbZoom !== 1) parts.push(`scale(${lbZoom})`);
   img.style.transform = parts.join(" ");
   const side = deg === 90 || deg === 270; // 竖图转横图时按视口高宽反过来限制，避免溢出屏幕
   img.style.maxWidth = side ? "85vh" : "";
   img.style.maxHeight = side ? "90vw" : "";
-  // 放大时去掉过渡（滚轮才跟手），并提示可以缩回
+  // 放大时去掉过渡（滚轮/拖动才跟手），并提示可以拖、可以缩回
   img.classList.toggle("zoomed", lbZoom > 1);
 }
 function resetLbView() {
   lbRotateDeg = 0;
   lbZoom = 1;
+  lbPanX = 0;
+  lbPanY = 0;
   const img = document.getElementById("lbImg");
   if (img) img.style.transformOrigin = "";
   applyLbView();
@@ -1309,9 +1314,39 @@ function lbZoomBy(factor, originX, originY) {
   const next = Math.min(LB_ZOOM_MAX, Math.max(1, lbZoom * factor));
   if (next === lbZoom) return;
   lbZoom = next;
-  if (lbZoom === 1) img.style.transformOrigin = "";
-  else if (originX !== undefined && originY !== undefined) img.style.transformOrigin = `${originX}% ${originY}%`;
+  if (lbZoom === 1) {
+    img.style.transformOrigin = "";
+    lbPanX = 0;
+    lbPanY = 0;
+  } else if (originX !== undefined && originY !== undefined) {
+    img.style.transformOrigin = `${originX}% ${originY}%`;
+  }
   applyLbView();
+}
+/* 拖动平移（v0.48）：把 transform-origin 归中的同时补偿平移量，避免图片「跳」一下 */
+function lbCenterOrigin() {
+  const img = document.getElementById("lbImg");
+  if (!img) return;
+  const m = String(img.style.transformOrigin || "").match(/([\d.]+)%\s+([\d.]+)%/);
+  if (!m) return;
+  const ox = parseFloat(m[1]) / 100, oy = parseFloat(m[2]) / 100;
+  const bw = img.offsetWidth || 0, bh = img.offsetHeight || 0;
+  lbPanX = -(ox - 0.5) * bw * (lbZoom - 1);
+  lbPanY = -(oy - 0.5) * bh * (lbZoom - 1);
+  img.style.transformOrigin = "";
+}
+/* 平移范围限制：放大后能看到的边缘为止，图片不会被拖出视口 */
+function clampLbPan() {
+  const img = document.getElementById("lbImg");
+  const wrap = img && img.parentElement; // .lb-img-wrap
+  if (!img || !wrap) return;
+  const bw = img.offsetWidth || 0, bh = img.offsetHeight || 0;
+  const cw = wrap.clientWidth || 0, ch = wrap.clientHeight || 0;
+  if (!bw || !bh || !cw || !ch) return; // 量不到尺寸（如无布局环境）就不做限制
+  const mx = Math.max(0, (bw * lbZoom - cw) / 2);
+  const my = Math.max(0, (bh * lbZoom - ch) / 2);
+  lbPanX = Math.min(mx, Math.max(-mx, lbPanX));
+  lbPanY = Math.min(my, Math.max(-my, lbPanY));
 }
 
 /* 下载原图 */
@@ -1389,6 +1424,52 @@ function initLightboxNav() {
     else lbStep(1);                                  // 图片右半边 = 下一张
   });
 
+  /* ---- v0.48：放大后按住拖动平移（桌面鼠标 + 移动端触摸） ---- */
+  let dragging = false, dragMoved = false, dragX = 0, dragY = 0, panBaseX = 0, panBaseY = 0;
+  const startDrag = (x, y) => {
+    lbCenterOrigin(); // 归中缩放锚点，之后 translate 就是纯屏幕位移
+    dragging = true;
+    dragMoved = false;
+    dragX = x;
+    dragY = y;
+    panBaseX = lbPanX;
+    panBaseY = lbPanY;
+    const img = document.getElementById("lbImg");
+    if (img) img.classList.add("panning");
+  };
+  const moveDrag = (x, y) => {
+    if (!dragging) return false;
+    const dx = x - dragX, dy = y - dragY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
+    lbPanX = panBaseX + dx;
+    lbPanY = panBaseY + dy;
+    clampLbPan();
+    applyLbView();
+    return true;
+  };
+  const endDrag = () => {
+    if (!dragging) return false;
+    dragging = false;
+    const img = document.getElementById("lbImg");
+    if (img) img.classList.remove("panning");
+    if (dragMoved) suppressClick = Date.now() + 300; // 拖完松手不要顺手切图
+    return dragMoved;
+  };
+
+  lb.addEventListener("mousedown", (e) => {
+    if (!lbIsOpen() || lbZoom <= 1) return;      // 只有放大后才拖动
+    if (!e.target.closest("#lbImg")) return;
+    e.preventDefault();                          // 阻止浏览器原生图片拖拽
+    startDrag(e.clientX, e.clientY);
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    moveDrag(e.clientX, e.clientY);
+  });
+  window.addEventListener("mouseup", () => { endDrag(); });
+  window.addEventListener("blur", () => { endDrag(); });
+
   let sx = 0, sy = 0, tracking = false;
   const pt = (e) => (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || null;
   // v0.47：桌面端滚轮缩放（以鼠标位置为锚点；缩放到 1× 即恢复适屏）
@@ -1414,8 +1495,23 @@ function initLightboxNav() {
     sx = t.clientX;
     sy = t.clientY;
     tracking = true;
+    // 放大状态下触摸 = 拖动平移（不是切图）
+    if (lbZoom > 1) startDrag(t.clientX, t.clientY);
   }, { passive: true });
+  lb.addEventListener("touchmove", (e) => {
+    if (!dragging) return;
+    const t = pt(e);
+    if (!t) return;
+    if (e.cancelable) e.preventDefault(); // 拖动时别让页面跟着滚
+    moveDrag(t.clientX, t.clientY);
+  }, { passive: false });
   lb.addEventListener("touchend", (e) => {
+    if (dragging) {
+      const moved = endDrag();
+      tracking = false;
+      if (moved) suppressClick = Date.now() + 400;
+      return; // 拖动结束，不触发切图
+    }
     if (!tracking) return;
     tracking = false;
     const t = pt(e);

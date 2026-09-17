@@ -858,6 +858,20 @@ async function aiTagSearch(query) {
 - 测试：新增 5 项断言 —— 「CSS：灯箱图片按比例铺满（`max-height: 100%` + `object-fit: contain`）/ 滚轮向上放大图片 / 滚轮向下缩回 1×（适屏）/ 切换图片后缩放自动复位」（滚轮用 `MouseEvent("wheel")` + 自定义 `deltaY` 模拟）；本地 69/70（未通过项仍是本地数据依赖的那 1 项）
 - **已知取舍**：放大后超出视口的部分靠「移动鼠标再滚」查看，**没有做拖动平移**；需要的话可以再加
 
+### 批次 42 · 放大后按住拖动平移（v0.48，2026-09-16）✅
+> 上一批的取舍被用户点名：放大后需要能按住拖动。
+- `app.js`：
+  - 新增 `lbPanX / lbPanY` 与 `clampLbPan()`；`applyLbView()` 的 transform 变成 `translate(px, py) rotate(Ndeg) scale(N)`（平移写在最前，所以它始终是**屏幕像素**、不受缩放影响）
+  - **拖动**：`mousedown`（仅 `lbZoom > 1` 且落在图片上）→ `mousemove` 在 `window` 上跟随 → `mouseup` / `window.blur` 结束；`mousedown` 里 `preventDefault()` 挡掉浏览器原生图片拖拽
+  - **拖动时把缩放锚点归中**（`lbCenterOrigin()`），同时按 `-(o - 0.5) × 尺寸 × (zoom - 1)` 补偿平移量 —— 否则从「鼠标锚点缩放」切到「中心缩放」时会跳一下
+  - **边界限制**：可平移范围 = 图片视觉尺寸超出容器的一半（`(bw × zoom - cw) / 2`），拖到底就停，图片不会被拖出视口；量不到尺寸的环境（无布局）自动跳过限制
+  - **移动端手势分层**：`lbZoom > 1` 时触摸 = 拖动平移（`touchmove` 里 `preventDefault()`，不让页面跟着滚），未放大时触摸仍是左右滑动切图；`touchend` 若刚拖过则不切图
+  - 缩回 1× 时平移量一并清零；换图 / 重开灯箱走 `resetLbView()` 全清（旋转 + 缩放 + 平移）
+  - 拖动结束后 300ms 抑制 click（鼠标拖动松手时不要顺手触发「点左右半边切图」或「点空白关闭」）
+- `style.css`：放大时光标 `grab`、拖动中 `grabbing`（用 `.lightbox #lbImg.zoomed / .panning`，因为 v0.43 的 `.lightbox #lbImg { cursor: pointer }` 带 id、优先级更高）
+- 测试：新增 6 项断言 —— 「放大后按住拖动 = 平移图片（`translate(60px, 30px) scale(1.18)`）/ 拖动松手不会顺手切图 / 拖动结束后图片仍在放大状态 / 缩回 1× 后平移量清零 / 放大后触摸拖动 = 平移图片 / 触摸拖动结束不切图」；本地 75/76（未通过项仍是本地数据依赖的那 1 项）
+
+
 
 
 

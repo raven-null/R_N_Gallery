@@ -433,7 +433,36 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(120);
     await clickAt(lbImgEl, Math.round(w * 0.65));
     check("切换图片后缩放自动复位", !lbImgEl.style.transform, `transform="${lbImgEl.style.transform}"`);
-    // v0.44：点图片以外的空白 → 关闭灯箱
+    // v0.48：放大后按住拖动平移
+    lbImgEl.dispatchEvent(makeWheel(-120));
+    await wait(120);
+    const curBeforePan = lbBox.dataset.cur;
+    lbImgEl.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, clientX: 500, clientY: 400 }));
+    window.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 560, clientY: 430 }));
+    await wait(150);
+    const panTf = lbImgEl.style.transform || "";
+    check("放大后按住拖动 = 平移图片", /translate\(/.test(panTf), `transform="${panTf}"`);
+    window.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+    await wait(150);
+    check("拖动松手不会顺手切图", lbBox.dataset.cur === curBeforePan, `${curBeforePan} → ${lbBox.dataset.cur}`);
+    check("拖动结束后图片仍在放大状态", /scale\(/.test(lbImgEl.style.transform || ""));
+    // 缩回 1× 时平移一起清零
+    for (let i = 0; i < 14; i++) lbImgEl.dispatchEvent(makeWheel(120));
+    await wait(150);
+    check("缩回 1× 后平移量清零", !/translate\(/.test(lbImgEl.style.transform || ""), `transform="${lbImgEl.style.transform}"`);
+    // 移动端：放大后触摸拖动 = 平移（不再是切图）
+    lbImgEl.dispatchEvent(makeWheel(-120));
+    await wait(120);
+    const curBeforeTouchPan = lbBox.dataset.cur;
+    lbImgEl.dispatchEvent(mkTouch("touchstart", 400));
+    lbBox.dispatchEvent(mkTouch("touchmove", 470));
+    await wait(150);
+    check("放大后触摸拖动 = 平移图片", /translate\(/.test(lbImgEl.style.transform || ""), `transform="${lbImgEl.style.transform}"`);
+    lbBox.dispatchEvent(mkTouch("touchend", 470));
+    await wait(150);
+    check("触摸拖动结束不切图", lbBox.dataset.cur === curBeforeTouchPan, `${curBeforeTouchPan} → ${lbBox.dataset.cur}`);
+    // v0.44：点图片以外的空白 → 关闭灯箱（拖动后有 400ms 防误触抑制，先等一下）
+    await wait(450);
     lbBox.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: Math.round(w * 0.5), clientY: 60 }));
     await wait(300);
     check("点空白关闭灯箱并收起工具条", !lbBox.classList.contains("open") && !lbBox.classList.contains("tools-visible"));

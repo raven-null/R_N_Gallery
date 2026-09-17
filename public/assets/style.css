@@ -1287,6 +1287,9 @@ body.perf-lite .masonry.grid-square .card { transition: none; }
 }
 /* 滚轮缩放中不要过渡，否则跟手感很差（缩回 1× 时恢复平滑） */
 .lightbox img.zoomed { transition: none; }
+/* v0.48：放大后可按住拖动（光标提示可拖 / 正在拖；用 #lbImg 覆盖上面的 pointer） */
+.lightbox #lbImg.zoomed { cursor: grab; }
+.lightbox #lbImg.panning { cursor: grabbing; }
 @keyframes lb-zoom {
   from { transform: scale(0.92); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
