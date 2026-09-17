@@ -460,6 +460,8 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   check("组头有「＋」新建标签入口", !!gnewBtn);
   if (gnewBtn) {
     const gid = gnewBtn.dataset.gnew;
+    // 上一个弹窗若还没关干净，openTagModal 会被拦下 —— 先确保关闭
+    if (doc.getElementById("tagModal").classList.contains("open")) { closeModal(); await wait(400); }
     gnewBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     await wait(300);
     const sel = doc.querySelector("#tagModalBody #fGroup");
@@ -475,13 +477,15 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   check("筛选菜单有查重入口", !!dupEntry);
   if (dupEntry) {
     clickEl(dupEntry);
-    await wait(1800);
+    await wait(4000); // 线上是全量索引，给足时间（首次可能还带函数冷启动）
     const dupModal = doc.getElementById("dupModal");
     const dupBody = doc.getElementById("dupBody");
     check("点查重打开弹窗并完成扫描",
       !!dupModal && dupModal.classList.contains("open") && !!dupBody && /dup-summary|dup-empty/.test(dupBody.innerHTML));
     const st = window.__dupState ? window.__dupState() : null;
-    check("扫描结果有状态钩子", !!st && st.scanned > 0, st ? `扫了 ${st.scanned} 张，${st.groups} 组（完全相同 ${st.exact}）` : "无");
+    const dupTxt = (dupBody ? dupBody.textContent : "").replace(/\s+/g, " ").trim().slice(0, 160);
+    check("扫描结果有状态钩子", !!st && st.scanned > 0,
+      st ? `扫了 ${st.scanned} 张，${st.groups} 组（完全相同 ${st.exact}）` : `无 ｜ 弹窗内容：${dupTxt}`);
     const dc = doc.getElementById("dupClose");
     if (dc) clickEl(dc);
     await wait(250);
