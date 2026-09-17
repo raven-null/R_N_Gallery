@@ -710,6 +710,26 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("safe=1 列表里没有 R18 / R16 图片", false, e.message);
   }
 
+  /* v0.52：设置页输入框里打字不该被键盘快捷键抢走（整理视图的 1-9 曾吞掉密码里的数字） */
+  if (window.__refreshTagManager) {
+    window.localStorage.setItem("rn_tmgr_view", "review"); // 让整理视图的键盘流挂上
+    window.__refreshTagManager();
+    await wait(400);
+  }
+  const taggerPwd = doc.getElementById("taggerPwdNew");
+  if (taggerPwd) {
+    taggerPwd.focus();
+    const keys = ["1", "3", "9", "0", "s", "S", "Enter", "ArrowLeft", "ArrowRight", "/"];
+    const stolen = keys.filter((k) => {
+      const ev = new window.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
+      taggerPwd.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    });
+    check("设置页输入框里按键不被快捷键抢走", stolen.length === 0, stolen.length ? `被拦截：${stolen.join(" ")}` : "全部放行");
+    if (taggerPwd.blur) taggerPwd.blur();
+  }
+  window.localStorage.setItem("rn_tmgr_view", "group"); // 复位，别影响后续断言
+
   const failed = results.filter((x) => !x).length;
   console.log(`\n${failed ? `✗ ${failed} 项未通过` : "✓ 全部通过"}（共 ${results.length} 项）\n`);
   process.exit(failed ? 1 : 0);

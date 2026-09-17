@@ -127,6 +127,15 @@ function bindTagSuggest(input, suggest, box, afterPick) {
     input.addEventListener("blur", () => setTimeout(hide, 150));
   }
 }
+/* v0.52：判断事件目标是不是「正在打字」的地方（输入框 / 文本域 / 下拉框 / 可编辑区域）。
+   所有全局键盘快捷键都要先过这一关，否则会抢走用户正在输入的数字、方向键、空格等。
+   （此前整理视图的 1-9 打标签快捷键就曾把设置页密码框里的数字吞掉） */
+function isTypingTarget(el) {
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true;
+}
+
 /* ---------- 通用确认弹窗 ---------- */
 let confirmCb = null;
 function askConfirm(title, desc, okLabel, cb) {
@@ -1199,7 +1208,7 @@ function initDupFinder() {
 
 /* ---------- 通用：键盘快捷键 ---------- */
 document.addEventListener("keydown", (e) => {
-  if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
+  if (e.key === "/" && !isTypingTarget(document.activeElement)) { // v0.52：输入框 / 文本域里不抢
     // 打开搜索窗口并聚焦输入框
     e.preventDefault();
     if (window.__openWindow) window.__openWindow("search");
@@ -1529,8 +1538,7 @@ function initLightboxTools() {
     if (e.key !== " " && e.code !== "Space") return;
     if (!lbIsOpen()) return;
     const a = document.activeElement;
-    const typing = a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
-    if (typing && a.getClientRects && a.getClientRects().length) return; // 可见输入框 → 让位给打字
+    if (isTypingTarget(a) && a.getClientRects && a.getClientRects().length) return; // 可见输入框 → 让位给打字
     e.preventDefault();
     toggleSlide();
   });
@@ -2199,6 +2207,7 @@ function initGallery() {
   window.__lbStepList = () => (filtered.length && filtered.some((x) => x.id === lightbox.dataset.cur) ? filtered : PHOTOS);
   document.addEventListener("keydown", (e) => {
     if (!lightbox.classList.contains("open")) return;
+    if (isTypingTarget(e.target) || isTypingTarget(document.activeElement)) return; // v0.52：别抢输入框的方向键
     if (e.key === "ArrowLeft") step(-1);
     if (e.key === "ArrowRight") step(1);
   });
@@ -4196,8 +4205,8 @@ function initCwView(root) {
     window.__cwKey = (e) => {
       if (localStorage.getItem(TMGR_VIEW_KEY) !== "classify") return;
       if (document.querySelector(".modal-mask.open")) return;
-      const tn = e.target && e.target.tagName;
-      if (tn === "INPUT" || tn === "TEXTAREA" || tn === "SELECT") return;
+      // v0.52：任何输入框 / 可编辑区域里打字时不抢按键
+      if (isTypingTarget(e.target || document.activeElement)) return;
       if (!/^[1-9]$/.test(e.key)) return;
       const name = loadRecentTags()[Number(e.key) - 1];
       if (!name) return;
@@ -4552,8 +4561,14 @@ function initReviewView(root) {
   window.__rvKey = (e) => {
     if (localStorage.getItem(TMGR_VIEW_KEY) !== "review") return;
     if (document.querySelector(".modal-mask.open")) return;
+    // v0.52：焦点在「别的输入框」里时一律不抢按键（原先只排除了自己的输入框，
+    // 导致设置页的密码框里打不了数字 / Enter 会被当成"应用并下一张"）
+    const ae = document.activeElement;
     const inp = document.getElementById("rvTagInput");
-    const typing = !!(inp && document.activeElement === inp && inp.value.trim());
+    const inRvInput = !!(inp && ae === inp);
+    const typingElsewhere = !inRvInput && isTypingTarget(ae); // v0.52
+    if (typingElsewhere) return;
+    const typing = inRvInput && inp.value.trim();
     if (e.key === "Enter") { e.preventDefault(); rvApply(); return; }
     if (e.key === "Escape") {
       localStorage.setItem(TMGR_VIEW_KEY, "group");
