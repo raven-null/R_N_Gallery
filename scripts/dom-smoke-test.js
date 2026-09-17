@@ -660,6 +660,36 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
+  /* 整理模式（v0.51）：能打标签、看不到 R18 / R16，其余管理功能仍然禁用 */
+  if (modeSt) {
+    window.__setMode("tagger");
+    await wait(250);
+    check("整理模式：body 带 mode-tagger", doc.body.classList.contains("mode-tagger") && !doc.body.classList.contains("mode-admin"));
+    check("整理模式：拦下编辑操作", window.__guestBlocked("编辑图片") === true);
+    const tmgrItem = doc.querySelector('.page-menu-item[data-page="tags"]');
+    if (tmgrItem) {
+      tmgrItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(700);
+      check("整理模式：能打开标签管理", doc.getElementById("panelTags").classList.contains("open"));
+      const segBtns = doc.querySelectorAll("#tmgrViewSeg .seg-btn");
+      check("整理模式：只给「整理」视图", segBtns.length === 1 && segBtns[0].dataset.view === "review",
+        [...segBtns].map((b) => b.dataset.view).join(",") || "(无)");
+      check("整理模式：看不到标签库管理按钮", !doc.getElementById("btnNewTag") && !doc.getElementById("btnNewCategory"));
+      const closeTags = doc.getElementById("closeTags");
+      if (closeTags) clickEl(closeTags);
+      await wait(500);
+    }
+    const setItem = doc.querySelector('.page-menu-item[data-page="settings"]');
+    if (setItem) {
+      setItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(500);
+      check("整理模式：不能打开设置", !doc.getElementById("panelSettings").classList.contains("open"));
+    }
+    window.__setMode("admin");
+    await wait(250);
+    check("切回管理员模式（整理模式段落结束）", doc.body.classList.contains("mode-admin"));
+  }
+
   /* 服务端 safe=1：观光模式的列表里不返回带 r18 / r16 标签的图片 */
   try {
     const all = await (await fetch(`${BASE}/api/photos?limit=300${TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""}`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} })).json();

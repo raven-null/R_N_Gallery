@@ -229,12 +229,22 @@ function tokenFrom(req, url) {
   return String(h || (url ? url.searchParams.get("token") || "" : "")).trim();
 }
 
-/* 返回 { ok, gate }：gate 表示是否启用了门禁 */
+/* 返回 { ok, gate, role }：
+   role = "admin"（持访问密码，全部权限）/ "tagger"（持整理密码，只能看图 + 给照片打标签）
+   gate 表示是否启用了门禁（以访问密码为准） */
 async function checkAuth(req, url) {
   const cfg = await authConfig();
-  if (!cfg.accessHash) return { ok: true, gate: false };
   const t = tokenFrom(req, url);
-  return { ok: !!t && sha256hex(t) === cfg.accessHash, gate: true };
+  const hitAdmin = !!cfg.accessHash && !!t && sha256hex(t) === cfg.accessHash;
+  const hitTagger = !!cfg.taggerHash && !!t && sha256hex(t) === cfg.taggerHash;
+  if (!cfg.accessHash) {
+    // 未设访问密码：门禁关闭；但若带了整理密码，仍然按整理角色对待（前端据此进入整理模式）
+    if (hitTagger) return { ok: true, gate: false, role: "tagger" };
+    return { ok: true, gate: false, role: "admin" };
+  }
+  if (hitAdmin) return { ok: true, gate: true, role: "admin" };
+  if (hitTagger) return { ok: true, gate: true, role: "tagger" };
+  return { ok: false, gate: true, role: null };
 }
 
 /* v0.50：R18 密钥机制（r18KeyFrom / checkR18）已整体删除 ——

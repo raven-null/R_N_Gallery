@@ -2900,23 +2900,26 @@ body.select-mode .card .pick { display: grid; }
 body.perf-lite .dup-modal { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 /* ============================================================
-   观光模式（v0.49）：只留「看图 + 下载」，管理类入口整块隐藏
-   保留：筛选 / 搜索 / 排序 / 布局切换 / 相册浏览 / 灯箱（旋转缩放下载幻灯片）
+   受限模式（v0.49 观光 / v0.51 整理）：只留「看图 + 下载」与管理白名单
+   观光：保留 筛选 / 搜索 / 排序 / 布局切换 / 相册浏览 / 灯箱
+   整理：再额外允许「标签管理」（窗口内部只显示整理视图）
    ============================================================ */
-body.mode-guest #fabSelectBtn,        /* 批量选择 */
-body.mode-guest #aiFab,               /* AI 助手 */
-body.mode-guest .ai-empty-btn,        /* 搜索里的 AI 入口 */
-body.mode-guest .page-menu-item[data-page="upload"],
-body.mode-guest .page-menu-item[data-page="tags"],
-body.mode-guest .page-menu-item[data-page="settings"],
-body.mode-guest #lbToolEdit,          /* 灯箱：编辑 */
-body.mode-guest #lbToolAlbum,         /* 灯箱：加入相册 */
-body.mode-guest #albAddBtn,           /* 相册页：新建相册 */
-body.mode-guest #albNewBar,
-body.mode-guest [data-alb-act],       /* 相册：重命名 / 删除 */
-body.mode-guest [data-alb-out],       /* 相册：移出图片 */
-body.mode-guest #batchBar             /* 底部批量操作条 */
+body:not(.mode-admin) #fabSelectBtn,        /* 批量选择 */
+body:not(.mode-admin) #aiFab,               /* AI 助手 */
+body:not(.mode-admin) .ai-empty-btn,        /* 搜索里的 AI 入口 */
+body:not(.mode-admin) .page-menu-item[data-page="upload"],
+body:not(.mode-admin) .page-menu-item[data-page="settings"],
+body:not(.mode-admin) #lbToolEdit,          /* 灯箱：编辑 */
+body:not(.mode-admin) #lbToolAlbum,         /* 灯箱：加入相册 */
+body:not(.mode-admin) #albAddBtn,           /* 相册页：新建相册 */
+body:not(.mode-admin) #albNewBar,
+body:not(.mode-admin) [data-alb-act],       /* 相册：重命名 / 删除 */
+body:not(.mode-admin) [data-alb-out],       /* 相册：移出图片 */
+body:not(.mode-admin) #batchBar,            /* 底部批量操作条 */
+body:not(.mode-admin) #btnFindDups          /* 设置里的查重（设置本身也进不去，双保险） */
 { display: none !important; }
+/* 观光模式连标签管理入口也藏起来（整理模式保留） */
+body.mode-guest .page-menu-item[data-page="tags"] { display: none !important; }
 
 /* ---------- 日志弹窗（v0.12） ---------- */
 .logs-modal { max-width: 560px; }.logs-list {

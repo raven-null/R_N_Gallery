@@ -547,14 +547,14 @@ const fmtDate = (s) => {
 const TOKEN_KEY = "rn_token";
 const R18_KEY_STORE = "rn_r18"; // 仅用于清除历史遗留值，不再读写
 function gateToken() { return localStorage.getItem(TOKEN_KEY) || ""; }
-function authState() { return window.__authState || { gate: false, hasR18: false }; }
+function authState() { return window.__authState || { gate: false, hasTagger: false }; }
 async function fetchAuthState() {
   try {
     const r = await fetch("/api/auth/state", { cache: "no-store" });
     const d = await r.json();
-    window.__authState = { gate: !!d.gate, hasR18: !!d.hasR18 };
+    window.__authState = { gate: !!d.gate, hasTagger: !!d.hasTagger };
   } catch (e) {
-    window.__authState = { gate: false, hasR18: false };
+    window.__authState = { gate: false, hasTagger: false };
   }
   return window.__authState;
 }
@@ -577,10 +577,11 @@ function isR18(p) {
 /* v0.50：R18 密钥的输入 / 校验流程与锁定占位卡都已删除；
    R18 / R16 的可见性现在只由观光模式的 adultHidden() 决定 */
 
-/* ---------- 观光 / 管理员模式（v0.49） ----------
-   观光模式（默认）：只能看图与下载（外加筛选/搜索/排序/布局切换这些纯浏览辅助），
-   带 R18 / R16 标签的图片直接隐藏 —— 除非管理员打开了「允许观光观看」。
-   管理员模式：全部功能、全部图片。切换需要输入「访问密码」（复用 v0.16 的登录接口）。 */
+/* ---------- 观光 / 整理 / 管理员 三种模式（v0.49；v0.51 加整理模式） ----------
+   观光模式：只能看图与下载（外加筛选/搜索/排序/布局切换这些纯浏览辅助），R18 / R16 隐藏
+   整理模式：观光模式的能力 + 「标签管理 → 整理」里给图片打标签 / 设主分类，R18 / R16 照样隐藏
+   管理员模式：全部功能、全部图片
+   观光 → 整理 / 管理员 需要输入对应密码（服务端登录接口一次判断角色） */
 const MODE_KEY = "rn_mode";
 const GUEST_ADULT_KEY = "rn_guest_adult";
 const GUEST_VISIT_KEY = "rn_guest_visit"; // 观光访客：没有访问密码也允许只读浏览
@@ -588,9 +589,14 @@ function guestVisiting() {
   try { return localStorage.getItem(GUEST_VISIT_KEY) === "1"; } catch (e) { return false; }
 }
 function modeValue() {
-  try { return localStorage.getItem(MODE_KEY) === "admin" ? "admin" : "guest"; } catch (e) { return "guest"; }
+  try {
+    const v = localStorage.getItem(MODE_KEY);
+    return v === "admin" || v === "tagger" ? v : "guest";
+  } catch (e) { return "guest"; }
 }
 function isAdmin() { return modeValue() === "admin"; }
+function isTagger() { return modeValue() === "tagger"; } // 整理模式
+function manageAllowed() { return isAdmin() || isTagger(); } // 能打开标签管理的整理视图
 function guestAdultAllowed() {
   try { return localStorage.getItem(GUEST_ADULT_KEY) === "1"; } catch (e) { return false; }
 }
@@ -602,24 +608,30 @@ function isR16(p) {
   return catsOf(p).some((c) => String(c).trim().toLowerCase() === "r16");
 }
 function isAdult(p) { return isR18(p) || isR16(p); }
-/* 现在是否需要隐藏成人向图片 */
+/* 现在是否需要隐藏成人向图片（只有管理员能看到） */
 function adultHidden() { return !isAdmin() && !guestAdultAllowed(); }
 
 function applyMode() {
-  const guest = !isAdmin();
+  const mode = modeValue();
+  const guest = mode === "guest";
   document.body.classList.toggle("mode-guest", guest);
-  document.body.classList.toggle("mode-admin", !guest);
+  document.body.classList.toggle("mode-tagger", mode === "tagger");
+  document.body.classList.toggle("mode-admin", mode === "admin");
   const btn = document.getElementById("fabModeBtn");
   if (btn) {
-    btn.title = guest ? "观光模式 · 点此输入访问密码进入管理员模式" : "管理员模式 · 点此退出到观光模式";
+    btn.title = guest ? "观光模式 · 点此输入密码进入整理 / 管理员模式"
+      : mode === "tagger" ? "整理模式 · 点此切换模式（可打标签，不看 R18 / R16）"
+        : "管理员模式 · 点此切换模式";
     btn.classList.toggle("on", !guest);
     const g = btn.querySelector(".ico-guest");
+    const tg = btn.querySelector(".ico-tagger");
     const a = btn.querySelector(".ico-admin");
     if (g) g.style.display = guest ? "" : "none";
-    if (a) a.style.display = guest ? "none" : "";
+    if (tg) tg.style.display = mode === "tagger" ? "" : "none";
+    if (a) a.style.display = mode === "admin" ? "" : "none";
   }
   const state = document.getElementById("modeState");
-  if (state) state.textContent = guest ? "观光模式" : "管理员模式";
+  if (state) state.textContent = guest ? "观光模式" : (mode === "tagger" ? "整理模式" : "管理员模式");
   const box = document.getElementById("guestAdult");
   if (box) box.checked = guestAdultAllowed();
 }
@@ -628,7 +640,7 @@ function applyMode() {
 function initMode() {
   let saved = null;
   try { saved = localStorage.getItem(MODE_KEY); } catch (e) { /* ignore */ }
-  if (saved !== "admin" && saved !== "guest") {
+  if (saved !== "admin" && saved !== "tagger" && saved !== "guest") {
     saved = gateToken() ? "admin" : "guest";
     try { localStorage.setItem(MODE_KEY, saved); } catch (e) { /* ignore */ }
   }
@@ -638,10 +650,12 @@ function setMode(mode) {
   try { localStorage.setItem(MODE_KEY, mode); } catch (e) { /* ignore */ }
   applyMode();
 }
-/* 观光模式下拦住管理类操作；返回 true 表示已拦下 */
+/* 受限模式下拦住管理类操作；返回 true 表示已拦下 */
 function guestBlocked(what) {
   if (isAdmin()) return false;
-  alert(`观光模式下${what ? "不能" + what : "此功能不可用"}。\n输入访问密码切换到管理员模式后即可使用。`);
+  const label = isTagger() ? "整理模式" : "观光模式";
+  const extra = isTagger() ? "整理模式下只能给图片打标签。" : "输入访问密码切换到管理员模式后即可使用。";
+  alert(`${label}下${what ? "不能" + what : "此功能不可用"}。\n${extra}`);
   return true;
 }
 window.__modeState = () => ({
@@ -650,7 +664,7 @@ window.__modeState = () => ({
   photos: PHOTOS.length,
   adultVisible: PHOTOS.filter(isAdult).length,
 });
-window.__setMode = setMode; // 测试钩子：切换观光 / 管理员
+window.__setMode = setMode; // 测试钩子：切换观光 / 整理 / 管理员
 window.__guestBlocked = guestBlocked;
 
 /* 模式切换弹窗：观光 → 输访问密码；管理员 → 确认退出 */
@@ -691,9 +705,10 @@ async function submitModeLogin() {
       const d = await r.json().catch(() => ({}));
       throw new Error(d.error || "密码错误");
     }
-    localStorage.setItem(TOKEN_KEY, v); // 管理类操作需要凭证
+    const d = await r.json().catch(() => ({}));
+    localStorage.setItem(TOKEN_KEY, v); // 管理类操作需要凭证（整理密码同样作为 token 使用）
     try { localStorage.removeItem(GUEST_VISIT_KEY); } catch (e) { /* ignore */ }
-    setMode("admin");
+    setMode(d.role === "tagger" ? "tagger" : "admin"); // v0.51：服务端判断这是整理密码还是访问密码
     location.reload();
   } catch (e) {
     if (err) { err.textContent = e.message || "验证失败"; err.style.display = "block"; }
@@ -750,7 +765,10 @@ function showGate() {
         btn.disabled = false;
         return;
       }
+      const d = await r.json().catch(() => ({}));
       localStorage.setItem(TOKEN_KEY, v);
+      // v0.51：输入的是整理密码就进整理模式，是访问密码就进管理员模式
+      try { localStorage.setItem(MODE_KEY, d.role === "tagger" ? "tagger" : "admin"); } catch (e2) { /* ignore */ }
       location.reload();
     } catch (e) {
       err.textContent = "网络错误，请重试";
@@ -773,13 +791,43 @@ function showGate() {
   setTimeout(() => input.focus(), 60);
 }
 
-/* 设置页：访问与保护（v0.50：修改密码 / R18 密钥两块已删除，只留模式切换与退出登录） */
+/* 设置页：访问与保护（v0.50 删掉访问密码 / R18 密钥入口；v0.51 加整理模式密码） */
 function initAuthSettings() {
   const btnLogout = document.getElementById("btnLogoutGate");
-  window.__refreshAuthState = async () => { await fetchAuthState(); };
+  const taggerInput = document.getElementById("taggerPwdNew");
+  const btnTagger = document.getElementById("btnSetTagger");
+  const taggerState = document.getElementById("taggerState");
+  const paint = () => {
+    const st = authState();
+    if (taggerState) taggerState.textContent = st.hasTagger ? "已设置（可进整理模式）" : "未设置";
+  };
+  paint();
+  window.__refreshAuthState = async () => { await fetchAuthState(); paint(); };
+
+  if (btnTagger) btnTagger.onclick = async () => {
+    if (guestBlocked("设置整理密码")) return;
+    const v = (taggerInput.value || "").trim();
+    if (v && v.length < 4) { window.alert("整理密码至少 4 位"); return; }
+    const tip = v ? "设置 / 修改整理模式密码？" : "留空保存会清除整理模式密码，之后该密码无法登录。确定？";
+    if (!window.confirm(tip)) return;
+    try {
+      const d = await apiFetch("/api/auth/tagger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taggerKey: v }),
+      }).then((r) => r.json());
+      if (!d.ok) throw new Error(d.error || "保存失败");
+      taggerInput.value = "";
+      window.alert(v ? "整理模式密码已更新" : "整理模式密码已清除");
+      await fetchAuthState();
+      paint();
+    } catch (e) {
+      window.alert("操作失败：" + (e && e.message ? e.message : e));
+    }
+  };
 
   if (btnLogout) btnLogout.onclick = () => {
-    if (!window.confirm("退出登录会清除本机保存的访问密码，确定？")) return;
+    if (!window.confirm("退出登录会清除本机保存的密码凭据，确定？")) return;
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(R18_KEY_STORE);
     location.reload();
@@ -3774,7 +3822,8 @@ function refreshTagManager() {
   const counts = tagCounts();
   const used = Object.keys(counts);
   const savedView = localStorage.getItem(TMGR_VIEW_KEY);
-  const view = savedView === "group" ? "group" : (savedView === "review" ? "review" : "classify");
+  let view = savedView === "group" ? "group" : (savedView === "review" ? "review" : "classify");
+  if (isTagger()) view = "review"; // v0.51 整理模式：只给「整理」视图（其余视图是管理功能）
   // v0.20：离开「整理」视图时摘掉键盘监听（v0.23 起同时管理分类工作台的数字键）
   if (view !== "review" && window.__rvKey) {
     document.removeEventListener("keydown", window.__rvKey, true);
@@ -3787,8 +3836,8 @@ function refreshTagManager() {
 
   let html = `<div class="tmgr-seg">
       <div class="seg" id="tmgrViewSeg" role="group" aria-label="视图">
-        <button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
-        <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>
+        ${isTagger() ? "" : `<button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
+        <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>`}
         <button class="seg-btn${view === "review" ? " on" : ""}" data-view="review" title="一次只处理一张图，键盘流快速分类">整理</button>
       </div>
       ${view === "group" ? `<span class="tmgr-fold-actions">
@@ -3898,9 +3947,9 @@ function refreshTagManager() {
         <div class="rv-panel">
           <div class="uq-panel">
             <div class="uq-panel-title">主分类 <span class="req">可多选</span>
-              <button class="mini-link" id="rvNewCat" type="button" title="新建主分类">＋ 新建</button>
+              ${isAdmin() ? `<button class="mini-link" id="rvNewCat" type="button" title="新建主分类">＋ 新建</button>` : ""}
             </div>
-            <div class="uq-cats" id="rvCats" data-multi="1" data-can-edit="1"></div>
+            <div class="uq-cats" id="rvCats" data-multi="1"${isAdmin() ? ` data-can-edit="1"` : ""}></div>
           </div>
           <div class="uq-panel">
             <div class="uq-panel-title">标签</div>
@@ -3923,12 +3972,15 @@ function refreshTagManager() {
     </div>`;
   }
 
-  html += `<div class="tag-mgr-actions">
-    <button class="btn ghost sm" id="btnNewCategory">＋ ${t("新建主分类", "New category")}</button>
-    <button class="btn ghost sm" id="btnNewTag">＋ 新建标签</button>
-    <button class="btn ghost sm" id="btnNewGroup">＋ 新建标签组</button>
-    <button class="btn ghost sm" id="btnBulkTags">⇪ ${t("批量导入标签", "Bulk import")}</button>
-  </div>`;
+  // v0.51：整理模式下不显示这些标签库管理按钮（只能给图片打标签，不能改标签库本身）
+  if (isAdmin()) {
+    html += `<div class="tag-mgr-actions">
+      <button class="btn ghost sm" id="btnNewCategory">＋ ${t("新建主分类", "New category")}</button>
+      <button class="btn ghost sm" id="btnNewTag">＋ 新建标签</button>
+      <button class="btn ghost sm" id="btnNewGroup">＋ 新建标签组</button>
+      <button class="btn ghost sm" id="btnBulkTags">⇪ ${t("批量导入标签", "Bulk import")}</button>
+    </div>`;
+  }
   root.innerHTML = html;
 
   const q = (sel) => root.querySelector(sel);
@@ -5757,11 +5809,15 @@ function initPageSwitch() {
   function openWindow(page) {
     const el = panels[page];
     if (!el || animating) return;
-    // v0.49 观光模式：上传 / 标签管理 / 设置这些管理窗口一律不给开（搜索是只读的，放行）
-    if (!isAdmin() && page !== "search") {
+    // v0.49 观光模式：上传 / 标签管理 / 设置都不给开（搜索只读，放行）
+    // v0.51 整理模式：额外允许打开标签管理（窗口内部只会显示「整理」视图）
+    const allowed = isAdmin() || (isTagger() && page === "tags") || page === "search";
+    if (!allowed) {
       guestBlocked(page === "upload" ? "上传图片" : page === "tags" ? "管理标签" : "打开设置");
       return;
     }
+    // v0.51：标签管理按当前模式重新渲染（整理模式只显示「整理」视图）
+    if (page === "tags" && window.__refreshTagManager) window.__refreshTagManager();
     const existed = openStack.includes(page);
     if (!existed) {
       openStack.push(page);
