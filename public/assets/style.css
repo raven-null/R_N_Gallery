@@ -1249,14 +1249,13 @@ body.perf-lite .masonry.grid-square .card { transition: none; }
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: 24px; /* v0.47：从 40px 收窄，给图片更多空间 */
   /* v0.43：横向手势留给「左右滑动切图」，纵向滚动与双指缩放仍交给浏览器 */
   touch-action: pan-y pinch-zoom;
 }
 .lightbox.open { 
   display: flex; 
   flex-direction: row; 
-  gap: 32px; 
   animation: lb-in 0.4s var(--ease-out) both; 
 }
 @keyframes lb-in { 
@@ -1266,15 +1265,18 @@ body.perf-lite .masonry.grid-square .card { transition: none; }
 .lightbox .lb-img-wrap {
   position: relative;
   flex: 1;
+  align-self: stretch;   /* v0.47：撑满可用高度，图片才能「尽量铺满」 */
   display: flex;
   align-items: center;
   justify-content: center;
-  max-height: 85vh;
+  min-height: 0;
+  min-width: 0;
   animation: lb-zoom 0.5s var(--ease-out) both;
 }
 .lightbox img {
+  /* v0.47：按比例铺满可用区域（大图缩到边界、小图保持原尺寸不放大），object-fit 保证不变形 */
   max-width: 100%;
-  max-height: 85vh;
+  max-height: 100%;
   border-radius: var(--radius);
   border: 1px solid rgba(255,255,255,0.1);
   box-shadow: 
@@ -1283,6 +1285,8 @@ body.perf-lite .masonry.grid-square .card { transition: none; }
   object-fit: contain;
   transition: transform 0.25s var(--ease-out); /* v0.45：旋转只改预览，给个平滑过渡 */
 }
+/* 滚轮缩放中不要过渡，否则跟手感很差（缩回 1× 时恢复平滑） */
+.lightbox img.zoomed { transition: none; }
 @keyframes lb-zoom {
   from { transform: scale(0.92); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
@@ -2045,9 +2049,10 @@ input.settings-value:focus {
   .traffic .dot { width: 10px; height: 10px; }
   .page-head .actions { margin-left: 0; width: 100%; }
   .tag-menu { right: 60px; bottom: 120px; width: min(230px, 78vw); }
-  .lightbox { flex-direction: column; padding: 20px; gap: 16px; }
-  .lightbox .lb-img-wrap { max-height: 50vh; }
-  .lightbox img { max-height: 50vh; }
+  /* v0.47：窄屏也铺满（原先 50vh 是「图片 + 右侧信息栏」时代的遗留，信息栏早就删了） */
+  .lightbox { flex-direction: column; padding: 10px; }
+  .lightbox .lb-img-wrap { max-height: none; }
+  .lightbox img { max-height: 100%; }
   .fab-group { right: 16px; bottom: 20px; }
   .fab-main { width: 48px; height: 48px; }
   .fab-main svg { width: 22px; height: 22px; }

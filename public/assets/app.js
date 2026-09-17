@@ -1169,7 +1169,7 @@ function openLightboxById(id, bustCache) {
     clearTimeout(lbHideTimer);
     lbToolsVisible(false);
   }
-  resetLbRotation(); // v0.45：换图即复位预览旋转
+  resetLbView(); // v0.45/0.47：换图即复位预览旋转与缩放
   syncSlideBtn();
 }
 
@@ -1271,26 +1271,47 @@ function toggleSlide() {
 }
 window.__stopSlide = stopSlide;
 
-/* 旋转（v0.45）：只旋转**灯箱里的预览**，不改动原图、不发请求；
+/* 旋转（v0.45）与缩放（v0.47）：都只作用于**灯箱里的预览**，不改动原图、不发请求；
    切换图片 / 重新打开灯箱时自动复位（想看旋转后的效果请下载后自行处理） */
 let lbRotateDeg = 0;
-function applyLbRotation() {
+let lbZoom = 1; // v0.47：桌面端滚轮缩放，1 = 适屏铺满
+function applyLbView() {
   const img = document.getElementById("lbImg");
   if (!img) return;
   const deg = ((lbRotateDeg % 360) + 360) % 360;
-  img.style.transform = deg ? `rotate(${deg}deg)` : "";
+  const parts = [];
+  if (deg) parts.push(`rotate(${deg}deg)`);
+  if (lbZoom !== 1) parts.push(`scale(${lbZoom})`);
+  img.style.transform = parts.join(" ");
   const side = deg === 90 || deg === 270; // 竖图转横图时按视口高宽反过来限制，避免溢出屏幕
   img.style.maxWidth = side ? "85vh" : "";
   img.style.maxHeight = side ? "90vw" : "";
+  // 放大时去掉过渡（滚轮才跟手），并提示可以缩回
+  img.classList.toggle("zoomed", lbZoom > 1);
 }
-function resetLbRotation() {
+function resetLbView() {
   lbRotateDeg = 0;
-  applyLbRotation();
+  lbZoom = 1;
+  const img = document.getElementById("lbImg");
+  if (img) img.style.transformOrigin = "";
+  applyLbView();
 }
 function lbRotateView() {
   lbRotateDeg = (lbRotateDeg + 90) % 360;
-  applyLbRotation();
+  applyLbView();
   lbShowTools();
+}
+/* 滚轮缩放：以鼠标位置为锚点放大 / 缩小，1× 即适屏（不变形，纯 CSS transform） */
+const LB_ZOOM_MAX = 8;
+function lbZoomBy(factor, originX, originY) {
+  const img = document.getElementById("lbImg");
+  if (!img) return;
+  const next = Math.min(LB_ZOOM_MAX, Math.max(1, lbZoom * factor));
+  if (next === lbZoom) return;
+  lbZoom = next;
+  if (lbZoom === 1) img.style.transformOrigin = "";
+  else if (originX !== undefined && originY !== undefined) img.style.transformOrigin = `${originX}% ${originY}%`;
+  applyLbView();
 }
 
 /* 下载原图 */
@@ -1370,6 +1391,23 @@ function initLightboxNav() {
 
   let sx = 0, sy = 0, tracking = false;
   const pt = (e) => (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || null;
+  // v0.47：桌面端滚轮缩放（以鼠标位置为锚点；缩放到 1× 即恢复适屏）
+  lb.addEventListener("wheel", (e) => {
+    if (!lbIsOpen()) return;
+    if (!e.target.closest("#lbImg")) return;
+    e.preventDefault();
+    let ox, oy;
+    const img = document.getElementById("lbImg");
+    if (img) {
+      const r = img.getBoundingClientRect();
+      if (r.width && r.height) {
+        ox = Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100));
+        oy = Math.min(100, Math.max(0, ((e.clientY - r.top) / r.height) * 100));
+      }
+    }
+    lbZoomBy(e.deltaY < 0 ? 1.18 : 1 / 1.18, ox, oy);
+    lbShowTools();
+  }, { passive: false });
   lb.addEventListener("touchstart", (e) => {
     const t = pt(e);
     if (!t) return;

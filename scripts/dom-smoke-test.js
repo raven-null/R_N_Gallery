@@ -173,6 +173,9 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
 
   const cssText = fs.readFileSync(path.join(ROOT, "public", "assets", "style.css"), "utf8");
   check("CSS 含 content-visibility 规则", /content-visibility:\s*auto/.test(cssText));
+  // v0.47：灯箱图片铺满可用区域且不变形
+  check("CSS：灯箱图片按比例铺满（max-height 100% + object-fit contain）",
+    /\.lightbox img\s*\{[^}]*max-height:\s*100%/.test(cssText) && /\.lightbox img\s*\{[^}]*object-fit:\s*contain/.test(cssText));
 
   /* 分类工作台：选中一张卡片 → 点主分类 chips → 真能写进图库 */
   const cwCard = doc.querySelector("#cwCards .cw-card");
@@ -413,6 +416,23 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       await clickAt(lbImgEl, Math.round(w * 0.65)); // 切到下一张
       check("切换图片后旋转自动复位", !lbImgEl.style.transform, `transform="${lbImgEl.style.transform}"`);
     }
+    // v0.47：桌面端滚轮缩放（只影响预览，切图复位）
+    const makeWheel = (deltaY) => {
+      const ev = new window.MouseEvent("wheel", { bubbles: true, cancelable: true, clientX: 500, clientY: 400 });
+      Object.defineProperty(ev, "deltaY", { value: deltaY });
+      return ev;
+    };
+    lbImgEl.dispatchEvent(makeWheel(-120));
+    await wait(150);
+    const zoomMatch = (lbImgEl.style.transform || "").match(/scale\(([\d.]+)\)/);
+    check("滚轮向上放大图片", !!zoomMatch && parseFloat(zoomMatch[1]) > 1, `transform="${lbImgEl.style.transform}"`);
+    for (let i = 0; i < 14; i++) lbImgEl.dispatchEvent(makeWheel(120));
+    await wait(150);
+    check("滚轮向下缩回 1×（适屏）", !/scale\(/.test(lbImgEl.style.transform || ""), `transform="${lbImgEl.style.transform}"`);
+    lbImgEl.dispatchEvent(makeWheel(-120));
+    await wait(120);
+    await clickAt(lbImgEl, Math.round(w * 0.65));
+    check("切换图片后缩放自动复位", !lbImgEl.style.transform, `transform="${lbImgEl.style.transform}"`);
     // v0.44：点图片以外的空白 → 关闭灯箱
     lbBox.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: Math.round(w * 0.5), clientY: 60 }));
     await wait(300);
