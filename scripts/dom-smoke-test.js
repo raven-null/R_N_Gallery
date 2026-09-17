@@ -367,19 +367,21 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     lbBox.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 400, clientY: 300 }));
     await wait(100);
     check("鼠标移动后工具条浮现", lbBox.classList.contains("tools-visible"));
-    // v0.43：‹ › 按钮删除，改点左 / 右区域 + 左右滑动切图
-    check("灯箱不再有上一张 / 下一张按钮", !doc.querySelector(".lightbox .lb-prev") && !doc.querySelector(".lightbox .lb-next"));
+    // v0.43/0.44：切图 = 点图片左右半边 / 左右滑动；关闭 = 点图片外的空白（按钮全删了）
+    check("灯箱不再有上一张 / 下一张 / 关闭按钮",
+      !doc.querySelector(".lightbox .lb-prev") && !doc.querySelector(".lightbox .lb-next") && !doc.querySelector(".lightbox .lb-close"));
     const cur0 = lbBox.dataset.cur;
-    const clickAt = async (x) => {
-      lbBox.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: x, clientY: 400 }));
+    const lbImgEl = doc.getElementById("lbImg");
+    const clickAt = async (el, x) => {
+      el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: x, clientY: 400 }));
       await wait(300);
       return lbBox.dataset.cur;
     };
     const w = window.innerWidth || 1024;
-    const afterLeft = await clickAt(Math.round(w * 0.15));
-    check("点灯箱左侧切到上一张", !!afterLeft && afterLeft !== cur0, `${cur0} → ${afterLeft}`);
-    const afterRight = await clickAt(Math.round(w * 0.85));
-    check("点灯箱右侧切回下一张", afterRight === cur0, `${afterLeft} → ${afterRight}`);
+    const afterLeft = await clickAt(lbImgEl, Math.round(w * 0.35));
+    check("点图片左半边切到上一张", !!afterLeft && afterLeft !== cur0, `${cur0} → ${afterLeft}`);
+    const afterRight = await clickAt(lbImgEl, Math.round(w * 0.65));
+    check("点图片右半边切回下一张", afterRight === cur0, `${afterLeft} → ${afterRight}`);
     // 左右滑动（移动端）：模拟 touch 事件
     const mkTouch = (type, x) => {
       const ev = new window.Event(type, { bubbles: true });
@@ -402,9 +404,10 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: " ", bubbles: true }));
     await wait(100);
     check("再按空格停止幻灯片", !!playBtn && !playBtn.classList.contains("playing"));
-    clickEl(doc.querySelector(".lb-close"));
-    await wait(250);
-    check("关闭灯箱并收起工具条", !lbBox.classList.contains("open") && !lbBox.classList.contains("tools-visible"));
+    // v0.44：点图片以外的空白 → 关闭灯箱
+    lbBox.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: Math.round(w * 0.5), clientY: 60 }));
+    await wait(300);
+    check("点空白关闭灯箱并收起工具条", !lbBox.classList.contains("open") && !lbBox.classList.contains("tools-visible"));
   }
   if (firstCard) {
     firstCard.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));

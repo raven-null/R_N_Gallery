@@ -1377,12 +1377,17 @@ function initLightboxNav() {
   let suppressClick = 0;
 
   lb.addEventListener("click", (e) => {
-    if (e.target.closest("button")) return;          // 关闭按钮 / 右下角工具条按钮
+    if (e.target.closest("button")) return;          // 右下角悬浮工具条按钮
     if (e.target.closest(".lb-tools-float")) return;
     if (Date.now() < suppressClick) return;          // 刚滑动过 → 忽略尾随的 click
+    // v0.44：点图片 → 左右半边切换；点图片以外的空白 → 关闭灯箱（✕ 按钮已删除）
+    if (!e.target.closest("#lbImg")) {
+      closeLightbox();
+      return;
+    }
     const w = lb.clientWidth || window.innerWidth || 1;
-    if ((e.clientX || 0) < w / 2) lbStep(-1);        // 点左半边 = 上一张
-    else lbStep(1);                                  // 点右半边 = 下一张
+    if ((e.clientX || 0) < w / 2) lbStep(-1);        // 图片左半边 = 上一张
+    else lbStep(1);                                  // 图片右半边 = 下一张
   });
 
   let sx = 0, sy = 0, tracking = false;
@@ -1953,12 +1958,10 @@ function initGallery() {
     openLightbox(id);
   });
 
-  // 灯箱（全局实现 openLightboxById；←→ / 点击左右区域 / 左右滑动 按当前筛选视图顺序切换）
+  // 灯箱（全局实现 openLightboxById；←→ / 点图片左右半边 / 左右滑动 按当前筛选视图顺序切换）
   const openLightbox = openLightboxById;
-  const lbCloseEl = document.querySelector(".lb-close");
   const step = (d) => lbStep(d); // v0.38：切图逻辑抽到全局，灯箱悬浮工具条 / 幻灯片共用
   window.__lbStepList = () => (filtered.length && filtered.some((x) => x.id === lightbox.dataset.cur) ? filtered : PHOTOS);
-  if (lbCloseEl) lbCloseEl.onclick = () => closeLightbox();
   document.addEventListener("keydown", (e) => {
     if (!lightbox.classList.contains("open")) return;
     if (e.key === "ArrowLeft") step(-1);

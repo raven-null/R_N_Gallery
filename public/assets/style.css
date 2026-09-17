@@ -1254,61 +1254,9 @@ body[data-page="gallery"] .page {
   from { transform: scale(0.92); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
-.lightbox .lb-btn {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 48px; height: 48px;
-  border-radius: 50%;
-  border: 1px solid var(--w012);
-  background: linear-gradient(
-    135deg,
-    var(--s28) 0%,
-    var(--s09) 100%
-  );
-  -webkit-backdrop-filter: blur(24px) saturate(200%);
-  backdrop-filter: blur(24px) saturate(200%);
-  color: #fff;
-  font-size: 20px;
-  display: grid;
-  place-items: center;
-  box-shadow: 
-    inset 0 1px 0 rgba(255,255,255,0.1),
-    inset 0 -1px 0 rgba(0,0,0,0.15),
-    0 8px 24px rgba(0,0,0,0.3);
-  transition: all 0.3s var(--ease-spring);
-  z-index: 10;
-}
-.lightbox .lb-btn:hover { 
-  background: linear-gradient(
-    135deg,
-    var(--s35) 0%,
-    var(--s20) 100%
-  );
-  border-color: var(--w020);
-  transform: translateY(-50%) scale(1.12); 
-  box-shadow: 
-    inset 0 1px 0 var(--w012),
-    inset 0 -1px 0 rgba(0,0,0,0.15),
-    0 12px 32px rgba(0,0,0,0.4);
-}
-.lightbox .lb-btn:active { 
-  transform: translateY(-50%) scale(0.95);
-  transition-duration: 0.1s;
-}
-/* v0.43：‹ › 按钮已删除 —— 切图改为点左 / 右区域、左右滑动 */
-.lightbox .lb-img-wrap { cursor: pointer; }
-.lightbox .lb-close { 
-  top: 20px; 
-  transform: none; 
-  right: 20px; 
-}
-.lightbox .lb-close:hover { 
-  transform: scale(1.12); 
-}
-.lightbox .lb-close:active { 
-  transform: scale(0.95); 
-}
+/* v0.43/0.44：‹ › 与 ✕ 按钮都已删除 —— 切图 = 点图片左右半边 / 左右滑动，关闭 = 点图片外的空白 */
+.lightbox { cursor: default; }
+.lightbox #lbImg { cursor: pointer; }
 
 /* ---- 右下角悬浮工具条（v0.38：默认隐藏，鼠标在灯箱内移动时浮现，静止 3 秒淡出） ---- */
 .lightbox .lb-tools-float {
@@ -2473,11 +2421,6 @@ input.settings-value:focus {
 [data-theme="light"] .tag-form input[type="text"],
 [data-theme="light"] .tag-form select { background: rgba(255,255,255,0.75); }
 [data-theme="light"] .tag-suggest .ts-item:hover { background: rgba(0,0,0,0.05); }
-[data-theme="light"] .lightbox .lb-btn {
-  background: linear-gradient(135deg, rgba(32,36,48,0.9) 0%, rgba(13,15,22,0.93) 100%);
-  color: #fff;
-  border-color: rgba(255,255,255,0.16);
-}
 
 /* ============================================================
    外观设置 v0.11.1：主题 / 瀑布流列宽 / 快捷键说明
@@ -3123,41 +3066,8 @@ body.perf-lite .dup-modal { backdrop-filter: none; -webkit-backdrop-filter: none
 .fab-group.hover-hold,
 .fab-group.active {
   pointer-events: auto;
-}/* ============================================================
-   灯箱控件 · 液态玻璃（v0.13.9：左右切换 / 信息开关 / 关闭）
-   亮半透明玻璃：高光边 + 顶部高光 + 下缘折射 + 大模糊
-   ============================================================ */
-.lightbox .lb-btn,
-[data-theme="light"] .lightbox .lb-btn{
-  background: linear-gradient(
-    150deg,
-    rgba(255,255,255,0.24) 0%,
-    rgba(255,255,255,0.09) 36%,
-    rgba(255,255,255,0.15) 70%,
-    rgba(255,255,255,0.22) 100%
-  );
-  border-color: rgba(255,255,255,0.32);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.5),
-    inset 1px 0 0 rgba(255,255,255,0.14),
-    inset -1px 0 0 rgba(255,255,255,0.14),
-    inset 0 -1px 1px rgba(255,255,255,0.12),
-    0 6px 18px rgba(0,0,0,0.35);
-  -webkit-backdrop-filter: blur(26px) saturate(190%);
-  backdrop-filter: blur(26px) saturate(190%);
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.25);
-}.lightbox .lb-btn:hover,
-[data-theme="light"] .lightbox .lb-btn:hover{
-  background: linear-gradient(
-    150deg,
-    rgba(255,255,255,0.34) 0%,
-    rgba(255,255,255,0.16) 42%,
-    rgba(255,255,255,0.26) 100%
-  );
-  border-color: rgba(255,255,255,0.42);
-  color: #fff;
 }
+
 /* ============================================================
    标签借鉴模块 v0.14：快捷点选 / 统计视图 / 拖拽分类
    ============================================================ */
