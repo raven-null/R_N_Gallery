@@ -470,6 +470,24 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(200);
   }
 
+  /* 库内查重（v0.42）：筛选菜单入口 + 扫描弹窗（本地 seed 里放了两张相同的图） */
+  const dupEntry = doc.querySelector('#tagMenuList [data-dupopen]');
+  check("筛选菜单有查重入口", !!dupEntry);
+  if (dupEntry) {
+    clickEl(dupEntry);
+    await wait(1800);
+    const dupModal = doc.getElementById("dupModal");
+    const dupBody = doc.getElementById("dupBody");
+    check("点查重打开弹窗并完成扫描",
+      !!dupModal && dupModal.classList.contains("open") && !!dupBody && /dup-summary|dup-empty/.test(dupBody.innerHTML));
+    const st = window.__dupState ? window.__dupState() : null;
+    check("扫描结果有状态钩子", !!st && st.scanned > 0, st ? `扫了 ${st.scanned} 张，${st.groups} 组（完全相同 ${st.exact}）` : "无");
+    const dc = doc.getElementById("dupClose");
+    if (dc) clickEl(dc);
+    await wait(250);
+    check("查重弹窗可关闭", !!dupModal && !dupModal.classList.contains("open"));
+  }
+
   /* 清道夫（v0.39）：本测试会新建 / 改名 / 删除临时标签，而改名与删除后的 `apiSaveTags()`
      是全量 PUT —— 若当时 `loadTags()` 读到的是含历史临时标签的旧副本（Blobs 读延迟 1~2 分钟），
      这些残留就会被写回配置。这里统一过滤掉 `zz测试*` 再 PUT 一次，保证跑完不留垃圾。 */

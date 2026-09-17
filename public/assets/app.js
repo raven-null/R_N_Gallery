@@ -836,6 +836,234 @@ function updateUqSimilarBadge(it) {
   badge.title = parts.join("\n") + "\n（上传时会再确认一次；不想留可以点右侧 ✕ 从队列移除）";
 }
 
+/* ---------- 图库查重：完全相同 / 相似图片（v0.42） ----------
+   用户诉求：图库里有两张相同或相似的图时提醒他。
+   上传时的提醒已有（上面那套）；这里补的是**库内既有照片**的扫描：
+   内容哈希 sha1 相同 = 完全相同；感知哈希 dHash 汉明距离 ≤ 8 = 构图相似。 */
+let dupAll = [];        // 本次扫描拿到的全量索引（含 url/thumbUrl）
+let dupGroups = [];     // 扫描结果分组
+let dupScanned = 0;
+let dupScanBusy = false;
+
+function popcount32(x) {
+  x = x - ((x >> 1) & 0x55555555);
+  x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
+  x = (x + (x >> 4)) & 0x0f0f0f0f;
+  return Math.imul(x, 0x01010101) >>> 24;
+}
+/* 16 位十六进制 dHash → 两个 32 位整数，便于批量比较时快速算汉明距离 */
+function dhashNum(hex) {
+  if (!hex || hex.length < 16) return null;
+  return [parseInt(hex.slice(0, 8), 16), parseInt(hex.slice(8, 16), 16)];
+}
+function hammingFast(a, b) {
+  return popcount32((a[0] ^ b[0]) >>> 0) + popcount32((a[1] ^ b[1]) >>> 0);
+}
+function fmtBytes(b) {
+  const n = Number(b) || 0;
+  return n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.round(n / 1e3) + " KB";
+}
+
+/* 拉全量索引（分页 500，走列表接口，不受图库墙已显示数量影响） */
+async function fetchAllIndex() {
+  const out = [];
+  let cursor = null;
+  for (let guard = 0; guard < 400; guard++) {
+    const page = await fetchPhotosPage(cursor, 500);
+    const items = (page.photos || []).map(mapPhoto);
+    out.push(...items);
+    if (!page.hasMore || !items.length || !page.cursor) break;
+    cursor = page.cursor;
+  }
+  return out;
+}
+
+/* 扫描：exact = 完全相同（sha1 相同），similar = 相似（dHash 距离 ≤ 阈值） */
+function scanDuplicates(list) {
+  const groups = [];
+  const byHash = new Map();
+  for (const p of list) {
+    if (!p.hash) continue;
+    if (!byHash.has(p.hash)) byHash.set(p.hash, []);
+    byHash.get(p.hash).push(p);
+  }
+  for (const arr of byHash.values()) {
+    if (arr.length > 1) groups.push({ kind: "exact", distance: 0, photos: arr });
+  }
+
+  const items = list.map((p) => ({ p, n: dhashNum(p.dhash) })).filter((x) => x.n);
+  const pairs = [];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      // 完全相同的内容哈希已单独成组，不再重复报为「相似」
+      if (items[i].p.hash && items[i].p.hash === items[j].p.hash) continue;
+      const d = hammingFast(items[i].n, items[j].n);
+      if (d <= DHASH_THRESHOLD) pairs.push([i, j, d]);
+    }
+  }
+  // 连通分量：A~B、B~C 归为同一组相似图
+  const adj = new Map();
+  for (const [i, j, d] of pairs) {
+    if (!adj.has(i)) adj.set(i, []);
+    if (!adj.has(j)) adj.set(j, []);
+    adj.get(i).push([j, d]);
+    adj.get(j).push([i, d]);
+  }
+  const seen = new Set();
+  for (const start of adj.keys()) {
+    if (seen.has(start)) continue;
+    const stack = [start];
+    const comp = [];
+    let minD = 64;
+    seen.add(start);
+    while (stack.length) {
+      const k = stack.pop();
+      comp.push(k);
+      for (const [nx, d] of adj.get(k) || []) {
+        if (d < minD) minD = d;
+        if (!seen.has(nx)) { seen.add(nx); stack.push(nx); }
+      }
+    }
+    if (comp.length > 1) groups.push({ kind: "similar", distance: minD, photos: comp.map((k) => items[k].p) });
+  }
+  // 完全相同优先，然后按组内张数、差异升序
+  return groups.sort((a, b) => (a.kind === b.kind ? (b.photos.length - a.photos.length || a.distance - b.distance) : (a.kind === "exact" ? -1 : 1)));
+}
+
+function renderDupResults(err) {
+  const body = document.getElementById("dupBody");
+  if (!body) return;
+  if (err) {
+    body.innerHTML = `<div class="dup-empty">扫描失败：${esc(err.message || String(err))}</div>`;
+    return;
+  }
+  if (!dupGroups.length) {
+    body.innerHTML = `<div class="dup-empty">✓ 没发现重复或相似的图片（已扫 ${dupScanned} 张）</div>`;
+    return;
+  }
+  const exact = dupGroups.filter((g) => g.kind === "exact").length;
+  const sim = dupGroups.length - exact;
+  body.innerHTML = `<div class="dup-summary">发现 <b>${dupGroups.length}</b> 组（完全相同 ${exact} · 相似 ${sim}），共扫描 ${dupScanned} 张</div>` +
+    dupGroups.map((g, gi) => {
+      const kind = g.kind === "exact"
+        ? `<span class="dup-kind exact">完全相同</span>`
+        : `<span class="dup-kind similar">相似 · 差异 ${g.distance}/64</span>`;
+      const items = g.photos.map((p) => `
+        <div class="dup-item" data-id="${esc(p.id)}">
+          <img class="dup-thumb" src="${esc(p.thumbUrl || p.url)}" alt="" loading="lazy" decoding="async" data-dupview="${esc(p.id)}">
+          <div class="dup-meta">
+            <b>${esc(p.title || "未命名")}</b>
+            <span>${p.width || 0}×${p.height || 0} · ${fmtBytes(p.size)} · ${esc(String(p.uploadedAt || "").slice(0, 10))}</span>
+          </div>
+          <div class="dup-acts">
+            <button class="btn ghost sm" type="button" data-dupview="${esc(p.id)}">看大图</button>
+            <button class="btn ghost sm dup-del" type="button" data-dupdel="${esc(p.id)}">删除</button>
+          </div>
+        </div>`).join("");
+      return `<div class="dup-group">
+        <div class="dup-head">${kind}<span class="dup-count">${g.photos.length} 张</span>
+          <button class="btn ghost sm" type="button" data-dupkeep="${gi}">保留最新一张，删除其余 ${g.photos.length - 1} 张</button>
+        </div>
+        <div class="dup-items">${items}</div>
+      </div>`;
+    }).join("");
+}
+
+async function runDupScan() {
+  const body = document.getElementById("dupBody");
+  if (!body || dupScanBusy) return;
+  dupScanBusy = true;
+  body.innerHTML = `<div class="dup-empty">正在扫描图库…</div>`;
+  try {
+    dupAll = await fetchAllIndex();
+    dupScanned = dupAll.length;
+    dupGroups = scanDuplicates(dupAll);
+    renderDupResults();
+    window.__dupState = () => ({ scanned: dupScanned, groups: dupGroups.length, exact: dupGroups.filter((g) => g.kind === "exact").length });
+  } catch (e) {
+    dupGroups = [];
+    renderDupResults(e);
+  }
+  dupScanBusy = false;
+}
+
+function dropFromDupResults(ids) {
+  const set = new Set(ids);
+  for (let i = PHOTOS.length - 1; i >= 0; i--) if (set.has(PHOTOS[i].id)) PHOTOS.splice(i, 1);
+  dupAll = dupAll.filter((x) => !set.has(x.id));
+  dupGroups = dupGroups
+    .map((g) => ({ ...g, photos: g.photos.filter((x) => !set.has(x.id)) }))
+    .filter((g) => g.photos.length > 1); // 组里只剩一张就不再是「重复」
+  if (window.__refreshGallery) window.__refreshGallery();
+  renderDupResults();
+}
+
+/* 删除单张（在查重弹窗里） */
+function deleteDupPhoto(id) {
+  const p = dupAll.find((x) => x.id === id) || PHOTOS.find((x) => x.id === id);
+  askConfirm(`删除「${p ? p.title || "未命名" : id}」？`, "原图与元数据将被永久删除，不可恢复。", "删除", async () => {
+    try {
+      await apiFetch(`/api/photos/${id}`, { method: "DELETE" });
+    } catch (e) {
+      alert("删除失败：" + e.message);
+      return;
+    }
+    dropFromDupResults([id]);
+  });
+}
+
+/* 整组处理：保留最新上传的一张，删除其余 */
+function dupKeepNewest(gi) {
+  const g = dupGroups[gi];
+  if (!g) return;
+  const sorted = [...g.photos].sort((a, b) => String(b.uploadedAt || "").localeCompare(String(a.uploadedAt || "")));
+  const keep = sorted[0];
+  const del = sorted.slice(1);
+  askConfirm(`保留「${keep.title || "未命名"}」，删除其余 ${del.length} 张？`, "删除不可恢复。想留别的可以在组内单独删除。", "删除", async () => {
+    const done = [];
+    for (const p of del) {
+      try {
+        await apiFetch(`/api/photos/${p.id}`, { method: "DELETE" });
+        done.push(p.id);
+      } catch (e) {
+        alert(`删除「${p.title || p.id}」失败：${e.message}`);
+      }
+    }
+    if (done.length) dropFromDupResults(done);
+  });
+}
+
+async function openDupFinder() {
+  const m = document.getElementById("dupModal");
+  if (!m) return;
+  m.classList.add("open");
+  await runDupScan();
+}
+
+function initDupFinder() {
+  const m = document.getElementById("dupModal");
+  if (!m) return;
+  const close = document.getElementById("dupClose");
+  if (close) close.onclick = () => m.classList.remove("open");
+  const rescan = document.getElementById("dupRescan");
+  if (rescan) rescan.onclick = () => runDupScan();
+  const sbtn = document.getElementById("btnFindDups");
+  if (sbtn) sbtn.onclick = () => openDupFinder();
+  const body = document.getElementById("dupBody");
+  if (body && body.dataset.bound !== "1") {
+    body.dataset.bound = "1";
+    body.addEventListener("click", (e) => {
+      const view = e.target.closest("[data-dupview]");
+      if (view) { openLightboxById(view.dataset.dupview); return; }
+      const del = e.target.closest("[data-dupdel]");
+      if (del) { deleteDupPhoto(del.dataset.dupdel); return; }
+      const keep = e.target.closest("[data-dupkeep]");
+      if (keep) dupKeepNewest(parseInt(keep.dataset.dupkeep, 10));
+    });
+  }
+  window.__openDupFinder = openDupFinder; // 筛选菜单入口用（内容动态渲染）
+}
+
 /* ---------- 通用：键盘快捷键 ---------- */
 document.addEventListener("keydown", (e) => {
   if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
@@ -1348,6 +1576,9 @@ function renderTagMenuContent() {
       }
     }
   }
+  // 查重入口（v0.42）：扫描库内完全相同 / 相似的图片（不受当前筛选影响）
+  html += `<button class="tag-menu-item dup-entry" data-dupopen="1" title="${t("扫描库内完全相同 / 相似的图片", "Scan for duplicate / similar photos")}">
+    <span class="nm">🔍 ${t("查找重复 / 相似图片", "Find duplicates")}</span><span class="cnt">›</span></button>`;
   list.innerHTML = html;
 }
 
@@ -1373,6 +1604,12 @@ function initGallery() {
 
   // 事件委托：标签行筛选切换 / 组头折叠展开 / AI 行 / 相册行
   tagMenuList.addEventListener("click", (e) => {
+    const dupOpen = e.target.closest("[data-dupopen]");
+    if (dupOpen) { // v0.42：筛选项底部的查重入口
+      if (tagFlyout) tagFlyout.close();
+      openDupFinder();
+      return;
+    }
     const aiRow = e.target.closest("[data-ai-q]");
     if (aiRow) {
       runAiTagSearch(aiRow.dataset.aiQ, aiRow);
@@ -5075,6 +5312,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initEditModal();
   initLightboxTools(); // v0.38：灯箱右下角悬浮工具条 + 幻灯片
   initSlideSetting();
+  initDupFinder(); // v0.42：库内重复 / 相似图片扫描
   initUqModal();
   initImportUrl();
   initAiSettings();

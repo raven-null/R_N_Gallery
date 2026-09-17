@@ -16,7 +16,6 @@
     "test:dom": "node scripts/dom-smoke-test.js",
     "import:chars": "node scripts/import-chars.js",
     "find:dups": "node scripts/find-duplicates.js",
-    "migrate": "node scripts/migrate-photos.js",
-    "tagger": "node scripts/local-tagger.js"
+    "migrate": "node scripts/migrate-photos.js"
   }
 }

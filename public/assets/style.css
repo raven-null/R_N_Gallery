@@ -2840,9 +2840,83 @@ body.select-mode .card .pick { display: grid; }
 .album-new-row input:focus { border-color: rgba(255,159,10,0.45); }
 [data-theme="light"] .album-new-row input { background: rgba(255,255,255,0.75); }
 
+/* ---------- 查重弹窗（v0.42：完全相同 / 相似图片） ---------- */
+.dup-modal { max-width: 720px; }
+.dup-body {
+  max-height: 56vh;
+  overflow-y: auto;
+  margin: 4px 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.dup-empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.dup-summary { font-size: 12.5px; color: var(--text-dim); }
+.dup-summary b { color: var(--text); }
+.dup-group {
+  border: 1px solid var(--w008);
+  border-radius: 14px;
+  padding: 10px 12px 12px;
+  background: var(--w005);
+}
+.dup-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 9px;
+}
+.dup-kind {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.dup-kind.exact { color: #ff6b6b; background: rgba(255,107,107,0.12); border-color: rgba(255,107,107,0.3); }
+.dup-kind.similar { color: #ffb020; background: rgba(255,176,32,0.12); border-color: rgba(255,176,32,0.3); }
+.dup-count { font-size: 12px; color: var(--text-faint); }
+.dup-head .btn { margin-left: auto; }
+.dup-items { display: flex; flex-direction: column; gap: 8px; }
+.dup-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--w005);
+  border: 1px solid var(--w006);
+}
+.dup-thumb {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: none;
+  cursor: zoom-in;
+  background: var(--w005);
+}
+.dup-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.dup-meta b {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dup-meta span { font-size: 11.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.dup-acts { display: flex; gap: 6px; flex: none; }
+.dup-acts .dup-del { color: var(--danger); }
+.tag-menu-item.dup-entry { margin-top: 6px; border-top: 1px solid var(--w008); border-radius: 0 0 10px 10px; }
+body.perf-lite .dup-modal { backdrop-filter: none; -webkit-backdrop-filter: none; }
+
 /* ---------- 日志弹窗（v0.12） ---------- */
-.logs-modal { max-width: 560px; }
-.logs-list {
+.logs-modal { max-width: 560px; }.logs-list {
   display: flex;
   flex-direction: column;
   gap: 6px;

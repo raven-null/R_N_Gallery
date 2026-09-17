@@ -341,6 +341,13 @@
             </span>
             <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
+          <button class="settings-row settings-row-action" id="btnFindDups">
+            <span class="settings-label">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="13" height="13" rx="2"/><path d="M8 21h11a2 2 0 0 0 2-2V8"/></svg>
+              查找重复 / 相似图片
+            </span>
+            <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
         </div>
       </div>
 
@@ -587,6 +594,19 @@
       <div class="m-actions">
         <button class="btn ghost sm" id="logsClearBtn" type="button">清空日志</button>
         <button class="btn ghost" id="logsClose" type="button">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 重复 / 相似图片（v0.42） -->
+  <div class="modal-mask" id="dupModal">
+    <div class="modal dup-modal">
+      <h3>重复 / 相似图片</h3>
+      <div class="hint" style="margin:-4px 0 10px">按内容哈希（sha1）找<b>完全相同</b>的图，按感知哈希（dHash）找<b>构图相似</b>的图；删除不可恢复，请逐组确认。</div>
+      <div class="dup-body" id="dupBody"></div>
+      <div class="m-actions">
+        <button class="btn ghost sm" id="dupRescan" type="button">重新扫描</button>
+        <button class="btn ghost" id="dupClose" type="button">关闭</button>
       </div>
     </div>
   </div>
