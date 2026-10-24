@@ -2626,7 +2626,7 @@ body.select-mode .card .pick { display: grid; }
 .uq-name-row .edited-mark { font-size: 10px; color: var(--accent); background: rgba(255,159,10,0.14); border-radius: 99px; padding: 0 6px; flex: none; }
 
 /* ============================================================
-iOS 风格开关（通用设置项：性能模式 / 水印 / R18 观光开关）
+iOS 风格开关（通用设置项：性能模式 / R18 观光开关）
    ============================================================ */
 /* iOS 风格开关 */
 .switch { position: relative; display: inline-block; width: 46px; height: 27px; flex: none; }
@@ -2850,16 +2850,7 @@ body.mode-guest .page-menu-item[data-page="tags"] { display: none !important; }
 .log-item .lip { margin-left: auto; color: var(--text-faint); font-size: 11px; flex: none; }
 .logs-empty { color: var(--text-faint); text-align: center; padding: 22px 0; font-size: 13px; }
 
-/* ---------- 水印（v0.12） ---------- */
-.wm-preview {
-  width: 42px;
-  height: 42px;
-  object-fit: contain;
-  border-radius: 8px;
-  border: 1px solid var(--w010);
-  background: repeating-conic-gradient(rgba(255,255,255,0.08) 0 25%, transparent 0 50%) 0 0/12px 12px;
-}
-.settings-section.wm-disabled .wm-opt { opacity: 0.45; pointer-events: none; }
+/* v0.63：水印功能已移除，相关样式（.wm-preview / .wm-disabled）一并删除 */
 .quota-block { width: 100%; }
 .quota-bar {
   height: 7px;

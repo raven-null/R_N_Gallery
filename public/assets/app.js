@@ -2793,8 +2793,6 @@ function initUpload() {
           canvas.height = Math.max(1, Math.round(img.height * scale));
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          // v0.12：加水印（启用时；失败不影响上传）
-          try { await paintWatermark(ctx, canvas.width, canvas.height); } catch (e) { /* ignore */ }
           const mime = canvas.toDataURL("image/webp").startsWith("data:image/webp") ? "image/webp" : "image/jpeg";
           resolve({ dataUrl: canvas.toDataURL(mime, 0.85), mime, width: canvas.width, height: canvas.height });
         };
@@ -3268,7 +3266,7 @@ function initImportUrl() {
 }
 
 /* ============================================================
-   v0.12 扩展：相册 / 访客门禁 / 操作日志 / 水印 / 语言
+   v0.12 扩展：相册 / 访客门禁 / 操作日志 / 语言
    ============================================================ */
 
 /* ============================================================
@@ -3536,84 +3534,7 @@ function initLogsUI() {
   });
 }
 
-/* ---------- 水印（前端 canvas 合成） ---------- */
-const WM_KEY = "rn_wm";
-function wmCfg() {
-  try {
-    const c = JSON.parse(localStorage.getItem(WM_KEY) || "null");
-    return c && c.dataUrl ? c : { on: false, dataUrl: null };
-  } catch (e) { return { on: false, dataUrl: null }; }
-}
-function wmEnabled() { return !!wmCfg().on; }
-let wmCache = null;
-async function paintWatermark(ctx, w, h) {
-  const cfg = wmCfg();
-  if (!cfg.on || !cfg.dataUrl) return;
-  if (!wmCache || wmCache.src !== cfg.dataUrl) {
-    wmCache = await new Promise((res, rej) => {
-      const im = new Image();
-      im.onload = () => { im.__src = cfg.dataUrl; res(im); };
-      im.onerror = rej;
-      im.src = cfg.dataUrl;
-    });
-  }
-  const img = wmCache;
-  const bw = Math.max(24, w * 0.18);
-  const bh = Math.max(24, (img.height / img.width) * bw);
-  const m = Math.max(8, w * 0.03);
-  ctx.save();
-  ctx.globalAlpha = 0.88;
-  ctx.drawImage(img, w - bw - m, h - bh - m, bw, bh);
-  ctx.restore();
-}
-function initWmSettings() {
-  const sec = document.getElementById("wmSection");
-  if (!sec) return;
-  const on = document.getElementById("wmOn");
-  const preview = document.getElementById("wmPreview");
-  const upBtn = document.getElementById("wmUpload");
-  const clrBtn = document.getElementById("wmClear");
-  const file = document.getElementById("wmFile");
-  const cfg = wmCfg();
-  on.checked = !!cfg.on;
-  const show = () => {
-    sec.classList.toggle("wm-disabled", !on.checked);
-    const c = wmCfg();
-    if (c.dataUrl) {
-      preview.src = c.dataUrl;
-      preview.hidden = false;
-      clrBtn.hidden = false;
-    } else {
-      preview.hidden = true;
-      clrBtn.hidden = true;
-    }
-  };
-  show();
-  on.addEventListener("change", () => {
-    const c = wmCfg();
-    c.on = on.checked;
-    localStorage.setItem(WM_KEY, JSON.stringify(c));
-    show();
-  });
-  upBtn.addEventListener("click", () => file.click());
-  file.addEventListener("change", () => {
-    const f = file.files && file.files[0];
-    if (!f) return;
-    if (f.size > 1024 * 1024) { alert("水印图请小于 1MB"); return; }
-    const rd = new FileReader();
-    rd.onload = () => {
-      const c = wmCfg();
-      c.dataUrl = rd.result;
-      localStorage.setItem(WM_KEY, JSON.stringify(c));
-      show();
-    };
-    rd.readAsDataURL(f);
-  });
-  clrBtn.addEventListener("click", () => {
-    localStorage.setItem(WM_KEY, JSON.stringify({ on: on.checked, dataUrl: null }));
-    show();
-  });
-}
+/* v0.63：水印功能已整体移除（设置页区块 + canvas 合成 + localStorage rn_wm 一并删除） */
 
 /* ---------- 语言切换（v0.12/0.13：骨架文案字典 + 动态文案 t()） ---------- */
 const LANG_KEY = "rn_lang";
@@ -3622,7 +3543,7 @@ const t = (zh, en) => (curLang() === "en" ? en : zh);
 const I18N_DICT = {
   "上传图片": "Upload Photos", "设置": "Settings", "搜索": "Search", "图库": "Gallery",
   "外观": "Appearance", "图库统计": "Library Stats", "快捷键": "Shortcuts",
-  "标签管理": "Tag Manager", "水印": "Watermark", "数据维护": "Maintenance", "危险操作": "Danger Zone",
+  "标签管理": "Tag Manager", "数据维护": "Maintenance", "危险操作": "Danger Zone",
   "主题": "Theme", "浅色": "Light", "深色": "Dark", "跟随系统": "Auto",
   "瀑布流列宽": "Column Width", "窄 180": "Narrow", "标准 240": "Standard", "宽 320": "Wide",
   "图片加载": "Image Quality", "高画质": "High", "平衡": "Balanced", "省流": "Low Data", "语言": "Language",
@@ -3651,8 +3572,6 @@ const I18N_DICT = {
   "编辑待上传项": "Edit upload item", "编辑图片信息": "Edit photo",
   "留空则使用文件名": "Empty = use file name", "留空则跟随上方全局标签": "Empty = use global tags",
   "图片编辑": "Edit", "操作日志": "Activity Log", "暂无操作记录": "No activity yet",
-  "水印图": "Watermark image", "上传时加图片水印": "Add watermark on upload",
-  "建议使用透明底 PNG；水印将等比缩放到图片宽度的 18%，置于右下角。仅作用于启用后新上传的图片。": "Use transparent PNG; watermark scales to 18% width, bottom-right. Applies to new uploads only.",
   "进入": "Enter", "私人图库": "Private Gallery", "输入访问密码以继续": "Enter password to continue", "访问密码": "Password",
 
 };
@@ -5432,7 +5351,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   initBatchFav();
   initAlbumPage(); // v0.34：相册整页（FAB 相册按钮 / 右边缘左滑进入）
   initLogsUI();
-  initWmSettings();
   initLang();
   initFabHold();
 
