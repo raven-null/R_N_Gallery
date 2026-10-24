@@ -932,6 +932,8 @@ body.perf-lite .masonry.grid-square .card { transition: none; }
   transform: translateY(0) scale(1);
   filter: blur(0);
 }
+/* v0.62：静默重渲染（切换循环滚动时）禁用卡片过渡 —— 否则整套卡片会重新浮现一遍 */
+.no-reveal .card { transition: none !important; }
 .card:hover {
   transform: scale(1.03);
   border-color: rgba(255,159,10,0.4);

@@ -2406,12 +2406,12 @@ function initGallery() {
   function updateLoadMore() {
     const lm = document.getElementById("loadMore");
     if (!lm) return;
-    // v0.61：无限滚动模式下没有"分批"概念，平时整条隐藏；只有撞到硬上限时才提示剩余
+    // v0.62：循环滚动模式下没有"分批"概念，平时整条隐藏；只有撞到硬上限时才提示剩余
     if (infiniteActive()) {
       const shownN = Math.min(filtered.length, INFINITE_LIMIT);
       const rest = filtered.length - shownN;
       lm.style.display = rest > 0 ? "block" : "none";
-      if (rest > 0) lm.querySelector("span").textContent = `已渲染前 ${shownN} 张（无限滚动上限）· 还有 ${rest} 张，用筛选缩小范围`;
+      if (rest > 0) lm.querySelector("span").textContent = `已渲染前 ${shownN} 张（循环滚动上限）· 还有 ${rest} 张，用筛选缩小范围`;
       return;
     }
     lm.style.display = shown < filtered.length ? "block" : "none";
@@ -2422,10 +2422,12 @@ function initGallery() {
     lm.querySelector("span").textContent = text;
   }
 
-  /* 全量渲染（初始 / 筛选 / 排序 / 数据变化时；滚动加载走 appendMore） */
-  function render() {
+  /* 全量渲染（初始 / 筛选 / 排序 / 数据变化时；滚动加载走 appendMore）
+     opts.skipReveal：跳过入场动画（v0.62 —— 切换循环滚动时只是换了渲染策略，不该重播一遍浮现动画） */
+  function render(opts) {
+    const skipReveal = !!(opts && opts.skipReveal);
     grid.innerHTML = "";
-    // v0.61：无限滚动 → 一次给全部（瀑布流下不再分批追加，避免 CSS 列重排）
+    // v0.62：循环滚动 → 一次给全部（瀑布流下不再分批追加，避免 CSS 列重排），到底才好无缝跳回顶部
     const cap = infiniteActive() ? Math.min(filtered.length, INFINITE_LIMIT) : (shown || PAGE);
     const slice = filtered.slice(0, cap);
     if (!slice.length) {
@@ -2441,12 +2443,24 @@ function initGallery() {
     grid.innerHTML = itemsHTML(slice, null, filtered);
     shown = slice.length;
     updateLoadMore();
-    // 视口出现动画（仅首次整批；滚动加载的新卡直接可见，避免闪屏）
-    initReveal(grid, ".card");
+    if (skipReveal) {
+      // v0.62：静默渲染 —— 卡片默认 opacity:0 靠 .visible 浮现，这里一次性点亮并掐掉过渡，
+      // 否则切换循环滚动时整套卡片会重新播一遍入场动画（用户明确不要）
+      grid.classList.add("no-reveal");
+      grid.querySelectorAll(".card").forEach((c) => {
+        c.style.transitionDelay = "0s";
+        c.classList.add("visible");
+      });
+      requestAnimationFrame(() => grid.classList.remove("no-reveal"));
+    } else {
+      // 视口出现动画（仅首次整批；滚动加载的新卡直接可见，避免闪屏）
+      initReveal(grid, ".card");
+    }
     initImgRelease(); // v0.25：性能模式下回收屏外卡片图片
     scheduleFill(); // v0.26：渲染后补足视口（首屏一次没填满就继续追加）
   }
   window.__renderGallery = () => render();
+  window.__renderGallerySilent = () => render({ skipReveal: true }); // v0.62：不播入场动画的重渲染
   // v0.24：后台补齐照片后，把新数据纳入当前筛选；显示数量不多时直接重建列表（保留已显示张数）
   window.__photosGrown = () => {
     renderTagMenuContent();
@@ -2503,8 +2517,31 @@ function initGallery() {
   window.addEventListener("scroll", () => {
     if (fillQueued) return;
     fillQueued = true;
-    requestAnimationFrame(() => { fillQueued = false; maybeFillViewport(); });
+    requestAnimationFrame(() => {
+      fillQueued = false;
+      if (!maybeLoopBack()) maybeFillViewport(); // v0.62：循环模式到底就跳回顶部，不用再补视口
+    });
   }, { passive: true });
+
+  /* v0.62：循环滚动（双击 FAB 主按钮开启）—— 这个模式的语义是「滚到底回到第一张继续」。
+     配合 render() 里的一次性全量渲染：结果全都在 DOM 里，到底就无缝跳回顶部，
+     于是可以一直往下滚、永远滚不完。 */
+  let loopGuard = 0;
+  function maybeLoopBack() {
+    if (!infiniteActive()) return false;
+    if (Date.now() < loopGuard) return false; // 刚跳过：防同一帧里反复触发
+    const sh = document.documentElement.scrollHeight;
+    const vh = window.innerHeight;
+    if (sh <= vh) return false;              // 内容还没一屏高，谈不上到底
+    if (sh - (window.scrollY + vh) > 40) return false; // 还差得远
+    if (shown < filtered.length) return false;         // 撞了渲染上限，仍按分批走
+    loopGuard = Date.now() + 400;
+    // 用 instant 而不是 smooth：html 上有 scroll-behavior: smooth，平滑回滚会露馅成"倒着滚回去"
+    try { window.scrollTo({ top: 0, behavior: "instant" }); }
+    catch (e) { window.scrollTo(0, 0); }
+    return true;
+  }
+  window.__maybeLoopBack = maybeLoopBack; // 调试 / 测试钩子
 
   /* 无限滚动（v0.25：改用 IntersectionObserver 哨兵。
      原先监听 scroll 事件并每次读 document.body.offsetHeight，会强制同步布局，
@@ -5070,12 +5107,13 @@ function initLayoutSwitch() {
   applyLayout();
 }
 
-/* ---------- 无限滚动（v0.61：双击 FAB 主按钮切换） ----------
-   瀑布流下一次把筛选结果全部渲染出来，滚到哪都有内容；
-   之所以只在瀑布流生效：瀑布流用 CSS `columns` 排版，分批追加会让已渲染的卡片重新分列、
-   整页跳动一下；正方形网格是 grid 布局，追加不会重排，保持分批反而更省 DOM。 */
+/* ---------- 循环滚动（v0.61 起叫"无限滚动"，v0.62 明确成循环：滚到底回到第一张） ----------
+   开关：双击 FAB 主按钮（localStorage rn_infinite）。
+   开启后瀑布流**一次渲染全部结果**，于是滚到最底部时可以无缝跳回顶部继续滚，永远滚不完；
+   之所以只在瀑布流生效：那套排版用 CSS `columns`，分批追加会让已渲染的卡片重新分列、整页跳动。
+   正方形网格是 grid 布局，追加不重排，保持分批反而更省 DOM。 */
 const INFINITE_KEY = "rn_infinite";
-const INFINITE_LIMIT = 1200; // 一次渲染的硬上限：上万张硬塞进来会卡死，超出部分仍走底部提示
+const INFINITE_LIMIT = 1200; // 一次渲染的硬上限：上万张硬塞进来会卡死，超出部分退回分批
 function infiniteWanted() {
   try { return localStorage.getItem(INFINITE_KEY) === "1"; } catch (e) { return false; }
 }
@@ -5088,16 +5126,18 @@ function applyInfiniteUI() {
   if (!btn) return;
   const on = infiniteWanted();
   btn.classList.toggle("inf", on);
-  btn.title = on ? "无限滚动已开启 · 双击切换回分批加载" : "双击开启无限滚动（瀑布流一次加载全部）";
+  btn.title = on ? "循环滚动已开启 · 滚到底回到第一张（双击关闭）" : "双击开启循环滚动（到底回到第一张继续）";
 }
 function toggleInfiniteScroll() {
-  if (!manageAllowed()) { guestBlocked("切换无限滚动"); return; }
+  if (!manageAllowed()) { guestBlocked("切换循环滚动"); return; }
   const on = !infiniteWanted();
   try { localStorage.setItem(INFINITE_KEY, on ? "1" : "0"); } catch (e) { /* ignore */ }
   applyInfiniteUI();
   const g = document.getElementById("fabGroup");
   if (g) g.classList.remove("hover-hold"); // 双击时顺手把菜单收起来
-  if (window.__renderGallery) window.__renderGallery();
+  // v0.62：静默重渲染 —— 只换渲染策略，不要重播图库的入场动画
+  if (window.__renderGallerySilent) window.__renderGallerySilent();
+  else if (window.__renderGallery) window.__renderGallery();
 }
 window.__infiniteState = () => ({ wanted: infiniteWanted(), active: infiniteActive() });
 window.__toggleInfinite = toggleInfiniteScroll;

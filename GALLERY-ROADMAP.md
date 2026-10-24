@@ -1065,6 +1065,23 @@ async function aiTagSearch(query) {
   与「拖到标签组打标」互斥 —— `dragstart` 会取消待触发的长按；反过来长按一旦触发就已经进了多选，`dragstart` 也会被 `selectMode` 拦住
 - 测试：前端 **155 项全通过**，新增 11 项 —— FAB 间距（CSS 断言）、鼠标长按进多选、鼠标移动不触发、初始未开启、标题提示、双击开启 / 点亮、一次渲染全部、进度条隐藏、再双击关闭 / 熄灭
 
+### 批次 54 · 循环滚动语义修正 + 切换时不重播入场动画（v0.62，2026-11-22）✅
+> 用户澄清：「无限滚动」要的是**滚到底回到第一张继续滚**（循环滚动），不是"一次加载全部"；
+> 并且**双击切换时不要重新播一遍图库的展开动画**。
+
+- **循环滚动**：`maybeLoopBack()` 挂在 scroll 处理里（rAF 节流后）——
+  滚到超过底部 40px 内、且结果已全部渲染时，`window.scrollTo({ top: 0, behavior: "instant" })` 回到第一张，可以一直滚下去
+  - 必须用 `instant`：`html { scroll-behavior: smooth }` 会让平滑回滚露馅成"倒着滚回去"
+  - 用 400ms 的 `loopGuard` 防止同一帧里反复触发；内容不足一屏时不做判断
+  - 上批的「一次渲染全部」保留 —— 它正是循环的前提（结果都在 DOM 里才谈得上无缝跳回）
+- **切换时不重播入场动画**：`render()` 新增 `opts.skipReveal`，跳过 `initReveal`，
+  改为一次性给所有卡片加 `.visible` 并清掉 `transitionDelay`，同时给 `#grid` 挂 `.no-reveal`（CSS 里 `transition: none !important`）到下一帧。
+  否则每次双击都会让整套卡片重新浮现一次（卡片默认 `opacity: 0`，靠 `.visible` 出现）
+  - 新增 `window.__renderGallerySilent()`，`toggleInfiniteScroll()` 改用它
+- 术语统一：界面文案、注释、ROADMAP 一律叫「循环滚动」
+- 测试：前端 **160 项全通过**，新增 5 项 —— 滚到底后循环回第一张、没滚到底不会跳、切换时不重播入场动画（18/18 卡片直接点亮）、切换时无 stagger 延迟；另把原「无限滚动」相关断言更名为「循环滚动」
+
+
 
 
 

@@ -425,7 +425,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
-  /* v0.61：双击 FAB 主按钮切换「无限滚动」 */
+  /* v0.61/v0.62：双击 FAB 主按钮切换「循环滚动」（滚到底回到第一张） */
   {
     const fabMain = doc.getElementById("fabMain");
     const inf = () => (window.__infiniteState ? window.__infiniteState() : { wanted: null, active: null });
@@ -437,19 +437,54 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       fabMain.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); // 这次 click 被吃掉
       await wait(350);
     };
-    check("初始未开启无限滚动", inf().wanted === false, JSON.stringify(inf()));
+    check("初始未开启循环滚动", inf().wanted === false, JSON.stringify(inf()));
     check("主按钮标题给出双击提示", /双击/.test(fabMain.title), fabMain.title);
 
     await dbl();
-    check("双击菜单按钮开启无限滚动", inf().wanted === true, JSON.stringify(inf()));
+    check("双击菜单按钮开启循环滚动", inf().wanted === true, JSON.stringify(inf()));
     check("开启后主按钮点亮（.inf）", fabMain.classList.contains("inf"));
     const shownN = doc.querySelectorAll("#grid .card").length;
     const totalN = window.__galleryState ? window.__galleryState().filtered : -1;
     check("瀑布流下一次性渲染全部结果", shownN === Math.min(totalN, 1200), `渲染 ${shownN} / 共 ${totalN}`);
-    check("无限滚动时不显示分批进度条", doc.getElementById("loadMore").style.display === "none");
+    check("循环滚动时不显示分批进度条", doc.getElementById("loadMore").style.display === "none");
+    // v0.62：切换只换渲染策略，不重播图库的入场动画（卡片直接点亮、无过渡延迟）
+    const afterCards = [...doc.querySelectorAll("#grid .card")];
+    check("切换时不重播入场动画（卡片已全部点亮）",
+      afterCards.length > 0 && afterCards.every((c) => c.classList.contains("visible")),
+      `${afterCards.filter((c) => c.classList.contains("visible")).length}/${afterCards.length} 已点亮`);
+    check("切换时卡片没有过渡延迟（无 stagger）",
+      afterCards.every((c) => c.style.transitionDelay === "0s"),
+      afterCards[0] ? `delay="${afterCards[0].style.transitionDelay}"` : "");
+
+    // 滚到底 → 回到第一张（jsdom 没有布局，手动给出"内容很长 + 已经在底部"的几何）
+    Object.defineProperty(doc.documentElement, "scrollHeight", { value: 3000, configurable: true });
+    Object.defineProperty(window, "scrollY", { value: 2200, configurable: true });
+    const origScrollTo = window.scrollTo;
+    let scrollArg = null;
+    window.scrollTo = (arg) => { scrollArg = arg; };
+    window.dispatchEvent(new window.Event("scroll"));
+    await wait(350);
+    check("滚到底后循环回到第一张", scrollArg !== null && (scrollArg === 0 || scrollArg.top === 0),
+      JSON.stringify(scrollArg));
+    window.scrollTo = origScrollTo;
+    Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
+    delete doc.documentElement.scrollHeight; // 恢复 jsdom 默认（0）
+
+    // 还没到底时不该乱跳
+    let jumped = false;
+    window.scrollTo = () => { jumped = true; };
+    Object.defineProperty(doc.documentElement, "scrollHeight", { value: 6000, configurable: true });
+    Object.defineProperty(window, "scrollY", { value: 500, configurable: true });
+    await wait(450); // 等过 loopGuard
+    window.dispatchEvent(new window.Event("scroll"));
+    await wait(350);
+    check("没滚到底时不会跳回顶部", !jumped, jumped ? "误触发" : "正常");
+    window.scrollTo = origScrollTo;
+    Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
+    delete doc.documentElement.scrollHeight;
 
     await dbl();
-    check("再双击关闭无限滚动", inf().wanted === false, JSON.stringify(inf()));
+    check("再双击关闭循环滚动", inf().wanted === false, JSON.stringify(inf()));
     check("关闭后主按钮取消点亮", !fabMain.classList.contains("inf"));
   }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
