@@ -60,8 +60,34 @@ Module._load = function (request, parent, isMain) {
   return origLoad.apply(this, arguments);
 };
 
-const { default: handler } = require("../netlify/functions/photos");
-const { default: aiHandler } = require("../netlify/functions/ai-proxy");
+const photosFn = require("../netlify/functions/photos");
+const handler = photosFn.default;
+
+/* ---------- 路由白名单校验（v0.54） ----------
+   线上真正生效的是各函数 `exports.config.path` 里声明的路由；漏加一条就会 404
+   （v0.53 的 /api/auth/tagger 就踩过这个坑）。本地按同一份声明校验一次：
+   默认只打印警告并放行，设 STRICT_ROUTES=1 则按线上行为返回 404。 */
+function declaredRoutes() {
+  const out = [];
+  // 注意：Functions v2 的 config 挂在**模块导出**上（exports.config），不在 default 函数上
+  for (const mod of [photosFn]) {
+    const list = (mod && mod.config && mod.config.path) || (mod && mod.default && mod.default.config && mod.default.config.path) || [];
+    for (const item of (Array.isArray(list) ? list : [list])) {
+      const p = typeof item === "string" ? item : item && item.path;
+      if (p) out.push(p);
+    }
+  }
+  return out;
+}
+const ROUTES = declaredRoutes();
+function routeDeclared(pathname) {
+  const p = pathname.length > 1 ? pathname.replace(/\/$/, "") : pathname;
+  return ROUTES.some((route) => {
+    if (!route.includes(":")) return route === p;
+    const re = new RegExp("^" + route.replace(/:[^/]+/g, "[^/]+").replace(/\*/g, ".*") + "$");
+    return re.test(p);
+  });
+}
 
 /* ---------- 静态文件 ---------- */
 const MIME = {
@@ -85,6 +111,14 @@ const server = http.createServer(async (req, res) => {
 
   // API 路由 → 交给 Netlify Functions v2（export default + Request/Response）
   if (pathname.startsWith("/api/")) {
+    if (!routeDeclared(pathname)) {
+      console.warn(`  ⚠ 路由未声明：${req.method} ${pathname} 不在函数 config.path 里 —— 线上会直接 404`);
+      if (process.env.STRICT_ROUTES === "1") {
+        res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: `Route not declared in config.path: ${pathname}` }));
+        return;
+      }
+    }
     let body = "";
     for await (const chunk of req) body += chunk;
     const fnReq = new Request(`http://localhost:${PORT}${url.pathname}${url.search}`, {
@@ -93,8 +127,7 @@ const server = http.createServer(async (req, res) => {
       body: body || undefined,
     });
     try {
-      // 多函数分发：/api/ai/* → ai-proxy.js，其余 → photos.js
-      const fnRes = await (pathname.startsWith("/api/ai/") ? aiHandler : handler)(fnReq);
+      const fnRes = await handler(fnReq);
       res.writeHead(fnRes.status, {
         ...Object.fromEntries(fnRes.headers.entries()),
         "Access-Control-Allow-Origin": "*",

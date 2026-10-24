@@ -5,5 +5,23 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
+  # sharp 带平台原生二进制，交给 esbuild 打包会在部分镜像下报
+  # "Could not load the sharp module using the linux-x64 runtime"
+  external_node_modules = ["sharp"]
+
+# 安全响应头（不涉及缓存，函数自身的 Cache-Control 不受影响）
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+# 静态资源引用时带 ?v= 版本号，可长缓存；改版务必同步更新 index.html 里的 v 值
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
 
 # API 路由由 Functions v2 的 config.path 声明（见 netlify/functions/photos.js），无需 redirects

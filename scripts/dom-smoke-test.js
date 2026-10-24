@@ -55,6 +55,10 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   window.fetch = (url, opts) => {
     const abs = String(url).startsWith("http") ? String(url) : BASE + String(url);
     const o = Object.assign({}, opts);
+    // v0.54：app.js 会给请求带 AbortSignal.timeout()，但 jsdom 的 AbortSignal 不是
+    // Node fetch 认的实例（报 "Expected signal to be an instance of AbortSignal"）。
+    // 浏览器里两者同源没有这个问题，所以这里只丢掉 signal（等价于"无超时的浏览器"）。
+    delete o.signal;
     if (TOKEN) o.headers = Object.assign({}, o.headers, { "X-Auth-Token": TOKEN });
     return fetch(abs, o);
   };
@@ -282,82 +286,99 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
   }
 
-  /* 相册整页（v0.34）：FAB 相册按钮进入，iOS 风格一级/二级 */
+  /* 浏览页（v0.56）：一级 = 全部图片 / 收藏夹 / 主分类集合；二级 = 集合内容 */
   const fabAlb = doc.getElementById("fabAlbumsBtn");
-  check("FAB 有相册按钮", !!fabAlb);
+  check("FAB 有浏览按钮", !!fabAlb);
   check("页面切换菜单已移除「图库」项", !doc.querySelector('#pageMenu [data-page="gallery"]'));
   const clickEl = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   if (fabAlb) {
     clickEl(fabAlb);
     await wait(800);
     const page = doc.getElementById("albumPage");
-    check("点击后相册整页打开", !!page && page.classList.contains("open"));
-    check("有顶部导航栏与大标题容器", !!doc.getElementById("albNavTitle") && !!doc.getElementById("albumBody"));
-    const addBtn = doc.getElementById("albAddBtn");
-    if (addBtn) {
-      clickEl(addBtn);
-      await wait(250);
-      const bar = doc.getElementById("albNewBar");
-      check("点＋展开新建相册输入框", !!bar && !bar.hidden && !!doc.getElementById("albNewName"));
+    const cardOf = (key) => doc.querySelector(`#albumBody [data-set="${key}"]`);
+    const setCards = () => [...doc.querySelectorAll("#albumBody [data-set]")];
+    check("点击后浏览页打开", !!page && page.classList.contains("open"));
+    check("有顶部导航栏与内容容器", !!doc.getElementById("albNavTitle") && !!doc.getElementById("albumBody"));
+    check("一级有「全部图片」与「收藏夹」入口", !!cardOf("__all") && !!cardOf("__fav"));
+    const heads = [...doc.querySelectorAll("#albumBody .alb-group-head")].map((x) => x.textContent.trim());
+    check("一级有主分类分组标题", heads.includes("主分类"), heads.join(" / ") || "（无）");
+    check("一级按主分类列出集合", setCards().length >= 3, `${setCards().length} 个集合卡片`);
+    check("手动相册入口已移除（新建 / 输入行）", !doc.getElementById("albAddBtn") && !doc.getElementById("albNewBar"));
+    const st0 = window.__albumsState ? window.__albumsState() : { level: "?" };
+    check("初始停在一级列表", st0.level === "list", `层级=${st0.level}`);
+
+    clickEl(cardOf("__all"));
+    await wait(600);
+    const allN = doc.querySelectorAll("#albumBody .alb-photo").length;
+    const st1 = window.__albumsState ? window.__albumsState() : { level: "?" };
+    check("点「全部图片」进二级并显示照片", allN > 0 && st1.level === "set", `${allN} 张，层级=${st1.level}`);
+    check("导航标题变成集合名", /全部图片|All Photos/.test((doc.getElementById("albNavTitle") || {}).textContent || ""),
+      (doc.getElementById("albNavTitle") || {}).textContent || "");
+
+    const firstAlbPhoto = doc.querySelector("#albumBody .alb-photo");
+    if (firstAlbPhoto) {
+      clickEl(firstAlbPhoto);
+      await wait(400);
+      check("二级点图片打开灯箱", doc.getElementById("lightbox").classList.contains("open"));
+      doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await wait(300);
     }
-    if (!TOKEN) {
-      const inp = doc.getElementById("albNewName");
-      if (inp) {
-        const albName = "zz测试相册" + Math.random().toString(36).slice(2, 5);
-        inp.value = albName;
-        inp.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        await wait(1800);
-        const st = window.__albumsState ? window.__albumsState() : { albums: [] };
-        const created = st.albums[st.albums.length - 1];
-        const covers = doc.querySelectorAll("#albumBody .alb-cover").length;
-        check("新建相册出现在一级网格", !!created && covers > 0, created ? `${created.name}（${covers} 个封面）` : "");
-        const firstCard = doc.querySelector("#grid .card");
-        const photoId = firstCard && firstCard.dataset.id;
-        if (created && photoId) {
-          const headers = TOKEN ? { "X-Auth-Token": TOKEN } : {};
-          const list = await (await fetch(`${BASE}/api/albums?_=${Math.random()}`, { headers })).json();
-          const albums = list.albums || [];
-          const target = albums.find((a) => a.id === created.id);
-          if (target) {
-            target.photoIds = [photoId];
-            await fetch(`${BASE}/api/albums`, {
-              method: "PUT",
-              headers: Object.assign({ "Content-Type": "application/json" }, headers),
-              body: JSON.stringify({ albums }),
-            });
-            await window.__reloadAlbums();
-            await wait(400);
-            // 点封面进二级，应看到照片网格
-            const cover = doc.querySelector(`#albumBody .alb-cover[data-aid="${created.id}"]`);
-            if (cover) {
-              clickEl(cover);
-              await wait(500);
-              const photos = doc.querySelectorAll("#albumBody .alb-photo").length;
-              const lv = window.__albumsState ? window.__albumsState().level : "?";
-              check("点封面进入二级并显示照片", photos > 0 && lv === "album", `${photos} 张，层级=${lv}`);
-              // 返回按钮：二级 → 一级 → 关闭
-              clickEl(doc.getElementById("albBack"));
-              await wait(400);
-              const lv2 = window.__albumsState ? window.__albumsState().level : "?";
-              check("返回按钮：二级退回一级", lv2 === "list", `层级=${lv2}`);
-              clickEl(doc.getElementById("albBack"));
-              await wait(600);
-              const stillOpen = doc.getElementById("albumPage").classList.contains("open");
-              check("再点返回关闭相册页", !stillOpen);
-            }
-          }
-        }
+
+    clickEl(doc.getElementById("albBack"));
+    await wait(400);
+    const st2 = window.__albumsState ? window.__albumsState() : { level: "?" };
+    check("返回按钮：二级退回一级", st2.level === "list", `层级=${st2.level}`);
+
+    // 主分类集合的渲染数量应与派生规则一致（分批上限 200）
+    const catCard = setCards().find((c) => c.dataset.set.startsWith("cat:") && !c.dataset.set.includes("__none"));
+    if (catCard) {
+      const key = catCard.dataset.set;
+      const expect = window.__setPhotoIds ? window.__setPhotoIds(key).length : -1;
+      clickEl(catCard);
+      await wait(600);
+      const got = doc.querySelectorAll("#albumBody .alb-photo").length;
+      check("主分类集合数量与派生规则一致", got === Math.min(expect, 200), `${key} 派生 ${expect} 张，渲染 ${got} 张`);
+      clickEl(doc.getElementById("albBack"));
+      await wait(350);
+    }
+
+    clickEl(doc.getElementById("albBack"));
+    await wait(600);
+    check("再点返回关闭浏览页", !doc.getElementById("albumPage").classList.contains("open"));
+  }
+
+  /* 收藏（v0.56）：卡片爱心 → 照片字段 fav → 收藏夹集合收录 */
+  {
+    const card = doc.querySelector("#grid .card");
+    check("卡片右上角有收藏爱心", !!(card && card.querySelector("[data-fav]")));
+    if (card) {
+      const id = card.dataset.id;
+      const headers = TOKEN ? { "X-Auth-Token": TOKEN } : {};
+      clickEl(card.querySelector("[data-fav]"));
+      await wait(700);
+      const after = doc.querySelector(`#grid .card[data-id="${id}"]`);
+      check("点爱心后卡片进入已收藏态", !!after && after.classList.contains("fav"), after ? after.className.replace(/\s+/g, " ").trim() : "卡片已重建");
+      const favN = window.__setPhotoIds ? window.__setPhotoIds("__fav").length : -1;
+      check("「收藏夹」集合收录该图", favN === 1, `收藏夹 ${favN} 张`);
+      const one = await (await fetch(`${BASE}/api/photos/${id}?_=${Math.random()}`, { headers })).json();
+      check("收藏已写入照片字段（跟着图走）", !!one.photo && one.photo.fav === true, `fav=${one.photo && one.photo.fav}`);
+
+      const card2 = doc.querySelector(`#grid .card[data-id="${id}"]`);
+      if (card2) {
+        clickEl(card2.querySelector("[data-fav]"));
+        await wait(700);
+        const favN2 = window.__setPhotoIds ? window.__setPhotoIds("__fav").length : -1;
+        const one2 = await (await fetch(`${BASE}/api/photos/${id}?_=${Math.random()}`, { headers })).json();
+        check("再点一次取消收藏", favN2 === 0 && !!one2.photo && one2.photo.fav === false, `收藏夹 ${favN2} 张，fav=${one2.photo && one2.photo.fav}`);
       }
-    } else {
-      console.log("   （线上跳过相册创建与加图，避免改动真实数据）");
     }
   }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
-  check("灯箱不再有收藏按钮", !doc.getElementById("lbToolFav"));
+  check("灯箱工具条有收藏按钮（v0.56 归来）", !!doc.getElementById("lbToolFav"));
   const lbBox = doc.getElementById("lightbox");
   const lbBar = doc.getElementById("lbToolsFloat");
-  const toolIds = ["lbToolPlay", "lbToolEdit", "lbToolRot", "lbToolDl", "lbToolAlbum"];
+  const toolIds = ["lbToolPlay", "lbToolEdit", "lbToolRot", "lbToolDl", "lbToolFav"];
   check("灯箱右下角悬浮工具条含 5 个按钮", !!lbBar && toolIds.every((i) => doc.getElementById(i)));
   check("工具条默认隐藏（无 tools-visible 类）", !!(lbBox && !lbBox.classList.contains("tools-visible")));
   check("筛选菜单不再有收藏行", !doc.querySelector('#tagMenuList [data-tag="__fav"]'));
@@ -579,6 +600,200 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("再点一下切回原样", gridEl.classList.contains("grid-square") === before);
   }
 
+  /* ---------- 标签筛选 v0.55：多选 / 且或 / 排除 / 我的筛选 ----------
+     seed 数据：18 张，「冒烟角色01」1 张、「冒烟角色02」2 张（第 1 张两个标签都带 → 有交集） */
+  {
+    const bar = doc.getElementById("tagFilterBar");
+    const chipsBox = doc.getElementById("tfbChips");
+    const gN = () => (window.__galleryState ? window.__galleryState().filtered : -1);
+    const rowOf = (name) => doc.querySelector(`#tagMenuList [data-tag="${name}"]`);
+    const catOf = (name) => doc.querySelector(`#tagMenuList [data-catf="${name}"]`);
+    const chipKeys = () => [...chipsBox.querySelectorAll("[data-chip]")].map((el) => el.dataset.chip);
+    const clearAll = async () => { const allRow = doc.querySelector('#tagMenuList [data-tag=""]'); if (allRow) clickEl(allRow); await wait(250); };
+
+    const total = gN();
+    check("筛选条默认收起（无条件时不占地方）", !!bar && bar.hidden === true, `全部 ${total} 张`);
+
+    // v0.23 起大组默认折叠（折叠时标签行不进 DOM）—— 先点组头把组展开，再取标签行
+    const headOf = (name) => [...doc.querySelectorAll("#tagMenuList .tag-group-head")].find((h) => (h.textContent || "").includes(name));
+    const collapsedHead = doc.querySelector("#tagMenuList .tag-group-head.collapsed");
+    check("大组默认折叠显示", !!collapsedHead);
+    if (collapsedHead) {
+      clickEl(collapsedHead);
+      await wait(300);
+      check("点组头可展开（重渲染补出标签行）", doc.querySelectorAll("#tagMenuList .tag-menu-item[data-tag]:not([data-tag=''])").length > 0,
+        `${doc.querySelectorAll("#tagMenuList .tag-menu-item[data-tag]:not([data-tag=''])").length} 行`);
+    }
+    for (const h of [...doc.querySelectorAll("#tagMenuList .tag-group-head.collapsed")]) { clickEl(h); await wait(200); }
+
+    const rowA = rowOf("冒烟角色01");
+    const rowB = rowOf("冒烟角色02");
+    check("菜单里有可组合筛选的标签行", !!rowA && !!rowB, headOf("冒烟测试作品") ? "「冒烟测试作品」组已展开" : "未找到测试组");
+
+    if (rowA && rowB) {
+      clickEl(rowA);
+      await wait(300);
+      const nA = gN();
+      check("选中标签后筛选条出现且有 1 个条件", bar.hidden === false && chipKeys().length === 1, chipKeys().join(","));
+      check("有筛选时 FAB 亮起小红点", doc.getElementById("fabDot").classList.contains("on"));
+
+      clickEl(rowOf("冒烟角色02"));
+      await wait(300);
+      const nAB = gN();
+      const st2 = window.__filterState();
+      check("可以同时选中两个标签（多选，不再是互斥单选）", st2.tags.length === 2 && chipKeys().length === 2, `结果 ${nA} → ${nAB} 张`);
+      check("默认「或」：多选后结果变大", nAB > nA, `${nA} → ${nAB} 张`);
+
+      const opBtn = doc.getElementById("tfbTagOp");
+      check("标签 ≥2 时出现「且 / 或」开关", !!opBtn && opBtn.hidden === false);
+      clickEl(opBtn);
+      await wait(300);
+      const nAnd = gN();
+      check("切到「且」后结果收窄为交集", nAnd > 0 && nAnd < nAB, `或 ${nAB} → 且 ${nAnd}`);
+      clickEl(doc.getElementById("tfbTagOp"));
+      await wait(300);
+      check("再点切回「或」", gN() === nAB, `结果 ${gN()} 张`);
+
+      // 排除：单标签 nB 张 → 排除后应剩 total - nB
+      await clearAll();
+      check("「全部」清空所有条件", window.__filterState().tags.length === 0 && bar.hidden === true, `结果 ${gN()} 张`);
+
+      clickEl(rowOf("冒烟角色02"));
+      await wait(300);
+      const nB = gN();
+      clickEl(doc.getElementById("tfbNeg"));
+      await wait(150);
+      clickEl(rowOf("冒烟角色02"));
+      await wait(300);
+      const st3 = window.__filterState();
+      check("排除模式：点击的项目进入排除列表", st3.not.includes("tag:冒烟角色02") && st3.tags.length === 0, JSON.stringify(st3.not));
+      check("排除后结果 = 全部 − 该标签命中数", gN() === total - nB, `${total} − ${nB} = ${total - nB}，实际 ${gN()}`);
+      check("排除项在筛选条上以删除线 chip 呈现", !!chipsBox.querySelector(".tfb-chip.neg"));
+      clickEl(doc.getElementById("tfbNeg"));
+      await wait(150);
+      await clearAll();
+
+      // 主分类多选（层内 OR，与标签层 AND 叠加）
+      const c1 = catOf("插画");
+      const c2 = catOf("次元女");
+      if (c1 && c2) {
+        clickEl(c1);
+        await wait(300);
+        const n1 = gN();
+        clickEl(catOf("次元女"));
+        await wait(300);
+        check("主分类也能多选（层内 OR）", window.__filterState().cats.length === 2 && gN() > n1, `插画 ${n1} → +次元女 ${gN()}`);
+        await clearAll();
+      }
+
+      // 我的筛选：保存 → 一键恢复 → 删除
+      clickEl(rowOf("冒烟角色01"));
+      await wait(250);
+      clickEl(rowOf("冒烟角色02"));
+      await wait(300);
+      const beforeSave = gN();
+      clickEl(doc.getElementById("tfbSave"));
+      await wait(150);
+      check("点「保存」展开命名输入行", doc.getElementById("tfbSaverow").hidden === false);
+      doc.getElementById("tfbName").value = "冒烟组合";
+      clickEl(doc.getElementById("tfbSaveOk"));
+      await wait(300);
+      let saved = [];
+      try { saved = JSON.parse(window.localStorage.getItem("rn_saved_filters") || "[]"); } catch (e) { saved = []; }
+      check("筛选组合已写入 localStorage", saved.length === 1 && saved[0].tags.length === 2, JSON.stringify(saved));
+      check("菜单里出现「我的筛选」区与条目", !!doc.querySelector("#tagMenuList .tag-group-head.saved") && !!doc.querySelector("#tagMenuList [data-sf]"));
+
+      clickEl(doc.getElementById("tfbClear"));
+      await wait(300);
+      check("「清空」清掉全部条件并收起筛选条", window.__filterState().tags.length === 0 && gN() === total, `结果 ${gN()} 张`);
+
+      const sfItem = doc.querySelector("#tagMenuList [data-sf]");
+      if (sfItem) {
+        clickEl(sfItem);
+        await wait(300);
+        check("点「我的筛选」一键恢复条件", window.__filterState().tags.length === 2 && gN() === beforeSave, `结果 ${gN()} 张`);
+      }
+      const delBtn = doc.querySelector("#tagMenuList [data-sfdel]");
+      if (delBtn) {
+        clickEl(delBtn);
+        await wait(300);
+        let after = [];
+        try { after = JSON.parse(window.localStorage.getItem("rn_saved_filters") || "[]"); } catch (e) { after = []; }
+        check("删除「我的筛选」条目", after.length === 0, JSON.stringify(after));
+      }
+
+      window.__clearFilter(); // 收尾：别把筛选状态留给后面的断言
+      await wait(300);
+      check("收尾：筛选状态已清空", window.__filterState().tags.length === 0 && gN() === total, `结果 ${gN()} 张`);
+      check("清空后 FAB 小红点熄灭", !doc.getElementById("fabDot").classList.contains("on"));
+    }
+  }
+
+  /* ---------- 分级 v0.57：大众级 / R16 / R18 ----------
+     分级是照片自己的字段（meta.rating），与标签库并列而非混在标签里。
+     seed 里第 17 张 = R18、第 18 张 = R16，其余大众级。 */
+  {
+    const gN = () => (window.__galleryState ? window.__galleryState().filtered : -1);
+    const total = gN();
+    const ratingRow = (r) => doc.querySelector(`#tagMenuList [data-rating="${r}"]`);
+
+    check("筛选菜单有「分级」区（三档）", !!ratingRow("general") && !!ratingRow("r16") && !!ratingRow("r18"),
+      [...doc.querySelectorAll("#tagMenuList [data-rating]")].map((b) => b.dataset.rating).join(" / ") || "（无）");
+    const badges = doc.querySelectorAll("#grid .card .rating-badge");
+    check("卡片上有分级角标", badges.length >= 1, `${badges.length} 个（非大众级才显示）`);
+
+    if (ratingRow("r18")) {
+      clickEl(ratingRow("r18"));
+      await wait(400);
+      const n18 = gN();
+      check("按 R18 筛选生效", window.__filterState().rating === "r18" && n18 >= 1 && n18 < total, `R18 ${n18} 张 / 共 ${total} 张`);
+      clickEl(ratingRow("general"));
+      await wait(400);
+      const nGen = gN();
+      check("切到大众级只剩大众级", window.__filterState().rating === "general" && nGen === total - n18 - 1,
+        `大众级 ${nGen} 张（总 ${total} − R18 ${n18} − R16 1）`);
+      clickEl(doc.querySelector('#tagMenuList [data-tag=""]')); // 「全部」清空
+      await wait(350);
+      check("「全部」同时清掉分级筛选", window.__filterState().rating === null && gN() === total, `结果 ${gN()} 张`);
+    }
+
+    // 编辑弹窗里的三档选择
+    const card = doc.querySelector("#grid .card");
+    if (card) {
+      const id = card.dataset.id;
+      const headers = TOKEN ? { "X-Auth-Token": TOKEN } : {};
+      // 记下原分级，测完按原值还原（第一张卡片可能就是 seed 的 R16 / R18 图）
+      const beforeDoc = await (await fetch(`${BASE}/api/photos/${id}?_=${Math.random()}`, { headers })).json();
+      const origRating = (beforeDoc.photo && beforeDoc.photo.rating) || "general";
+      card.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
+      await wait(450);
+      const modal = doc.getElementById("editModal");
+      check("编辑弹窗有分级三档选择", !!modal && modal.classList.contains("open") && doc.querySelectorAll("#edRating .rating-pick").length === 3,
+        `${doc.querySelectorAll("#edRating .rating-pick").length} 个档位`);
+      const pick18 = doc.querySelector('#edRating .rating-pick[data-rating="r18"]');
+      if (pick18) {
+        clickEl(pick18);
+        await wait(180);
+        check("点选档位后高亮（单选互斥）",
+          pick18.classList.contains("on") && doc.querySelectorAll("#edRating .rating-pick.on").length === 1);
+        clickEl(doc.getElementById("edSave"));
+        await wait(1500);
+        const one = await (await fetch(`${BASE}/api/photos/${id}?_=${Math.random()}`, { headers })).json();
+        check("分级写入照片字段 rating", !!one.photo && one.photo.rating === "r18", `rating=${one.photo && one.photo.rating}`);
+        // 还原成原分级（避免影响后续断言与数据形态）
+        await fetch(`${BASE}/api/photos/${id}`, {
+          method: "PATCH",
+          headers: Object.assign({ "Content-Type": "application/json" }, headers),
+          body: JSON.stringify({ rating: origRating }),
+        });
+        await wait(250);
+        if (window.__reloadData) await window.__reloadData();
+        if (window.__refreshGallery) window.__refreshGallery();
+        await wait(600);
+      }
+    }
+  }
+
   /* 库内查重（v0.42）：筛选菜单入口 + 扫描弹窗（本地 seed 里放了两张相同的图） */
   const dupEntry = doc.querySelector('#tagMenuList [data-dupopen]');
   check("筛选菜单有查重入口", !!dupEntry);
@@ -690,15 +905,18 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("切回管理员模式（整理模式段落结束）", doc.body.classList.contains("mode-admin"));
   }
 
-  /* 服务端 safe=1：观光模式的列表里不返回带 r18 / r16 标签的图片 */
+  /* 服务端 safe=1：观光模式的列表里不返回非大众级（R16 / R18）的图片 —— v0.57 起看 rating 字段 */
   try {
     const all = await (await fetch(`${BASE}/api/photos?limit=300${TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""}`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} })).json();
     const safe = await (await fetch(`${BASE}/api/photos?limit=300&safe=1${TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""}`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} })).json();
-    const adult = (all.photos || []).filter((p) => (p.tags || []).some((t) => ["r18", "r16"].includes(String(t).trim().toLowerCase())));
-    const adultInSafe = (safe.photos || []).filter((p) => (p.tags || []).some((t) => ["r18", "r16"].includes(String(t).trim().toLowerCase())));
-    check("safe=1 列表里没有 R18 / R16 图片",
+    const adult = (all.photos || []).filter((p) => (p.rating || "general") !== "general");
+    const adultInSafe = (safe.photos || []).filter((p) => (p.rating || "general") !== "general");
+    check("safe=1 列表里没有 R16 / R18 图片",
       adultInSafe.length === 0 && (safe.total || 0) === (all.total || 0) - adult.length,
       `全部 ${all.total} · 成人向 ${adult.length} · safe ${safe.total}`);
+    check("列表返回三档分级字段", (all.photos || []).every((p) => ["general", "r16", "r18"].includes(p.rating)),
+      [...new Set((all.photos || []).map((p) => p.rating))].join(" / "));
+    check("标签里不再混入 r18 / r16", (all.photos || []).every((p) => !(p.tags || []).some((t) => ["r18", "r16"].includes(String(t).trim().toLowerCase()))));
     // v0.50：管理员读成人向图片不再需要额外密钥
     if (adult.length) {
       const rr = await fetch(`${BASE}/api/photos/${adult[0].id}/raw${TOKEN ? "?token=" + encodeURIComponent(TOKEN) : ""}`, {
@@ -707,7 +925,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       check("管理员读 R18 图不再需要密钥", rr.status === 200, `HTTP ${rr.status}`);
     }
   } catch (e) {
-    check("safe=1 列表里没有 R18 / R16 图片", false, e.message);
+    check("safe=1 列表里没有 R16 / R18 图片", false, e.message);
   }
 
   /* v0.53：所有前端会用到的接口都必须挂载在函数的 config.path 里（漏加会直接 404） */
@@ -718,7 +936,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     const probes = [
       ["GET", "/api/auth/state"],
       ["POST", "/api/auth/login"],
-      ["POST", "/api/auth/tagger"],
+      ["POST", "/api/auth/tagger", JSON.stringify({ taggerKey: "x" })], // v0.54：空 body 会清除整理密码，传无效值只验路由
       ["GET", "/api/photos?limit=1"],
       ["GET", "/api/tags"],
       ["GET", "/api/albums"],
@@ -726,9 +944,9 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       ["GET", "/api/meta/logs"],
     ];
     const missing = [];
-    for (const [m, p] of probes) {
+    for (const [m, p, body] of probes) {
       try {
-        const r = await fetch(withToken(p), { method: m, headers: hdr, body: m === "POST" ? "{}" : undefined });
+        const r = await fetch(withToken(p), { method: m, headers: hdr, body: m === "POST" ? (body || "{}") : undefined });
         if (r.status === 404) missing.push(`${m} ${p}`);
       } catch (e) {
         missing.push(`${m} ${p}(${e.message})`);

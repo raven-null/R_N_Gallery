@@ -247,31 +247,42 @@ async function checkAuth(req, url) {
   return { ok: false, gate: true, role: null };
 }
 
-/* v0.50：R18 密钥机制（r18KeyFrom / checkR18）已整体删除 ——
-   R18 / R16 内容现在只由「观光模式」（safe=1 + authorized 判断）区分可见性 */
-
-/* R18 判定：独立字段 r18 === true，或标签含 r18，或主分类含 r18（v0.19 主分类为多选数组） */
-function isR18Photo(p) {
-  if (!p) return false;
-  if (p.r18 === true) return true;
-  if (Array.isArray(p.tags) && p.tags.some((t) => String(t).trim().toLowerCase() === "r18")) return true;
-  const cats = Array.isArray(p.categories) ? p.categories : (p.category ? [p.category] : []);
-  return cats.some((c) => String(c).trim().toLowerCase() === "r18");
+/* ============================================================
+   分级（v0.57）：整库统一的三档 —— general（大众级）/ r16 / r18
+   v0.56 及以前成人向是「独立布尔字段 + 标签名 + 主分类名」三路任一命中，
+   于是标签名一撞车就能改可见性（还出过「整理角色删掉图上 r18 标签把自己解锁」的越权）。
+   现在收敛成一个字段 meta.rating：
+     · 写入 —— 只有管理员能设（整理角色的 body 被裁剪成 tags/categories，天然写不进）
+     · 读取 —— ratingOf() 优先读字段；**迁移期兜底**再看老布尔字段 / 老标签 / 老主分类，
+       保证在跑 scripts/migrate-rating.js 之前，老数据的成人向图片一张都不会漏
+   ============================================================ */
+const RATINGS = ["general", "r16", "r18"];
+const RATING_LABEL = { general: "大众级", r16: "R16", r18: "R18" };
+/* 归一化：缺失 / 非法值 → 大众级 */
+function normRating(v) {
+  const s = String(v == null ? "" : v).trim().toLowerCase();
+  return RATINGS.includes(s) ? s : "general";
 }
-
-/* R16 判定（v0.49 观光模式）：标签 / 字段 / 主分类里带 r16 即算 */
-function isR16Photo(p) {
-  if (!p) return false;
-  if (p.r16 === true) return true;
-  if (Array.isArray(p.tags) && p.tags.some((t) => String(t).trim().toLowerCase() === "r16")) return true;
-  const cats = Array.isArray(p.categories) ? p.categories : (p.category ? [p.category] : []);
-  return cats.some((c) => String(c).trim().toLowerCase() === "r16");
+/* 判定顺序：显式字段 → 老布尔字段 → 标签 → 主分类（后三者只为兼容迁移前的数据） */
+function ratingOf(p) {
+  if (!p) return "general";
+  const raw = String(p.rating || "").trim().toLowerCase();
+  if (RATINGS.includes(raw)) return raw;
+  if (p.r18 === true) return "r18";
+  if (p.r16 === true) return "r16";
+  const low = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map((x) => String(x).trim().toLowerCase());
+  const tags = low(p.tags);
+  if (tags.includes("r18")) return "r18";
+  if (tags.includes("r16")) return "r16";
+  const cats = low(Array.isArray(p.categories) && p.categories.length ? p.categories : p.category);
+  if (cats.includes("r18")) return "r18";
+  if (cats.includes("r16")) return "r16";
+  return "general";
 }
-
-/* 成人向（R18 / R16 任一）：观光模式要整体隐藏 */
-function isAdultPhoto(p) {
-  return isR18Photo(p) || isR16Photo(p);
-}
+const isR18Photo = (p) => ratingOf(p) === "r18";
+const isR16Photo = (p) => ratingOf(p) === "r16";
+/* 成人向 = 非大众级（观光 / 整理模式对 R16 与 R18 一视同仁） */
+const isAdultPhoto = (p) => ratingOf(p) !== "general";
 
 module.exports = {
   store,
@@ -286,6 +297,10 @@ module.exports = {
   authConfig,
   saveAuthConfig,
   checkAuth,
+  RATINGS,
+  RATING_LABEL,
+  normRating,
+  ratingOf,
   isR18Photo,
   isR16Photo,
   isAdultPhoto,

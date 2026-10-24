@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>渡·影·集</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='2' width='20' height='20' rx='5' fill='%2314171f'/%3E%3Crect x='4.5' y='4.5' width='15' height='15' rx='3' fill='none' stroke='%23ff9f0a' stroke-width='1.6'/%3E%3Ccircle cx='9' cy='9' r='1.3' fill='%23ff9f0a'/%3E%3Cpath d='M19.5 14.5l-3.6-3.6a.8.8 0 0 0-1.1 0L7 18.5' stroke='%23ff9f0a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="assets/style.css?v=20261022">
+<link rel="stylesheet" href="assets/style.css?v=20261117">
 </head>
 <body data-page="gallery">
 
@@ -85,6 +85,7 @@
         <!-- ========== 左栏：图片（可拖入右侧分类） ========== -->
         <div class="up-left">
           <!-- 拖拽区 -->
+        <div class="up-top">
           <div class="dropzone" id="dz">
             <div class="icon">📤</div>
             <h3>拖拽图片到这里，或点击选择</h3>
@@ -92,55 +93,23 @@
             <input type="file" id="fileInput" multiple accept="image/*" hidden>
           </div>
 
-          <!-- URL 导入（v0.12） -->
+          <!-- URL 导入（v0.12）+ 开始上传 -->
           <div class="import-url">
             <div class="import-url-head">
-              <span>或从 URL 导入（每行一个图片链接）</span>
-              <button class="btn ghost sm" id="btnImportUrl" type="button">导入</button>
+              <span>或从 URL 导入</span>
+              <span class="up-actions">
+                <button class="btn ghost sm" id="btnImportUrl" type="button">导入</button>
+                <button class="btn primary sm" id="btnUpload" disabled>开始上传</button>
+              </span>
             </div>
-            <textarea id="urlList" rows="2" placeholder="https://example.com/a.jpg&#10;https://example.com/b.webp"></textarea>
+            <textarea id="urlList" rows="2" placeholder="每行一个图片链接，如 https://example.com/a.jpg"></textarea>
+            <div class="hint up-hint" id="upHint">拖入图片后点「开始上传」；关闭本窗口会清空列表</div>
             <div class="hint" id="importResult"></div>
-          </div>
-
-          <!-- 上传队列（v0.14.3：拖动行到右侧分类槽） -->
-          <div class="upload-queue" id="queue"></div>
-
-          <div class="up-foot">
-            <div class="hint up-hint" id="upHint">拖图片到右侧分类槽可单独归类；<b>15 秒</b>后自动上传，也可点按钮立即开始</div>
-            <button class="btn primary" id="btnUpload" disabled style="font-size:15px;padding:11px 26px;">开始上传</button>
           </div>
         </div>
 
-        <!-- ========== 右栏：主分类（必选，可多选）+ 全局标签 + 分类槽 ========== -->
-        <div class="up-right" id="upRight">
-          <div class="uq-panel">
-            <div class="uq-panel-title">主分类 <span class="req">必选 · 可多选</span></div>
-            <div class="uq-panel-sub">每张图至少选一个主分类（可多选，如 次元女 + 插画），应用于全部新图片；单张可在 ✎ 中单独覆盖</div>
-            <div class="uq-cats" id="upCats" data-multi="1"></div>
-          </div>
-
-          <div class="uq-panel">
-            <div class="uq-panel-title">全局标签</div>
-            <div class="uq-panel-sub">应用于全部新图片，可拖到下方分类槽单独归类</div>
-            <div class="tag-input-wrap">
-              <div class="tag-input" id="tagListUpload">
-                <input id="tagInputUpload" type="text" placeholder="输入后按回车…" autocomplete="off">
-              </div>
-              <div class="tag-suggest" id="tagSuggest" hidden></div>
-            </div>
-            <div class="quick-pick show" id="upQuickPick"></div>
-          </div>
-
-          <div class="uq-panel">
-            <div class="uq-panel-title">分类（作品 / 角色）</div>
-            <div class="uq-panel-sub">点槽 = 加到选中行（未选则全部待上传）；也可拖图进来。组头可折叠，一次只展开一个作品组</div>
-            <input type="text" id="uqSlotSearch" class="uq-slot-search" placeholder="搜角色 / 作品（支持拼音，如 ht）" autocomplete="off">
-            <div class="uq-panel-status" id="uqSelStatus"></div>
-            <div class="uq-slots" id="uqSlots"></div>
-            <div class="uq-new-slot">
-              <input type="text" id="uqNewSlotInput" placeholder="+ 新分类标签，回车创建" autocomplete="off">
-            </div>
-          </div>
+          <!-- 上传队列 -->
+          <div class="upload-queue" id="queue"></div>
         </div>
       </div>
     </div>
@@ -216,48 +185,6 @@
         </div>
       </div>
 
-      <!-- AI 助手设置（v0.12） -->
-      <div class="settings-section" id="aiSection">
-        <div class="settings-section-title">AI 助手</div>
-        <div class="settings-group">
-          <div class="settings-row">
-            <span class="settings-label">启用 AI 助手</span>
-            <label class="switch" title="启用后显示 AI 相关入口">
-              <input type="checkbox" id="aiOn">
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="settings-row ai-opt">
-            <span class="settings-label">API Key</span>
-            <span class="settings-value ai-key-box">
-              <input type="password" id="aiKey" class="ai-key-input" placeholder="粘贴质谱 AI Key" autocomplete="off">
-              <button class="btn ghost sm" id="aiKeyToggle" type="button" style="flex:none">显示</button>
-            </span>
-          </div>
-          <div class="settings-row ai-opt" style="flex-wrap:wrap;gap:6px">
-            <span class="settings-label">温度</span>
-            <span class="settings-value" style="display:flex;align-items:center;gap:10px;min-width:220px;flex:1;justify-content:flex-end">
-              <input type="range" id="aiTemp" min="0" max="1" step="0.1" value="0.7">
-              <b id="aiTempVal" style="min-width:30px;font-variant-numeric:tabular-nums">0.7</b>
-            </span>
-          </div>
-          <div class="settings-row-wrap ai-opt">
-            <label class="ai-label">人设（System Prompt）</label>
-            <textarea id="aiSys" rows="2" maxlength="500" placeholder="可选，自定义助手人设…"></textarea>
-          </div>
-          <div class="settings-row ai-opt">
-            <span class="settings-label">测试对话</span>
-            <span class="settings-value" style="display:flex;gap:10px;align-items:center">
-              <button class="btn ghost sm" id="aiTest" type="button" style="flex:none">发送「你好」</button>
-              <span id="aiTestResult" class="ai-result"></span>
-            </span>
-          </div>
-          <div class="settings-row">
-            <span class="settings-label" style="font-size:11.5px;color:var(--text-faint);line-height:1.5">Key 仅在调用时经本站代理转发，不写入代码；也可在部署环境配置 <b>ZHIPU_API_KEY</b>（此时无需填写）</span>
-          </div>
-        </div>
-      </div>
-
       <!-- 快捷键说明 -->
       <div class="settings-section">
         <div class="settings-section-title">快捷键</div>
@@ -294,6 +221,10 @@
           <div class="settings-row">
             <span class="settings-label">已用空间</span>
             <span class="settings-value" id="stUsed">—</span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label" style="font-size:11.5px;color:var(--text-faint)">其中</span>
+            <span class="settings-value" id="stBreakdown" style="font-size:11.5px;color:var(--text-faint)">—</span>
           </div>
           <div class="settings-row-wrap">
             <div class="quota-block">
@@ -465,7 +396,7 @@
       </div>
     </div>
   </div>
-  <!-- ======= 相册页（v0.34：独立整页，iOS 相册风格；FAB 相册按钮左滑进入，右滑返回） ======= -->
+  <!-- ======= 浏览页（v0.34 独立整页 / v0.56 改为集合：全部图片 / 收藏夹 / 主分类；FAB 按钮左滑进入，右滑返回） ======= -->
   <div class="album-page" id="albumPage" aria-hidden="true">
     <!-- 顶部导航栏（随页面停留，切换页面时保持） -->
     <header class="album-nav">
@@ -473,16 +404,8 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
         <span id="albBackLabel">图库</span>
       </button>
-      <span class="album-nav-title" id="albNavTitle">相册</span>
-      <button class="album-nav-btn" id="albAddBtn" type="button" title="新建相册">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
+      <span class="album-nav-title" id="albNavTitle">浏览</span>
     </header>
-    <!-- 新建相册输入行（点＋时展开） -->
-    <div class="album-newbar" id="albNewBar" hidden>
-      <input type="text" id="albNewName" placeholder="相册名称，回车创建" maxlength="30" autocomplete="off">
-      <button class="btn ghost sm" id="albNewCancel" type="button">取消</button>
-    </div>
     <div class="album-body" id="albumBody"></div>
   </div>
 
@@ -537,11 +460,12 @@
           <div class="quick-pick" id="edQuickPick"></div>
         </div>
         <div class="field">
-          <label>R18 内容保护</label>
-          <label class="r18-toggle">
-            <input type="checkbox" id="edR18">
-            <span>标记为 R18（标签含 r18 或主分类为 R18 时同样生效；未输入 R18 密钥的人看不到）</span>
-          </label>
+          <label>分级（观光 / 整理模式只能看到「大众级」）</label>
+          <div class="rating-picks" id="edRating">
+            <button type="button" class="rating-pick" data-rating="general" style="--rg:#4ec97b">大众级</button>
+            <button type="button" class="rating-pick" data-rating="r16" style="--rg:#ff9f0a">R16</button>
+            <button type="button" class="rating-pick" data-rating="r18" style="--rg:#ff453a">R18</button>
+          </div>
         </div>
         <div class="m-actions">
           <button class="btn ghost" type="button" id="edCancel">取消</button>
@@ -586,19 +510,7 @@
     </div>
   </div>
 
-  <!-- 相册选择弹窗（v0.12） -->
-  <div class="modal-mask" id="albumModal">
-    <div class="modal">
-      <h3 id="albumModalTitle">加入相册</h3>
-      <div id="albumList" class="album-list"></div>
-      <div class="album-new-row">
-        <input type="text" id="albumNewName" placeholder="新建相册名称…" maxlength="30">
-        <button class="btn ghost sm" id="albumNewBtn" type="button">＋ 新建并加入</button>
-      </div>
-      <div class="hint" id="albumHint" style="display:none"></div>
-      <div class="m-actions"><button class="btn ghost" id="albumClose">取消</button></div>
-    </div>
-  </div>
+  <!-- 相册选择弹窗（v0.12）已在 v0.56 随手动相册一起移除 -->
 
   <!-- 操作日志弹窗（v0.12） -->
   <div class="modal-mask" id="logsModal">
@@ -644,16 +556,11 @@
     </div>
   </div>
 
-  <!-- 上传项编辑弹窗（v0.41：主分类 / 标签，描述已移除） -->
+  <!-- 上传项编辑弹窗（v0.54：仅标签） -->
   <div class="modal-mask" id="uqModal">
     <div class="modal">
       <h3>编辑待上传项</h3>
       <form class="tag-form" onsubmit="return false">
-        <div class="field">
-          <label>主分类（留空 = 跟随上方全局必选，可多选）</label>
-          <div class="uq-cats" id="uqCatPick" data-multi="1"></div>
-          <div class="hint">此处选择仅对该张图片生效；全部取消则回到跟随全局</div>
-        </div>
         <div class="field">
           <label>标签（留空则跟随上方全局标签）</label>
           <div class="tag-input-wrap">
@@ -672,25 +579,6 @@
     </div>
   </div>
 
-  <!-- AI 快捷对话（v0.13.4：启用 AI 后显示，风格与 FAB 一致） -->
-  <button class="ai-fab" id="aiFab" title="AI 助手" hidden>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/>
-      <path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/>
-    </svg>
-  </button>
-  <div class="ai-chat" id="aiChatBox" hidden>
-    <div class="ai-chat-head">
-      <span class="ai-chat-title">✨ AI 助手</span>
-      <button class="ai-chat-close" id="aiChatClose" title="关闭">✕</button>
-    </div>
-    <div class="ai-chat-msgs" id="aiChatMsgs"></div>
-    <div class="ai-chat-foot">
-      <input type="text" id="aiChatText" placeholder="输入问题，回车发送…" autocomplete="off">
-      <button class="btn primary sm" id="aiChatSend" type="button">发送</button>
-    </div>
-  </div>
-
 
   <!-- ======= 标签弹出菜单（悬停/点击标签按钮弹出，按分组展示，支持搜索） ======= -->
   <div class="page-menu tag-menu" id="tagMenu" aria-label="标签筛选">
@@ -702,6 +590,23 @@
       <input id="tagSearch" type="text" placeholder="搜索标签 / 别名…" autocomplete="off">
       <button class="tag-search-clear" id="tagSearchClear" title="清除">✕</button>
     </div>
+    <!-- 当前筛选条（v0.55）：已选条件 chips + 标签层 且/或 + 排除模式 + 保存 / 清空 -->
+    <div class="tag-filter-bar" id="tagFilterBar" hidden>
+      <div class="tfb-row">
+        <span class="tfb-label">已选</span>
+        <button class="tfb-btn" id="tfbTagOp" title="标签层：命中任一 / 全部命中">且</button>
+        <button class="tfb-btn" id="tfbNeg" title="排除模式：接下来点击的项目变成「排除」">排除</button>
+        <span class="tfb-spacer"></span>
+        <button class="tfb-btn" id="tfbSave" title="把当前筛选保存到「我的筛选」">保存</button>
+        <button class="tfb-btn tfb-danger" id="tfbClear" title="清空全部筛选条件">清空</button>
+      </div>
+      <div class="tfb-chips" id="tfbChips"></div>
+      <div class="tfb-saverow" id="tfbSaverow" hidden>
+        <input id="tfbName" type="text" placeholder="给这组筛选起个名字…" maxlength="20" autocomplete="off">
+        <button class="tfb-ok" id="tfbSaveOk">保存</button>
+        <button class="tfb-cancel" id="tfbSaveCancel">取消</button>
+      </div>
+    </div>
     <div class="tag-menu-list" id="tagMenuList"></div>
   </div>
 
@@ -709,7 +614,7 @@
   <div class="fab-group" id="fabGroup">
     <!-- 上分支：相册（最上）+ 切换页面（紧贴主按钮上方） -->
     <div class="fab-branch up">
-      <button class="fab fab-page" id="fabAlbumsBtn" title="相册">
+      <button class="fab fab-page" id="fabAlbumsBtn" title="浏览">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="4" width="18" height="16" rx="2"/>
           <circle cx="8.5" cy="9.5" r="1.5"/>
@@ -786,7 +691,7 @@
     <button class="btn ghost sm" id="batchCancel">✕ 取消</button>
     <span class="batch-count" id="batchCount">已选 0 张</span>
     <button class="btn ghost sm" id="batchTag">＋ 加标签</button>
-    <button class="btn ghost sm" id="batchAlbum">＋ 入相册</button>
+    <button class="btn ghost sm" id="batchFav">♥ 收藏</button>
     <button class="btn danger sm" id="batchDel">删除</button>
   </div>
 
@@ -829,8 +734,8 @@
       <button class="lb-tool" id="lbToolDl" title="下载原图">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </button>
-      <button class="lb-tool" id="lbToolAlbum" title="加入相册">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      <button class="lb-tool" id="lbToolFav" title="收藏">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.8 8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/></svg>
       </button>
     </div>
   </div>
@@ -840,8 +745,8 @@
 <!-- 最小化 Dock（v0.14.7：黄点最小化后收拢于此，点击图标恢复） -->
 <div class="dock-bar" id="dockBar" hidden></div>
 
-<!-- 拼音搜索支持（v0.13；加载失败自动降级为无拼音匹配） -->
-<script src="assets/pinyin-pro.min.js?v=20261015" defer></script>
-<script src="assets/app.js?v=20261022"></script>
+<!-- v0.54：拼音库改为按需加载（原来写死在这里，首屏要多下 316KB / gzip 142KB）：
+     首次真正要做拼音匹配时由 app.js 动态注入，见 app.js 的 loadPinyinLib -->
+<script src="assets/app.js?v=20261117" defer></script>
 </body>
 </html>

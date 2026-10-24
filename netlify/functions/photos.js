@@ -23,16 +23,20 @@ const {
   store, json, notFound, badRequest, serverError, unauthorized,
   nanoid, imageSize, sniffMime,
   authConfig, saveAuthConfig, checkAuth, isR18Photo, isR16Photo, isAdultPhoto, sha256hex,
+  RATINGS, RATING_LABEL, normRating, ratingOf, // v0.57 三档分级
 } = require("./_lib");
 const crypto = require("crypto");
+const dns = require("dns").promises;
 const sharp = require("sharp"); // v0.13.8：服务端缩略图（列表秒开）
 
 const PREFIX_META = "meta/";
+const PREFIX_HASH = "hash/"; // v0.54：内容 sha1 → 照片 id 的反查键，查重从 O(N) 降到 O(1)
+const hashKeyOf = (h) => `${PREFIX_HASH}${h}`;
 const PREFIX_IMG = "img/";
 const KEY_TAGS = "tags-config"; // 标签分组配置（v0.11 / v0.15 主分类）
 const KEY_ALBUMS = "albums-config"; // 相册配置（v0.12）
 const KEY_LOGS = "logs"; // 操作日志（v0.12）
-const KEY_INDEX = "photos-index"; // 列表索引（v0.24）：轻量元数据数组，避免列表接口逐个读 meta
+const KEY_INDEX = "photos-index"; // v0.24 的旧单 Blob 索引（v0.54 起被 idx/ 取代，仅在重建/清空时清理遗留）
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 /* 内置主分类（上传必选、可多选；照片 meta.categories 存名称数组，名称即引用键）
    首次读写配置时若 categories 缺失则自动补这份默认值 */
@@ -51,6 +55,42 @@ const sanitizeCat = (v) => String(v || "").trim().slice(0, 20); // 单个主分�
 function sanitizeCats(v) {
   const arr = Array.isArray(v) ? v : (v ? [v] : []);
   return [...new Set(arr.map((x) => sanitizeCat(x)).filter(Boolean))].slice(0, 6);
+}
+/* v0.55 / v0.57：保留名 —— r18 / r16 现在是**图库分级档位**（见 _lib.js 的 ratingOf），
+   不该再作为普通标签 / 主分类存在：
+   · 新建同名标签或主分类一律 400（存量由 scripts/migrate-rating.js 清理）；
+   · 照片写入时若 tags / categories 里出现它们，折算进 meta.rating 并从数组剔除
+     （旧脚本"打 r18 标签即标 R18"的习惯仍然有效，但数组里不留脏名字）。 */
+const RESERVED_NAMES = new Set(["r18", "r16"]);
+const isReservedName = (n) => RESERVED_NAMES.has(String(n == null ? "" : n).trim().toLowerCase());
+/* 从数组里剔除保留名（分级已折算进 meta.rating） */
+const stripRatingNames = (arr) => (Array.isArray(arr) ? arr : []).filter((x) => !isReservedName(x));
+const RATING_RANK = { general: 0, r16: 1, r18: 2 };
+/* 把一组名字里的 r18 / r16 折算进 meta.rating —— 只升不降（降级必须显式传 rating） */
+function bumpRating(meta, names) {
+  const low = (Array.isArray(names) ? names : []).map((x) => String(x).trim().toLowerCase());
+  const cur = RATING_RANK[ratingOf(meta)] || 0;
+  if (low.includes("r18") && cur < 2) meta.rating = "r18";
+  else if (low.includes("r16") && cur < 1) meta.rating = "r16";
+  return meta;
+}
+/* 照片标签清洗（v0.55，与 sanitizeCats 对称）：去空、去重、单名限长 40、最多 10 个。
+   以前这里只有 map(trim).filter(Boolean).slice(0,10) —— 同一张图能存重复标签，
+   也能塞进任意长字符串（整库导出会被撑大）。 */
+const TAG_NAME_MAX = 40;
+const TAGS_MAX = 10;
+function sanitizeTags(v) {
+  const arr = Array.isArray(v) ? v : (v ? [v] : []);
+  const out = [];
+  const seen = new Set();
+  for (const x of arr) {
+    const name = String(x == null ? "" : x).trim().slice(0, TAG_NAME_MAX);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+    if (out.length >= TAGS_MAX) break;
+  }
+  return out;
 }
 /* 主分类列表归一化：无/空 → 默认六类；补 id/color/sort，名称去重 */
 function normCategories(list) {
@@ -251,14 +291,14 @@ async function authTagger(req, role) {
   if (!k) {
     delete cfg.taggerHash;
     await saveAuthConfig(cfg);
-    logAction(req, "清除整理模式密码", "");
+    await logAction(req, "清除整理模式密码", "");
     return json({ ok: true, hasTagger: false });
   }
   if (k.length < 4) return badRequest("整理密码至少 4 位");
   if (cfg.accessHash && sha256hex(k) === cfg.accessHash) return badRequest("整理密码不能与访问密码相同");
   cfg.taggerHash = sha256hex(k);
   await saveAuthConfig(cfg);
-  logAction(req, "设置整理模式密码", "");
+  await logAction(req, "设置整理模式密码", "");
   return json({ ok: true, hasTagger: true });
 }
 
@@ -321,7 +361,7 @@ async function albumsPut(req) {
   }
   const cfg = { albums };
   await store().set(KEY_ALBUMS, JSON.stringify(cfg));
-  logAction(req, "保存相册配置", `${albums.length} 个相册`);
+  await logAction(req, "保存相册配置", `${albums.length} 个相册`);
   return json({ ok: true, config: cfg });
 }
 /* 删除照片后从相册移除引用 */
@@ -351,7 +391,8 @@ function indexEntry(m) {
     title: m.title || "",
     tags: Array.isArray(m.tags) ? m.tags : [],
     categories: Array.isArray(m.categories) ? m.categories : (m.category ? [m.category] : []),
-    r18: m.r18 === true,
+    rating: ratingOf(m), // v0.57：三档分级（general / r16 / r18），取代原来的 r18 布尔
+    fav: m.fav === true, // v0.56 收藏夹：照片上的标记（跟着图走，换设备也在）
     width: m.width || 0,
     height: m.height || 0,
     size: m.size || 0,
@@ -364,65 +405,146 @@ function indexEntry(m) {
     src: m.src || null,
   };
 }
-async function indexGet(s) {
-  const raw = await s.get(KEY_INDEX, { type: "json" });
-  return Array.isArray(raw) ? raw : null;
+/* ---------- 索引条目（v0.54：一条一 key，根治并发丢更新） ----------
+   旧实现把整份索引存在单个 Blob 里，每次上传/编辑/删除都要「整表读 → 改 → 整表写」；
+   两张图并发上传时后写的会覆盖先写的 —— 照片从列表里消失（meta 还在，要跑 reindex 才回来）。
+   现在 key = idx/<13 位倒序时间戳>-<id>.json：
+   · 写入只碰自己那一条，不存在 read-modify-write 竞态，也不会随图库变大而变慢；
+   · 倒序时间戳让字典序 = 「最新在前」，list 分页可直接用，无需再排序。
+   编辑与替换原图都不改 uploadedAt，所以同一张照片的 key 始终不变。 */
+const PREFIX_IDX = "idx/";
+const TS_MAX = 9999999999999;
+function idxStampOf(iso) {
+  const t = Date.parse(String(iso || ""));
+  const ms = Number.isFinite(t) ? Math.min(Math.max(t, 0), TS_MAX) : 0;
+  return String(TS_MAX - ms).padStart(13, "0");
 }
-const indexSet = (s, arr) => s.set(KEY_INDEX, JSON.stringify(arr));
-/* 全量重建（低频操作后调用；也能修复索引与 meta 不一致） */
-async function indexRebuild(s) {
+const idxKeyOf = (id, uploadedAt) => `${PREFIX_IDX}${idxStampOf(uploadedAt)}-${id}.json`;
+
+/* 读一页索引（管理员列表路径）：list 只给 key，条目内容要逐条取，一页几十次并发读可接受 */
+async function indexGetPage(s, { limit = 60, cursor } = {}) {
+  const res = await s.list({ prefix: PREFIX_IDX, cursor, limit });
+  const entries = await Promise.all(res.blobs.map((b) => s.get(b.key, { type: "json" }).catch(() => null)));
+  return { entries: entries.filter((e) => e && e.id), cursor: res.nextCursor || null, hasMore: !!res.nextCursor };
+}
+/* 全量读取（观光模式过滤、用量统计、重建用）*/
+async function indexAll(s) {
+  const keys = [];
+  let cursor;
+  do {
+    const res = await s.list({ prefix: PREFIX_IDX, cursor, limit: 200 });
+    for (const b of res.blobs) keys.push(b.key);
+    cursor = res.nextCursor;
+  } while (cursor);
   const out = [];
+  for (let i = 0; i < keys.length; i += 20) { // 分批并发，避免一次打满连接
+    const batch = await Promise.all(keys.slice(i, i + 20).map((k) => s.get(k, { type: "json" }).catch(() => null)));
+    for (const e of batch) if (e && e.id) out.push(e);
+  }
+  return out; // 顺序由 key 保证：最新在前
+}
+async function indexCount(s) {
+  let total = 0;
+  let cursor;
+  do {
+    const res = await s.list({ prefix: PREFIX_IDX, cursor, limit: 1000 });
+    total += res.blobs.length;
+    cursor = res.nextCursor;
+  } while (cursor);
+  return total;
+}
+/* 增量维护：只写 / 只删自己那一条 */
+const indexPut = (s, meta) => s.set(idxKeyOf(meta.id, meta.uploadedAt), JSON.stringify(indexEntry(meta)));
+async function indexDrop(s, metas) { // metas: [{ id, uploadedAt }]，传完整 meta 即可
+  await Promise.all(metas.map((m) => s.delete(idxKeyOf(m.id, m.uploadedAt))));
+}
+async function indexClear(s) { // 先收集再删：边列边删在不同 Blobs 实现下会漏删
+  const keys = [];
+  let cursor;
+  do {
+    const res = await s.list({ prefix: PREFIX_IDX, cursor, limit: 200 });
+    for (const b of res.blobs) keys.push(b.key);
+    cursor = res.nextCursor;
+  } while (cursor);
+  for (let i = 0; i < keys.length; i += 20) {
+    await Promise.all(keys.slice(i, i + 20).map((k) => s.delete(k)));
+  }
+  await s.delete(KEY_INDEX); // 顺手清掉 v0.54 之前遗留的单 Blob 索引
+  return keys.length;
+}
+/* 全量重建（低频：批量改写 / reindex 接口）：先写后删 ——
+   meta 数量不变时只是覆盖内容，中途失败也不会出现「列表空窗」 */
+async function indexRebuild(s) {
+  const metas = [];
   let cursor;
   do {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
-    for (const item of res.blobs) {
-      const m = await s.get(item.key, { type: "json" });
-      if (m) out.push(indexEntry(m));
-    }
+    const batch = await Promise.all(res.blobs.map((b) => s.get(b.key, { type: "json" }).catch(() => null)));
+    for (const m of batch) if (m && m.id) metas.push(m);
     cursor = res.nextCursor;
   } while (cursor);
-  out.sort((a, b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
-  await indexSet(s, out);
-  return out;
-}
-/* 索引不存在时构建（老库第一次访问会慢一次，之后走索引） */
-async function indexEnsure(s) {
-  const cur = await indexGet(s);
-  if (cur) return cur;
-  return indexRebuild(s);
-}
-async function indexUpsert(s, meta) {
-  const arr = (await indexGet(s)) || [];
-  const e = indexEntry(meta);
-  const i = arr.findIndex((x) => x.id === e.id);
-  if (i >= 0) arr[i] = e;
-  else {
-    arr.unshift(e);
-    arr.sort((a, b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
+
+  const entries = metas.map(indexEntry);
+  for (let i = 0; i < entries.length; i += 20) {
+    await Promise.all(entries.slice(i, i + 20).map((e) => s.set(idxKeyOf(e.id, e.uploadedAt), JSON.stringify(e))));
   }
-  await indexSet(s, arr);
+  // 清掉 meta 已不存在 / key 已变化的残留条目
+  const alive = new Set(entries.map((e) => idxKeyOf(e.id, e.uploadedAt)));
+  const stale = [];
+  let cur2;
+  do {
+    const res = await s.list({ prefix: PREFIX_IDX, cursor: cur2, limit: 200 });
+    for (const b of res.blobs) if (!alive.has(b.key)) stale.push(b.key);
+    cur2 = res.nextCursor;
+  } while (cur2);
+  for (let i = 0; i < stale.length; i += 20) {
+    await Promise.all(stale.slice(i, i + 20).map((k) => s.delete(k)));
+  }
+  await s.delete(KEY_INDEX); // 清掉 v0.54 之前遗留的单 Blob 索引
+  return entries;
 }
-async function indexDrop(s, ids) {
-  const arr = await indexGet(s);
-  if (!arr) return;
-  const del = new Set(ids);
-  await indexSet(s, arr.filter((x) => !del.has(x.id)));
+/* v0.54：原 indexUpsert / indexDrop（整表读改写）已由上面的 indexPut / indexDrop 取代 */
+
+/* v0.54：老库自动迁移 —— idx/ 为空但仍存在照片 meta 时（升级后第一次访问，
+   或只有 v0.24 那份单 Blob 索引）自动重建一次；索引正常时只多一次极廉价的 list。
+   返回重建后的条数，索引本来就正常时返回 null（调用方自己算 total）。 */
+async function indexHeal(s) {
+  const probe = await s.list({ prefix: PREFIX_IDX, limit: 1 });
+  if (probe.blobs.length) return null;
+  const meta = await s.list({ prefix: PREFIX_META, limit: 1 });
+  if (!meta.blobs.length) return 0; // 确实是空库
+  return (await indexRebuild(s)).length;
 }
 
-/* ---------- 列表（v0.24：走索引，分页用数字偏移） ---------- */
+/* ---------- 列表（v0.54：索引按条存储，两种模式各自分页） ----------
+   管理员：直接按 key 顺序分页（cursor 是 Blobs 游标，一次只读一页）；
+   观光 / 整理模式：必须「分页前过滤」成人向，否则能靠翻页反推数量 ——
+   这条路径读全量索引后在内存里过滤分页（cursor 是数字偏移）。
+   两种模式的 cursor 语义不同，但前端切换模式时会从头重新加载，不会混用。 */
 async function list(url, role) {
   const q = url.searchParams;
   const limit = Math.min(parseInt(q.get("limit"), 10) || 60, 500);
   const s = store();
-  let arr = await indexEnsure(s);
-  // v0.49 观光模式（?safe=1）：列表里直接剔除 R18 / R16 的图片
-  // v0.51：整理模式（tagger）同样看不到成人向，即使没带 safe=1
-  if (safeMode(q) || role === "tagger") arr = arr.filter((e) => !isAdultPhoto(e));
-  const start = Math.max(parseInt(q.get("cursor"), 10) || 0, 0);
-  const page = arr.slice(start, start + limit).map((e) => ({ ...e, r18: isR18Photo(e) }));
-  const nextStart = start + limit;
-  const next = nextStart < arr.length ? String(nextStart) : null;
-  return json({ photos: page, cursor: next, hasMore: !!next, total: arr.length });
+  const healed = await indexHeal(s); // v0.54：老库首次访问自动重建索引
+  const hideAdult = safeMode(q) || role === "tagger"; // v0.51：整理模式同样看不到成人向
+  let photos;
+  let cursor = null;
+  let total;
+
+  if (!hideAdult) {
+    const page = await indexGetPage(s, { limit, cursor: q.get("cursor") || undefined });
+    photos = page.entries.map((e) => ({ ...e, rating: ratingOf(e) }));
+    cursor = page.cursor;
+    total = healed !== null ? healed : await indexCount(s);
+  } else {
+    const arr = (await indexAll(s)).filter((e) => !isAdultPhoto(e));
+    const start = Math.max(parseInt(q.get("cursor"), 10) || 0, 0);
+    photos = arr.slice(start, start + limit).map((e) => ({ ...e, rating: ratingOf(e) }));
+    const nextStart = start + limit;
+    cursor = nextStart < arr.length ? String(nextStart) : null;
+    total = arr.length;
+  }
+  return json({ photos, cursor, hasMore: !!cursor, total });
 }
 
 /* ---------- 观光模式（v0.49） ---------- */
@@ -446,7 +568,7 @@ function guestReadOK(method, path, url, rest) {
 async function getMeta(id) {
   const m = await store().get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!m) return notFound("Photo not found");
-  return json({ photo: { ...m, r18: isR18Photo(m) } });
+  return json({ photo: { ...m, rating: ratingOf(m) } });
 }
 
 /* ---------- 图片字节输出（v0.9.20：必须用 arrayBuffer 读，v8 默认返回字符串会损坏二进制） ---------- */
@@ -495,13 +617,19 @@ async function replaceImage(req, id) {
   meta.width = dims.width;
   meta.height = dims.height;
   meta.mime = mime;
+  const oldHash = meta.hash; // v0.54：覆盖原图后同步 hash/ 反查键
   meta.hash = sha1hex(buf);
   meta.dhash = await genDHash(buf); // v0.21：替换原图后重算感知哈希
   await saveThumb(s, meta, id, buf, thumb); // 前端缩略图优先，否则服务端生成
   meta.updatedAt = new Date().toISOString();
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
-  await indexUpsert(s, meta); // v0.24 同步列表索引（尺寸/大小/哈希都变了）
-  logAction(req, "替换图片内容", (meta.title || id) + ` ${dims.width}x${dims.height}`);
+  await indexPut(s, meta); // v0.54 同步列表索引（尺寸/大小/哈希都变了）
+  if (oldHash && oldHash !== meta.hash) {
+    const stale = await s.get(hashKeyOf(oldHash), { type: "json" }).catch(() => null);
+    if (stale && stale.id === id) await s.delete(hashKeyOf(oldHash));
+  }
+  await s.set(hashKeyOf(meta.hash), JSON.stringify({ id, title: meta.title }));
+  await logAction(req, "替换图片内容", (meta.title || id) + ` ${dims.width}x${dims.height}`);
   return json({ ok: true, photo: meta });
 }
 
@@ -524,7 +652,7 @@ async function thumb(id, req, url, role) {
       meta.thumbMime = "image/webp";
       await s.set(meta.thumbKey, out);
       await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
-      await indexUpsert(s, meta); // v0.24 懒生成缩略图后同步索引
+      await indexPut(s, meta); // v0.54 懒生成缩略图后同步索引
       buf = out;
     } catch (e) {
       return notFound("Thumbnail generation failed");
@@ -540,17 +668,26 @@ async function thumb(id, req, url, role) {
   });
 }
 
-/* ---------- 重复检测（v0.12：按内容 sha1 查询） ---------- */
+/* ---------- 重复检测（v0.12 按内容 sha1；v0.54 改走 hash/<sha1> 反查键） ----------
+   旧实现每次都要遍历全库 meta，而前端每上传一张就调一次 → 整体 O(N²)。
+   现在一次 get 即可；老库还没有反查键时回退线性扫描，并顺手把键补上。 */
 async function checkHash(url) {
   const hash = (url.searchParams.get("hash") || "").trim().toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(hash)) return badRequest("Invalid hash");
   const s = store();
+  const hit = await s.get(hashKeyOf(hash), { type: "json" }).catch(() => null);
+  if (hit && hit.id) {
+    const alive = await s.get(`${PREFIX_META}${hit.id}.json`, { type: "json" });
+    if (alive) return json({ duplicate: true, photo: { id: alive.id, title: alive.title } });
+    await s.delete(hashKeyOf(hash)); // 反查键指向的照片已被删除 → 清掉后继续找
+  }
   let cursor;
   do {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
     for (const item of res.blobs) {
       const m = await s.get(item.key, { type: "json" });
       if (m && m.hash === hash) {
+        await s.set(hashKeyOf(hash), JSON.stringify({ id: m.id, title: m.title })); // 惰性补键
         return json({ duplicate: true, photo: { id: m.id, title: m.title } });
       }
     }
@@ -582,7 +719,7 @@ async function reindexDHash(req) {
     }
     cursor = res.nextCursor;
   } while (cursor);
-  logAction(req, "补算感知哈希", `${updated} 张已补算 / ${skipped} 张已有 / ${failed} 张失败`);
+  await logAction(req, "补算感知哈希", `${updated} 张已补算 / ${skipped} 张已有 / ${failed} 张失败`);
   if (updated) await indexRebuild(s); // v0.24：索引里的 dhash 也一起刷新
   return json({ ok: true, updated, skipped, failed });
 }
@@ -590,7 +727,7 @@ async function reindexDHash(req) {
 /* ---------- POST /api/photos/reindex：重建列表索引（v0.24，可修复索引与 meta 不一致） ---------- */
 async function reindexIndex(req) {
   const arr = await indexRebuild(store());
-  logAction(req, "重建列表索引", `${arr.length} 张`);
+  await logAction(req, "重建列表索引", `${arr.length} 张`);
   return json({ ok: true, count: arr.length });
 }
 
@@ -615,11 +752,23 @@ async function upload(req) {
   const ext = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" }[mime] || "bin";
   const origKey = `${PREFIX_IMG}${id}.${ext}`;
   const thumb = parseThumb(body);
+  const hash = sha1hex(buf); // v0.54：内容哈希（同时用于 hash/ 反查键）
+  /* v0.57：分级 —— 标签 / 主分类里写了 r18、r16 就折算成分级（安全优先，只升不降），
+     并把这两个名字从数组里剔掉；显式 body.rating 可以再往上抬，但不能把带 r18 标签的图降成大众级 */
+  const tagsRaw = sanitizeTags(body.tags); // v0.55：去重 / 单名限长 40 / 上限 10
+  const catsRaw = sanitizeCats(body.categories !== undefined ? body.categories : body.category); // v0.19 多选
+  let rating = ratingOf({ tags: tagsRaw, categories: catsRaw });
+  if (body.rating !== undefined) {
+    const v = String(body.rating).trim().toLowerCase();
+    if (!RATINGS.includes(v)) return badRequest(`分级只能是 ${RATINGS.join(" / ")}`);
+    if (RATING_RANK[v] > RATING_RANK[rating]) rating = v;
+  }
   const meta = {
     id,
     title: (body.title || "").trim() || "未命名",
-    categories: sanitizeCats(body.categories !== undefined ? body.categories : body.category), // 主分类（v0.19 必选、可多选）
-    tags: Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [],
+    categories: stripRatingNames(catsRaw),
+    tags: stripRatingNames(tagsRaw),
+    rating, // v0.57：三档分级（general / r16 / r18）
     takenAt: body.takenAt || new Date().toISOString(),
     uploadedAt: new Date().toISOString(),
     size: buf.length,
@@ -627,17 +776,23 @@ async function upload(req) {
     height: dims.height,
     mime,
     origKey,
-    hash: sha1hex(buf), // 内容哈希（v0.12 重复检测）
+    hash, // 内容哈希（v0.12 重复检测）
     dhash: await genDHash(buf), // 感知哈希（v0.21 相似图片提醒）
   };
 
   const s = store();
+  // v0.54：服务端也查一次重 —— 前端查重可被绕过，直接 POST 就能无限重复上传
+  const dupHit = await s.get(hashKeyOf(hash), { type: "json" }).catch(() => null);
   await s.set(origKey, buf);
   await saveThumb(s, meta, id, buf, thumb); // 前端缩略图优先，否则服务端生成（v0.13.8）
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
-  await indexUpsert(s, meta); // v0.24 同步列表索引
-  logAction(req, "上传图片", meta.title);
-  return json({ ok: true, photo: meta }, 201);
+  await indexPut(s, meta); // v0.54 同步列表索引（只写自己那一条）
+  await s.set(hashKeyOf(hash), JSON.stringify({ id, title: meta.title })); // 反查键（同内容保留最新一张）
+  await logAction(req, dupHit && dupHit.id ? "上传重复图片" : "上传图片", meta.title);
+  return json(
+    { ok: true, photo: meta, duplicate: dupHit && dupHit.id ? { id: dupHit.id, title: dupHit.title || "" } : null },
+    201
+  );
 }
 
 /* ---------- 更新元数据 ---------- */
@@ -651,27 +806,57 @@ async function patch(req, id, role) {
   const s = store();
   const meta = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
   if (!meta) return notFound("Photo not found");
-  // v0.51 整理模式：只能改标签与主分类（其余字段一律忽略，防止越权改名 / 标记 R18）
+  // v0.57：先把「靠老标签 / 老字段推导出来的分级」固化成显式字段 —— 否则下面把 r18 标签洗掉后，
+  // 这张图会从 R18 直接掉回大众级（观光模式立刻就能看到）。固化之后分级只由 meta.rating 决定。
+  if (!RATINGS.includes(String(meta.rating || "").trim().toLowerCase())) meta.rating = ratingOf(meta);
+  delete meta.r18;
+  delete meta.r16;
+  // v0.51 整理模式：只能改标签与主分类（其余字段一律忽略，防止越权改名 / 标分级）
+  // v0.57：分级已与标签解耦 —— tagger 改不动 rating（body 被裁掉），
+  //        而且 tags / categories 里一旦出现 r18 / r16 会折算分级，所以这两类保留名直接拒绝
   if (role === "tagger") {
     if (body.tags === undefined && body.categories === undefined && body.category === undefined) {
       return badRequest("整理模式只能添加标签或设置主分类");
     }
     body = { tags: body.tags, categories: body.categories, category: body.category };
+    if (body.tags !== undefined && sanitizeTags(body.tags).some(isReservedName)) {
+      return badRequest("整理模式不能设置分级（r18 / r16 是分级档位，不是标签）");
+    }
+    if ((body.categories !== undefined || body.category !== undefined)
+      && sanitizeCats(body.categories !== undefined ? body.categories : body.category).some(isReservedName)) {
+      return badRequest("整理模式不能设置分级（r18 / r16 是分级档位，不是主分类）");
+    }
   }
   if (body.title !== undefined) meta.title = String(body.title).trim() || "未命名";
   // v0.41：描述（desc）字段已整体移除，不再接受写入
-  if (body.tags !== undefined) meta.tags = Array.isArray(body.tags) ? body.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [];
+  if (body.tags !== undefined) {
+    const raw = sanitizeTags(body.tags); // v0.55：去重 / 单名限长 40 / 上限 10
+    bumpRating(meta, raw);              // v0.57：标签里若写了 r18 / r16，折算成分级（只升不降）
+    meta.tags = stripRatingNames(raw);  // 并从标签数组里剔除（分级不是标签）
+  }
   if (body.categories !== undefined || body.category !== undefined) {
     // 主分类（v0.19 多选数组；同时接受旧的单值 category 字段）
-    meta.categories = sanitizeCats(body.categories !== undefined ? body.categories : body.category);
+    const raw = sanitizeCats(body.categories !== undefined ? body.categories : body.category);
+    bumpRating(meta, raw);
+    meta.categories = stripRatingNames(raw);
     delete meta.category; // 迁移旧字段
   }
-  if (body.r18 !== undefined) meta.r18 = body.r18 === true || body.r18 === "true" || body.r18 === 1; // R18 独立开关
+  if (body.rating !== undefined) {
+    const v = String(body.rating).trim().toLowerCase();
+    if (!RATINGS.includes(v)) return badRequest(`分级只能是 ${RATINGS.join(" / ")}`);
+    meta.rating = v; // 显式设置可以升降（管理员专属：整理角色的 body 已被裁掉）
+  } else if (body.r18 !== undefined) {
+    // 兼容旧调用方：r18: true → R18，false → 大众级
+    meta.rating = (body.r18 === true || body.r18 === "true" || body.r18 === 1) ? "r18" : "general";
+  }
+  // v0.56 收藏夹：照片上的标记。整理模式的 body 上面已被裁剪成 tags/categories，
+  // 所以整理角色改不动收藏（只有管理员能收藏）——这正是想要的边界
+  if (body.fav !== undefined) meta.fav = body.fav === true || body.fav === "true" || body.fav === 1;
   if (body.takenAt !== undefined) meta.takenAt = body.takenAt;
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
-  await indexUpsert(s, meta); // v0.24 同步列表索引
-  logAction(req, "编辑图片", meta.title || id);
-  return json({ ok: true, photo: meta });
+  await indexPut(s, meta); // v0.54 同步列表索引（只写自己那一条）
+  await logAction(req, "编辑图片", meta.title || id);
+  return json({ ok: true, photo: { ...meta, rating: ratingOf(meta) } });
 }
 
 /* ---------- 删除单张 ---------- */
@@ -682,47 +867,88 @@ async function remove(req, id) {
   await s.delete(meta.origKey || `${PREFIX_IMG}${id}`);
   if (meta.thumbKey) await s.delete(meta.thumbKey);
   await s.delete(`${PREFIX_META}${id}.json`);
-  await indexDrop(s, [id]); // v0.24 同步列表索引
+  await indexDrop(s, [meta]); // v0.54：按 idx key 精确删除，不整表重写
+  if (meta.hash) { // v0.54：反查键指向本图时一并清掉（同内容还有别的图时属近似，可接受）
+    const cur = await s.get(hashKeyOf(meta.hash), { type: "json" }).catch(() => null);
+    if (cur && cur.id === id) await s.delete(hashKeyOf(meta.hash));
+  }
   await scrubAlbums([id]);
-  logAction(req, "删除图片", meta.title || id);
+  await logAction(req, "删除图片", meta.title || id);
   return json({ ok: true });
 }
 
 /* ---------- 清空图库 ---------- */
+/* v0.54：只删「照片数据」三类 key（img/ thumb- meta/），其余配置一律保留。
+   旧实现按黑名单跳过 tags 与 logs，会把 auth-config（访问密码）和 albums-config 一起删掉 ——
+   清空后门禁失效（未设密码时 checkAuth 直接把所有人当 admin），且相册配置一起丢失。 */
+const PHOTO_DATA_PREFIXES = [PREFIX_IMG, "thumb-", PREFIX_META, PREFIX_HASH];
 async function clearAll(req) {
   const s = store();
+  // 先收集、再删除：边列边删在不同 Blobs 实现下游标语义不一致，会漏删
+  const keys = [];
   let cursor;
-  let deleted = 0;
-  const removedIds = [];
   do {
     const res = await s.list({ cursor, limit: 200 });
     for (const item of res.blobs) {
-      if (item.key === KEY_TAGS || item.key === KEY_LOGS) continue; // 保留标签配置与日志（v0.11/0.12）
-      if (item.key.startsWith(PREFIX_META)) removedIds.push(item.key.slice(PREFIX_META.length, -5));
-      await s.delete(item.key);
-      deleted++;
+      if (PHOTO_DATA_PREFIXES.some((p) => item.key.startsWith(p))) keys.push(item.key);
     }
     cursor = res.nextCursor;
   } while (cursor);
+
+  const removedIds = keys
+    .filter((k) => k.startsWith(PREFIX_META))
+    .map((k) => k.slice(PREFIX_META.length).replace(/\.json$/, ""));
+
+  let deleted = 0;
+  for (const key of keys) {
+    await s.delete(key);
+    deleted++;
+  }
+  await indexClear(s); // 索引条目一并清空（保留 auth / albums / tags / logs）
   if (removedIds.length) await scrubAlbums(removedIds);
-  logAction(req, "清空图库", `${removedIds.length} 张图片`);
+  await logAction(req, "清空图库", `${removedIds.length} 张图片`);
   return json({ ok: true, deleted });
 }
 
-/* ---------- 用量统计（v0.24：走索引，不再逐个读 meta） ---------- */
+/* ---------- 用量统计（v0.54：真实遍历 Blobs 统计总占用） ----------
+   旧实现只累加原图的 size，缩略图（每张几十 KB，占比可达 20%+）、meta、索引、配置全没算，
+   所以「已用空间」明显偏小。现在直接遍历所有 Blob key 累加真实字节，并按用途分类。 */
 async function stats() {
   const s = store();
-  const arr = await indexEnsure(s);
+  const byKind = { img: 0, thumb: 0, meta: 0, idx: 0, other: 0 };
+  const countByKind = { img: 0, thumb: 0, meta: 0, idx: 0, other: 0 };
   let bytes = 0;
+  let keys = 0;
+  let cursor;
+  do {
+    const res = await s.list({ cursor, limit: 500 });
+    for (const item of res.blobs) {
+      const size = Number(item.size) || 0;
+      bytes += size;
+      keys++;
+      const kind = item.key.startsWith(PREFIX_IMG) ? "img"
+        : item.key.startsWith("thumb-") ? "thumb"
+        : item.key.startsWith(PREFIX_META) ? "meta"
+        : item.key.startsWith(PREFIX_IDX) ? "idx"
+        : "other";
+      byKind[kind] += size;
+      countByKind[kind]++;
+    }
+    cursor = res.nextCursor;
+  } while (cursor);
+
+  // 照片数与按月份分布仍走索引（轻量，不必再读一遍 meta）
+  const arr = await indexAll(s);
   const byMonth = {};
+  let originalBytes = 0;
   for (const e of arr) {
-    bytes += e.size || 0;
+    originalBytes += e.size || 0;
     const month = String(e.uploadedAt || "").slice(0, 7) || "unknown";
     byMonth[month] = (byMonth[month] || 0) + 1;
   }
   // 配额（默认 1GB，可用 QUOTA_BYTES 环境变量覆盖）
   const quota = Math.max(parseInt(process.env.QUOTA_BYTES, 10) || 1024 * 1024 * 1024, 1);
-  return json({ count: arr.length, bytes, byMonth, quota });
+  return json({ count: arr.length, bytes, originalBytes, keys, byKind, countByKind, byMonth, quota });
 }
 
 /* ---------- 导出全部元数据 ---------- */
@@ -741,6 +967,64 @@ async function exportAll() {
   return json({ exportedAt: new Date().toISOString(), count: photos.length, photos });
 }
 
+/* ---------- 远程抓取的安全护栏（v0.54） ----------
+   旧实现直接 fetch(src)：可打内网与云元数据（169.254.169.254）、可被重定向带进内网、
+   没有超时也没有体积上限。这里逐跳校验协议与目标地址，并限制跳数 / 超时 / 体积。 */
+const MAX_IMPORT_BYTES = 15 * 1024 * 1024;
+function isPrivateAddress(host) {
+  const h = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (!h) return true;
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal") || h.endsWith(".local")) return true;
+  if (h === "::1" || h.startsWith("fe80:") || h.startsWith("fc") || h.startsWith("fd")) return true; // IPv6 本机 / 链路本地 / ULA
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false; // 普通域名：下面会再解析一次
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;              // 云元数据
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;    // CGNAT
+  return false;
+}
+async function assertImportableUrl(src) {
+  let u;
+  try {
+    u = new URL(String(src));
+  } catch {
+    throw new Error("URL 不合法");
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("只支持 http/https");
+  if (isPrivateAddress(u.hostname)) throw new Error("禁止访问内网 / 本机地址");
+  // 域名再解析一次，挡住「公网域名解析到内网」；解析失败不阻断（字面量校验已经通过）
+  const addrs = await dns.lookup(u.hostname, { all: true }).catch(() => []);
+  for (const a of addrs) if (isPrivateAddress(a.address)) throw new Error("该域名解析到内网地址，已拒绝");
+  return u;
+}
+async function fetchRemoteImage(src, { maxHops = 3, timeoutMs = 15000 } = {}) {
+  let url = await assertImportableUrl(src);
+  for (let hop = 0; hop <= maxHops; hop++) {
+    const res = await fetch(url, {
+      redirect: "manual", // 自己跟随重定向：每一跳都要重新校验目标
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { Accept: "image/*" },
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) throw new Error(`HTTP ${res.status}（重定向缺少 Location）`);
+      url = await assertImportableUrl(new URL(loc, url).toString());
+      continue;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const declared = parseInt(res.headers.get("content-length") || "0", 10);
+    if (declared > MAX_IMPORT_BYTES) throw new Error("图片超过 15MB");
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_IMPORT_BYTES) throw new Error("图片超过 15MB");
+    return { buf, finalUrl: url.toString() };
+  }
+  throw new Error("重定向次数过多");
+}
+
 /* ---------- 批量导入（供自建静态图片源使用） ---------- */
 async function importStatic(req) {
   let body;
@@ -749,7 +1033,8 @@ async function importStatic(req) {
   } catch {
     return badRequest("Invalid JSON body");
   }
-  const items = Array.isArray(body.items) ? body.items.slice(0, 300) : [];
+  // v0.54：上限从 300 降到 50 —— 每项都要「抓取 + 缩略图 + dhash」，300 项必然超时
+  const items = Array.isArray(body.items) ? body.items.slice(0, 50) : [];
   if (!items.length) return badRequest("Missing items list");
 
   const s = store();
@@ -760,21 +1045,21 @@ async function importStatic(req) {
       const src = typeof item === "string" ? item : item.url;
       if (!src) throw new Error("no url");
       const title = typeof item === "string" ? null : item.title;
-      const tags = Array.isArray(item && item.tags) ? item.tags.slice(0, 10) : [];
-      const res = await fetch(src);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const buf = Buffer.from(await res.arrayBuffer());
+      const tags = stripRatingNames(sanitizeTags(item && item.tags)); // v0.57：分级名不进标签
+      const { buf, finalUrl } = await fetchRemoteImage(src); // v0.54：校验协议 / 内网 / 跳数 / 超时 / 体积
       const dims = imageSize(buf);
       if (!dims) throw new Error("Unsupported format");
       const id = nanoid();
       const mime = sniffMime(buf);
       const ext = { "image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp" }[mime] || "bin";
       const origKey = `${PREFIX_IMG}${id}.${ext}`;
+      const catsRaw = sanitizeCats(item && (item.categories !== undefined ? item.categories : item.category));
       const meta = {
         id,
         title: (title || "").trim() || "未命名",
-        categories: sanitizeCats(item && (item.categories !== undefined ? item.categories : item.category)),
+        categories: stripRatingNames(catsRaw),
         tags,
+        rating: ratingOf({ tags, categories: catsRaw, rating: item && item.rating }), // v0.57：分级
         takenAt: new Date().toISOString(),
         uploadedAt: new Date().toISOString(),
         size: buf.length,
@@ -782,20 +1067,21 @@ async function importStatic(req) {
         height: dims.height,
         mime,
         origKey,
-        src,
+        src: finalUrl,
         hash: sha1hex(buf),
         dhash: await genDHash(buf), // v0.21 感知哈希
       };
       await s.set(origKey, buf);
       await saveThumb(s, meta, id, buf, null); // 导入图无前端缩略图 → 服务端生成（v0.13.8）
       await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
-      await indexUpsert(s, meta); // v0.24 同步列表索引
+      await indexPut(s, meta); // v0.54 同步列表索引（只写自己那一条）
+      await s.set(hashKeyOf(meta.hash), JSON.stringify({ id, title: meta.title })); // v0.54 hash 反查键
       imported++;
     } catch (e) {
       errors.push({ url: typeof item === "string" ? item : item && item.url, error: e.message });
     }
   }
-  logAction(req, "URL/批量导入", `${imported} 成功 / ${errors.length} 失败`);
+  await logAction(req, "URL/批量导入", `${imported} 成功 / ${errors.length} 失败`);
   return json({ ok: true, imported, errors });
 }
 
@@ -824,7 +1110,7 @@ async function rewritePhotos(s, fn) {
       if (!m || !Array.isArray(m.tags)) continue;
       const next = fn(m.tags);
       if (next) {
-        m.tags = [...new Set(next)].slice(0, 10);
+        m.tags = sanitizeTags(next); // v0.55：批量改写也走同一套清洗（去重 / 限长 / 上限 10）
         await s.set(item.key, JSON.stringify(m));
         changed++;
       }
@@ -938,6 +1224,18 @@ async function tagsPut(req) {
   const s = store();
   const oldCfg = await loadConfig(s);
   const categories = normCategories(body.categories);
+  // v0.55：保留名（r18 / r16）不能作为普通标签 / 主分类**新建**；存量同名条目允许继续保留，
+  // 免得老库因为已经有 r18 标签而整份 PUT 被拒（那会把标签管理彻底锁死）
+  const oldTagNames = new Set((oldCfg.tags || []).map((t) => String(t.name).trim().toLowerCase()));
+  const freshTag = tags.find((t) => isReservedName(t.name) && !oldTagNames.has(t.name.trim().toLowerCase()));
+  if (freshTag) {
+    return badRequest(`「${freshTag.name}」是图库分级档位（大众级 / R16 / R18），不是标签 —— 分级请在图片编辑里设置`);
+  }
+  const oldCatNames = new Set((oldCfg.categories || []).map((c) => String(c.name).trim().toLowerCase()));
+  const freshCat = categories.find((c) => isReservedName(c.name) && !oldCatNames.has(c.name.trim().toLowerCase()));
+  if (freshCat) {
+    return badRequest(`「${freshCat.name}」是图库分级档位（大众级 / R16 / R18），不是主分类 —— 分级请在图片编辑里设置`);
+  }
   const cfg = { categories, groups, tags };
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
@@ -950,8 +1248,17 @@ async function tagsPut(req) {
       })
     : 0;
 
-  logAction(req, "保存标签配置", `${categories.length} 主分类 / ${groups.length} 组 / ${tags.length} 标签` + (cleared ? `（清空 ${cleared} 张引用已删主分类）` : ""));
+  await logAction(req, "保存标签配置", `${categories.length} 主分类 / ${groups.length} 组 / ${tags.length} 标签` + (cleared ? `（清空 ${cleared} 张引用已删主分类）` : ""));
   return json({ ok: true, config: cfg, clearedPhotos: cleared });
+}
+
+/* v0.55：改名后把旧名收进别名 —— 别名只服务搜索，旧名留成别名，用户按旧名仍然搜得到。
+   （此前旧名会彻底消失：把「胡桃」改成「桃桃」后搜「胡桃」什么都搜不到。） */
+function keepAlias(tag, oldName) {
+  if (!tag || !oldName || oldName === tag.name) return;
+  const list = (Array.isArray(tag.aliases) ? tag.aliases : []).filter(Boolean);
+  if (!list.includes(oldName)) list.push(oldName);
+  tag.aliases = [...new Set(list)].slice(0, 20);
 }
 
 /* ---------- POST /api/tags/rename：改名；目标已存在则合并 ----------
@@ -971,6 +1278,10 @@ async function tagsRename(req) {
   const cfg = await loadConfig(s);
   const idx = cfg.tags.findIndex((t) => t.name === from);
   const merged = cfg.tags.some((t) => t.name === to);
+  // v0.55：不允许把普通标签改名成 r18 / r16（保留名）；合并进已有的保留名仍放行
+  if (!merged && isReservedName(to)) {
+    return badRequest("r18 / r16 是图库分级档位，不能作为标签名（分级请在图片编辑里设置）");
+  }
 
   if (idx >= 0) {
     if (merged) {
@@ -981,14 +1292,17 @@ async function tagsRename(req) {
       (fromTag.aliases || []).forEach((a) => aliases.add(a));
       aliases.delete(to);
       toTag.aliases = [...aliases];
+      keepAlias(toTag, from); // v0.55：并入的旧名留作别名
       cfg.tags.splice(idx, 1);
     } else {
       cfg.tags[idx].name = to;
+      keepAlias(cfg.tags[idx], from); // v0.55：旧名留作别名，按旧名仍能搜到
     }
   } else if (!merged) {
     // v0.33：配置里暂时看不到旧名（刚新建、Blobs 写入还没传播）时**不要直接失败**，
     // 至少保证新名存在于配置里；照片引用照样改写，前端随后会用完整配置 PUT 覆盖对齐。
-    cfg.tags.push({ id: `t-${nanoid(6)}`, name: to, aliases: [], group: "", color: null, sort: cfg.tags.length });
+    // v0.55：旧名一并留成别名 —— 照片上的游离标签（有引用、库里没有）改名后也该能按旧名搜到。
+    cfg.tags.push({ id: `t-${nanoid(6)}`, name: to, aliases: [from], group: "", color: null, sort: cfg.tags.length });
   }
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
@@ -1005,7 +1319,7 @@ async function tagsRename(req) {
     }
     return changed ? next : null;
   });
-  logAction(req, merged ? "标签合并" : "标签改名", `${from} → ${to}（${photos} 张照片）`);
+  await logAction(req, merged ? "标签合并" : "标签改名", `${from} → ${to}（${photos} 张照片）`);
   return json({ ok: true, photos, merged });
 }
 
@@ -1028,7 +1342,7 @@ async function tagsRemove(req) {
     const next = tags.filter((t) => t !== name);
     return next.length === tags.length ? null : next;
   });
-  logAction(req, "删除标签", `${name}（从 ${photos} 张照片移除）`);
+  await logAction(req, "删除标签", `${name}（从 ${photos} 张照片移除）`);
   return json({ ok: true, photos });
 }
 
@@ -1048,15 +1362,18 @@ async function categoryRename(req) {
   const s = store();
   const cfg = await loadConfig(s);
   const cats = normCategories(cfg.categories);
-  if (cats.some((c) => c.name === to)) return badRequest(`主分类已存在: ${to}`);
   const idx = cats.findIndex((c) => c.name === from);
+  const toExists = cats.some((c) => c.name === to);
+  if (toExists) return badRequest(`主分类已存在: ${to}`);
+  // v0.55 / v0.57：不允许新造 r18 / r16 主分类（它们是分级档位）；合并进已存在的同名分类仍放行
+  if (isReservedName(to) && !toExists) return badRequest("r18 / r16 是图库分级档位，不能作为主分类名");
   if (idx >= 0) cats[idx].name = to;
   else cats.push({ id: `c-${nanoid(6)}`, name: to, color: null, sort: cats.length }); // v0.33：宽容处理（配置暂不可见旧名时不失败）
   cfg.categories = cats;
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
   const photos = await rewriteByCategory(s, (cats2) => (cats2.includes(from) ? cats2.map((c) => (c === from ? to : c)) : null));
-  logAction(req, "主分类改名", `${from} → ${to}（${photos} 张照片）`);
+  await logAction(req, "主分类改名", `${from} → ${to}（${photos} 张照片）`);
   return json({ ok: true, photos });
 }
 
@@ -1078,6 +1395,6 @@ async function categoryRemove(req) {
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
   const photos = await rewriteByCategory(s, (cats) => (cats.includes(name) ? cats.filter((c) => c !== name) : null));
-  logAction(req, "删除主分类", `${name}（清空 ${photos} 张照片的分类）`);
+  await logAction(req, "删除主分类", `${name}（清空 ${photos} 张照片的分类）`);
   return json({ ok: true, photos });
 }
