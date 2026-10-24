@@ -2490,6 +2490,12 @@ html[data-cols="wide"] { --col-w: 320px; }
 
 /* --- 批量选择模式 --- */
 body.select-mode .card { cursor: pointer; }
+/* v0.60：长按卡片激活多选 —— 触屏下别弹系统菜单、别顺手选中文字/图片 */
+.card {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 .card .pick {
   position: absolute;
   top: 10px;

@@ -58,6 +58,16 @@ const collapsedGroups = new Set(); // 筛选菜单中折叠的组 id
 const SORT_KEY = "rn_sort";
 let SORT_MODE = "newest"; // newest | oldest | title | size
 let selectMode = false;
+/* v0.60：长按卡片激活多选（移动端手势）—— 状态
+   · 按住 LP_MS 且没挪动超过 LP_SLOP → 进入多选并选中这张
+   · 触发后 600ms 内忽略随后的 click（否则会顺手打开灯箱） */
+const LP_MS = 450;
+const LP_SLOP = 10;
+let lpTimer = null;
+let lpCard = null;
+let lpX = 0;
+let lpY = 0;
+let lpFiredAt = 0;
 const selected = new Set();
 
 /* v0.54：照片的时间线字段（拍摄时间优先，缺失时回退上传时间）——
@@ -2502,6 +2512,45 @@ function initGallery() {
     }, { rootMargin: "800px 0px" }).observe(sentinelEl);
   }
 
+  /* v0.60：长按卡片 = 激活多选并选中该张（触屏手势；鼠标仍走「选择」按钮，避免和卡片拖拽抢手势） */
+  const lpStart = (x, y, card) => {
+    if (selectMode || !card || !manageAllowed()) return;
+    if (!card.dataset.id) return;
+    clearTimeout(lpTimer);
+    lpCard = card;
+    lpX = x;
+    lpY = y;
+    lpTimer = setTimeout(() => {
+      lpTimer = null;
+      const id = lpCard && lpCard.dataset.id;
+      lpCard = null;
+      if (id) enterSelectModeWith(id);
+    }, LP_MS);
+  };
+  const lpCancel = () => {
+    if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+    lpCard = null;
+  };
+  grid.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) { lpCancel(); return; } // 双指（缩放）不触发
+    const t = e.touches[0];
+    lpStart(t.clientX, t.clientY, e.target.closest(".card"));
+  }, { passive: true });
+  grid.addEventListener("touchmove", (e) => {
+    if (!lpCard) return;
+    const t = e.touches[0];
+    if (!t) return lpCancel();
+    if (Math.abs(t.clientX - lpX) > LP_SLOP || Math.abs(t.clientY - lpY) > LP_SLOP) lpCancel(); // 在滚动，不是在长按
+  }, { passive: true });
+  grid.addEventListener("touchend", lpCancel, { passive: true });
+  grid.addEventListener("touchcancel", lpCancel, { passive: true });
+  // 长按卡片时别弹出系统菜单（存图 / 复制），观光模式除外 —— 那边长按存图是正常需求
+  grid.addEventListener("contextmenu", (e) => {
+    if (!e.target.closest(".card")) return;
+    if (!manageAllowed()) return;
+    e.preventDefault();
+  });
+
   /* 卡片拖拽（v0.14：拖到标签管理窗口的标签上打标） */
   grid.addEventListener("dragstart", (e) => {
     const card = e.target.closest(".card");
@@ -2517,6 +2566,13 @@ function initGallery() {
 
   /* 卡片事件委托（v0.13.2：星标 / 选中 / 打开灯箱，避免整批重绑） */
   grid.addEventListener("click", (e) => {
+    // v0.60：长按刚触发过 → 吃掉这次 click（否则多选和灯箱会同时发生）
+    if (lpFiredAt && Date.now() - lpFiredAt < 600) {
+      lpFiredAt = 0;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const card = e.target.closest(".card");
     if (!card) return;
     const id = card.dataset.id;
@@ -2867,6 +2923,23 @@ function exitSelectMode() {
   if (!selectMode) return;
   toggleSelectMode();
 }
+/* v0.60：长按进入多选 —— 与「选择」按钮的区别是不清空、而是直接选中被按住的那张 */
+function enterSelectModeWith(id) {
+  if (!id) return;
+  if (!selectMode) {
+    selectMode = true;
+    document.body.classList.add("select-mode");
+    const b = document.getElementById("fabSelectBtn");
+    if (b) b.classList.add("on");
+    selected.clear();
+  }
+  selected.add(id);
+  const card = document.querySelector(`#grid .card[data-id="${id}"]`);
+  if (card) card.classList.add("sel");
+  updateBatchUI();
+  lpFiredAt = Date.now();
+  try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) { /* 桌面浏览器没有震动 API */ }
+}
 function initSelection() {
   const btn = document.getElementById("fabSelectBtn");
   const bar = document.getElementById("batchBar");
@@ -2878,6 +2951,9 @@ function initSelection() {
   document.getElementById("batchCancel").addEventListener("click", exitSelectMode);
   document.getElementById("batchDel").addEventListener("click", batchDelete);
   document.getElementById("batchTag").addEventListener("click", openBatchTag);
+  // 测试 / 调试钩子
+  window.__selectionState = () => ({ mode: selectMode, ids: [...selected] });
+  window.__exitSelectMode = exitSelectMode;
 }
 async function batchDelete() {
   const ids = [...selected];

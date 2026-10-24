@@ -347,6 +347,62 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       }
     }
   }
+
+  /* v0.60：长按卡片激活多选（触屏手势） */
+  {
+    const gridEl = doc.getElementById("grid");
+    const mkT = (type, x, y) => {
+      const ev = new window.Event(type, { bubbles: true });
+      ev.changedTouches = [{ clientX: x, clientY: y }];
+      ev.touches = [{ clientX: x, clientY: y }];
+      return ev;
+    };
+    const selMode = () => doc.body.classList.contains("select-mode");
+    const selIds = () => (window.__selectionState ? window.__selectionState().ids : []);
+    const card1 = doc.querySelector("#grid .card");
+    if (gridEl && card1) {
+      const id = card1.dataset.id;
+
+      // 1) 按住不动 → 进入多选并选中这张
+      card1.dispatchEvent(mkT("touchstart", 100, 300));
+      await wait(700);
+      card1.dispatchEvent(mkT("touchend", 100, 300));
+      await wait(200);
+      check("长按卡片激活多选", selMode() && !doc.getElementById("batchBar").hidden, `body=${doc.body.className}`);
+      check("长按的那张已被选中", selIds().includes(id), JSON.stringify(selIds()));
+
+      // 2) 长按后紧随的 click 被吃掉，不会打开灯箱
+      const lbBoxNow = doc.getElementById("lightbox");
+      card1.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(300);
+      check("长按后的点击不会顺带打开灯箱", !lbBoxNow.classList.contains("open"));
+
+      // 3) 退出多选
+      const cancelBtn = doc.getElementById("batchCancel");
+      if (cancelBtn) clickEl(cancelBtn);
+      await wait(300);
+      check("退出多选", !selMode() && selIds().length === 0, `body=${doc.body.className}`);
+
+      // 4) 长按期间滑动 = 滚动，不该激活多选
+      card1.dispatchEvent(mkT("touchstart", 100, 300));
+      await wait(150);
+      card1.dispatchEvent(mkT("touchmove", 170, 300)); // 挪 70px
+      await wait(700);
+      card1.dispatchEvent(mkT("touchend", 170, 300));
+      check("长按期间滑动不会激活多选", !selMode(), `body=${doc.body.className}`);
+
+      // 5) 多选模式下再长按不重复触发，正常单击 = 勾选
+      doc.getElementById("fabSelectBtn").click();
+      await wait(200);
+      const before = selIds().length;
+      card1.dispatchEvent(mkT("touchstart", 100, 300));
+      await wait(700);
+      card1.dispatchEvent(mkT("touchend", 100, 300));
+      check("多选模式下长按不重复触发", selIds().length === before, `${before} → ${selIds().length}`);
+      window.__exitSelectMode && window.__exitSelectMode();
+      await wait(250);
+    }
+  }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
   check("灯箱工具条有收藏按钮（v0.56 归来）", !!doc.getElementById("lbToolFav"));
