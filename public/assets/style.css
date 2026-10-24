@@ -570,7 +570,7 @@ body[data-page="gallery"] .page {
   bottom: 32px;
   z-index: 80;
   width: 272px;   /* 感应区：覆盖左分支行 + 与主按钮间隙 + 主按钮 */
-  height: 140px;  /* 覆盖上分支按钮 + 主按钮 */
+  height: 152px;  /* 覆盖上分支两个按钮 + 间距 + 主按钮（v0.61：上分支加了 12px 间距） */
   pointer-events: none; /* 空白区不拦截页面点击 */
 }
 .fab-main {
@@ -587,9 +587,11 @@ body[data-page="gallery"] .page {
   pointer-events: none;
   transition: opacity 0.26s ease, transform 0.32s var(--ease-spring);
 }
-/* 上分支：按钮中心与主按钮中心垂直对齐（主44px / 子38px → left 3px），紧贴主按钮上缘 */
+/* 上分支：按钮中心与主按钮中心垂直对齐（主44px / 子38px → left 3px），紧贴主按钮上缘
+   v0.61：两个按钮之间留 12px 间距 —— 之前是贴着的，`.fab:hover` 放大 1.12 倍时会视觉重叠 */
 .fab-branch.up {
   flex-direction: column;
+  gap: 12px;
   left: 231px; /* (272 - 22 - 19)：中心对齐主按钮 */
   bottom: 52px;
   transform: translateY(12px) scale(0.88);
@@ -648,6 +650,16 @@ body[data-page="gallery"] .page {
 .fab-group.active .fab-main svg {
   transform: rotate(90deg);
 }
+/* v0.61：无限滚动开启时主按钮点亮，双击可切换 */
+.fab-main.inf {
+  border-color: rgba(255,159,10,0.55);
+  box-shadow:
+    inset 0 1px 0 var(--w012),
+    inset 0 -1px 0 rgba(0,0,0,0.2),
+    0 8px 24px rgba(0,0,0,0.4),
+    0 0 0 1px rgba(255,159,10,0.35);
+}
+.fab-main.inf svg { color: var(--accent); }
 .fab-tag,
 .fab-page {
   width: 38px;

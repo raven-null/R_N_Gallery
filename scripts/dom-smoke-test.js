@@ -152,6 +152,9 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
 
   const cssText = fs.readFileSync(path.join(ROOT, "public", "assets", "style.css"), "utf8");
   check("CSS 含 content-visibility 规则", /content-visibility:\s*auto/.test(cssText));
+  // v0.61：FAB 上分支两个按钮之间留出间距（之前贴着，hover 放大 1.12 会视觉重叠）
+  check("CSS：FAB 上分支按钮之间有 12px 间距", /\.fab-branch\.up\s*\{[^}]*gap:\s*12px/.test(cssText),
+    (/\.fab-branch\.up\s*\{[^}]*\}/.exec(cssText) || ["(找不到规则)"])[0].replace(/\s+/g, " ").slice(0, 90));
   // v0.47：灯箱图片铺满可用区域且不变形
   check("CSS：灯箱图片按比例铺满（max-height 100% + object-fit contain）",
     /\.lightbox img\s*\{[^}]*max-height:\s*100%/.test(cssText) && /\.lightbox img\s*\{[^}]*object-fit:\s*contain/.test(cssText));
@@ -401,7 +404,53 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       check("多选模式下长按不重复触发", selIds().length === before, `${before} → ${selIds().length}`);
       window.__exitSelectMode && window.__exitSelectMode();
       await wait(250);
+
+      // 6) v0.61：桌面鼠标按住不动 600ms 也进多选
+      const card3 = doc.querySelector("#grid .card");
+      card3.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 100, clientY: 300 }));
+      await wait(900);
+      card3.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true, clientX: 100, clientY: 300 }));
+      await wait(150);
+      check("鼠标按住不动也能进多选", selMode() && selIds().length === 1, JSON.stringify(selIds()));
+      window.__exitSelectMode && window.__exitSelectMode();
+      await wait(250);
+
+      // 7) 按下后立刻移动（= 拖拽手势）不该触发长按 —— 两者互斥
+      card3.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 100, clientY: 300 }));
+      await wait(100);
+      card3.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 240, clientY: 340 }));
+      await wait(800);
+      card3.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+      check("鼠标移动超过阈值不触发长按（与拖拽互斥）", !selMode(), `body=${doc.body.className}`);
     }
+  }
+
+  /* v0.61：双击 FAB 主按钮切换「无限滚动」 */
+  {
+    const fabMain = doc.getElementById("fabMain");
+    const inf = () => (window.__infiniteState ? window.__infiniteState() : { wanted: null, active: null });
+    const dbl = async () => {
+      fabMain.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0 }));
+      fabMain.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); // 第一次单击：展开菜单
+      await wait(80);
+      fabMain.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0 })); // 判定为双击
+      fabMain.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); // 这次 click 被吃掉
+      await wait(350);
+    };
+    check("初始未开启无限滚动", inf().wanted === false, JSON.stringify(inf()));
+    check("主按钮标题给出双击提示", /双击/.test(fabMain.title), fabMain.title);
+
+    await dbl();
+    check("双击菜单按钮开启无限滚动", inf().wanted === true, JSON.stringify(inf()));
+    check("开启后主按钮点亮（.inf）", fabMain.classList.contains("inf"));
+    const shownN = doc.querySelectorAll("#grid .card").length;
+    const totalN = window.__galleryState ? window.__galleryState().filtered : -1;
+    check("瀑布流下一次性渲染全部结果", shownN === Math.min(totalN, 1200), `渲染 ${shownN} / 共 ${totalN}`);
+    check("无限滚动时不显示分批进度条", doc.getElementById("loadMore").style.display === "none");
+
+    await dbl();
+    check("再双击关闭无限滚动", inf().wanted === false, JSON.stringify(inf()));
+    check("关闭后主按钮取消点亮", !fabMain.classList.contains("inf"));
   }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));

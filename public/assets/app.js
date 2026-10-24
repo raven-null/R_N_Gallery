@@ -2406,6 +2406,14 @@ function initGallery() {
   function updateLoadMore() {
     const lm = document.getElementById("loadMore");
     if (!lm) return;
+    // v0.61：无限滚动模式下没有"分批"概念，平时整条隐藏；只有撞到硬上限时才提示剩余
+    if (infiniteActive()) {
+      const shownN = Math.min(filtered.length, INFINITE_LIMIT);
+      const rest = filtered.length - shownN;
+      lm.style.display = rest > 0 ? "block" : "none";
+      if (rest > 0) lm.querySelector("span").textContent = `已渲染前 ${shownN} 张（无限滚动上限）· 还有 ${rest} 张，用筛选缩小范围`;
+      return;
+    }
     lm.style.display = shown < filtered.length ? "block" : "none";
     let text = shown < filtered.length
       ? t("已加载", "Loaded") + ` ${shown} / ${filtered.length} · ${t("滚动加载更多…", "scroll for more…")}`
@@ -2417,7 +2425,9 @@ function initGallery() {
   /* 全量渲染（初始 / 筛选 / 排序 / 数据变化时；滚动加载走 appendMore） */
   function render() {
     grid.innerHTML = "";
-    const slice = filtered.slice(0, shown || PAGE);
+    // v0.61：无限滚动 → 一次给全部（瀑布流下不再分批追加，避免 CSS 列重排）
+    const cap = infiniteActive() ? Math.min(filtered.length, INFINITE_LIMIT) : (shown || PAGE);
+    const slice = filtered.slice(0, cap);
     if (!slice.length) {
       document.getElementById("loadMore").style.display = "none";
       // 加载中 / 加载失败的状态不覆盖，其余情况显示空态动画
@@ -2448,6 +2458,7 @@ function initGallery() {
   /* 增量追加一页（v0.13.2 增量而非重建；v0.25 抽成函数供哨兵复用） */
   let scrollBusy = false;
   function appendMore() {
+    if (infiniteActive()) return; // v0.61：无限滚动已经全渲染过，不需要再追加
     if (scrollBusy || shown >= filtered.length) return;
     scrollBusy = true;
     const start = grid.querySelectorAll(".card").length;
@@ -2551,10 +2562,44 @@ function initGallery() {
     e.preventDefault();
   });
 
+  /* v0.61：桌面鼠标按住不动 600ms 也进多选。
+     与「拖到标签组打标」的拖拽互斥：dragstart 会取消待触发的长按；
+     而长按一旦触发就已经进了多选，此时 dragstart 本来就会被 selectMode 拦掉。 */
+  const LP_MOUSE_MS = 600;
+  let lpMouseTimer = null;
+  let lpMouseCard = null;
+  function lpMouseCancel() {
+    if (lpMouseTimer) { clearTimeout(lpMouseTimer); lpMouseTimer = null; }
+    lpMouseCard = null;
+  }
+  grid.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (selectMode || !manageAllowed()) return;
+    const card = e.target.closest(".card");
+    if (!card || !card.dataset.id) return;
+    lpMouseCard = card;
+    lpX = e.clientX;
+    lpY = e.clientY;
+    clearTimeout(lpMouseTimer);
+    lpMouseTimer = setTimeout(() => {
+      lpMouseTimer = null;
+      const id = lpMouseCard && lpMouseCard.dataset.id;
+      lpMouseCard = null;
+      if (id) enterSelectModeWith(id);
+    }, LP_MOUSE_MS);
+  });
+  grid.addEventListener("mousemove", (e) => {
+    if (!lpMouseTimer) return;
+    if (Math.abs(e.clientX - lpX) > LP_SLOP || Math.abs(e.clientY - lpY) > LP_SLOP) lpMouseCancel(); // 在拖动 / 选文字
+  });
+  grid.addEventListener("mouseup", lpMouseCancel);
+  grid.addEventListener("mouseleave", lpMouseCancel);
+
   /* 卡片拖拽（v0.14：拖到标签管理窗口的标签上打标） */
   grid.addEventListener("dragstart", (e) => {
     const card = e.target.closest(".card");
     if (!card || selectMode) { e.preventDefault(); return; }
+    lpMouseCancel(); // v0.61：开始拖拽 → 取消还没触发的鼠标长按（两者互斥）
     card.classList.add("dragging");
     e.dataTransfer.effectAllowed = "copy";
     try { e.dataTransfer.setData("text/plain", card.dataset.id); } catch (err) { /* ignore */ }
@@ -3723,11 +3768,29 @@ function initFabHold() {
   });
   const main = document.getElementById("fabMain");
   if (main) {
+    /* v0.61：双击主按钮 = 切换无限滚动。
+       单击仍然是立即展开 / 收起（不引入延迟）：第二次按下距上次 < 300ms 时判定为双击，
+       切换模式并吃掉随后的 click（否则菜单会被顺手又展开一次）。 */
+    let lastDown = 0;
+    let skipClick = false;
+    main.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      const now = Date.now();
+      if (now - lastDown < 300) {
+        lastDown = 0;
+        skipClick = true;
+        toggleInfiniteScroll();
+        return;
+      }
+      lastDown = now;
+    });
     main.addEventListener("click", (e) => {
       e.stopPropagation();
+      if (skipClick) { skipClick = false; return; }
       g.classList.toggle("hover-hold"); // 触屏：点主按钮展开/收起
     });
   }
+  applyInfiniteUI(); // 回显「无限滚动」当前状态
 }
 
 
@@ -5006,6 +5069,38 @@ function initLayoutSwitch() {
   }
   applyLayout();
 }
+
+/* ---------- 无限滚动（v0.61：双击 FAB 主按钮切换） ----------
+   瀑布流下一次把筛选结果全部渲染出来，滚到哪都有内容；
+   之所以只在瀑布流生效：瀑布流用 CSS `columns` 排版，分批追加会让已渲染的卡片重新分列、
+   整页跳动一下；正方形网格是 grid 布局，追加不会重排，保持分批反而更省 DOM。 */
+const INFINITE_KEY = "rn_infinite";
+const INFINITE_LIMIT = 1200; // 一次渲染的硬上限：上万张硬塞进来会卡死，超出部分仍走底部提示
+function infiniteWanted() {
+  try { return localStorage.getItem(INFINITE_KEY) === "1"; } catch (e) { return false; }
+}
+/* 真正是否生效（开关打开 + 当前是瀑布流） */
+function infiniteActive() {
+  return infiniteWanted() && layoutMode() === "masonry";
+}
+function applyInfiniteUI() {
+  const btn = document.getElementById("fabMain");
+  if (!btn) return;
+  const on = infiniteWanted();
+  btn.classList.toggle("inf", on);
+  btn.title = on ? "无限滚动已开启 · 双击切换回分批加载" : "双击开启无限滚动（瀑布流一次加载全部）";
+}
+function toggleInfiniteScroll() {
+  if (!manageAllowed()) { guestBlocked("切换无限滚动"); return; }
+  const on = !infiniteWanted();
+  try { localStorage.setItem(INFINITE_KEY, on ? "1" : "0"); } catch (e) { /* ignore */ }
+  applyInfiniteUI();
+  const g = document.getElementById("fabGroup");
+  if (g) g.classList.remove("hover-hold"); // 双击时顺手把菜单收起来
+  if (window.__renderGallery) window.__renderGallery();
+}
+window.__infiniteState = () => ({ wanted: infiniteWanted(), active: infiniteActive() });
+window.__toggleInfinite = toggleInfiniteScroll;
 
 function applyTheme(pref) {
   const mq = window.matchMedia("(prefers-color-scheme: light)");
