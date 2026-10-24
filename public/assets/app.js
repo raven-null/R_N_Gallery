@@ -3916,44 +3916,86 @@ function tagCounts() {
   return counts;
 }
 
-function mgrPills(tagObjs, counts) {
+/* v0.69 重设计：标签 chip 降噪 —— 0 素材的淡化、数量做成角标、操作按钮 hover 才现；
+   另提供「卡片网格」呈现方式（flow = 紧凑标签流，grid = 带首字缩略的方块） */
+function mgrPills(tagObjs, counts, viewMode) {
   if (!tagObjs.length) return `<div class="tag-mgr-empty" style="padding:2px 2px 0">（空）</div>`;
+  const mode = viewMode === "grid" ? "grid" : "flow";
+  if (mode === "grid") {
+    return `<div class="tmgr-tagcards">` + tagObjs.map((t) => {
+      const n = counts[t.name] || 0;
+      const c = t.color || tagGroupColor(t.group) || "var(--w030)";
+      return `<div class="tmgr-tagcard${n ? "" : " empty"}" data-tag="${escAttr(t.name)}" title="${escAttr(t.name)} · ${n} 张">
+        <span class="cv" style="--tg:${c}">${esc(String(t.name || "?").slice(0, 1))}</span>
+        <span class="nm">${esc(t.name)}</span>
+        <span class="n">${n}</span>
+        <button class="act" data-tact="edit" data-tname="${escAttr(t.name)}" title="编辑 / 改名">✎</button>
+        <button class="act danger" data-tact="remove" data-tname="${escAttr(t.name)}" title="删除">×</button>
+      </div>`;
+    }).join("") + `</div>`;
+  }
   return `<div class="tmgr-pills">` + tagObjs.map((t) => {
+    const n = counts[t.name] || 0;
     const c = t.color || tagGroupColor(t.group) || null;
-    return `<span class="tmgr-pill" data-tag="${escAttr(t.name)}">
+    return `<span class="tmgr-pill${n ? "" : " empty"}" data-tag="${escAttr(t.name)}">
       <i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>${esc(t.name)}
-      <span class="cnt">${counts[t.name] || 0} 张</span>
+      <span class="cnt${n ? " on" : ""}">${n}</span>
       <button class="act" data-tact="edit" data-tname="${escAttr(t.name)}" title="编辑 / 改名">✎</button>
       <button class="act danger" data-tact="remove" data-tname="${escAttr(t.name)}" title="删除">×</button>
     </span>`;
   }).join("") + `</div>`;
 }
 
-/* ---------- 主分类管理块（v0.15：分组视图顶部） ---------- */
+/* ---------- 主分类管理块（v0.15：分组视图顶部；v0.69 改成可折叠，省掉常驻占位） ---------- */
 function catMgrBlockHTML() {
   const catUsed = {};
+  let catPhotos = 0;
   PHOTOS.forEach((p) => {
     const cs = catsOf(p);
+    if (cs.length) catPhotos++;
     cs.forEach((c) => { catUsed[c] = (catUsed[c] || 0) + 1; }); // 多选：一张图计入多个分类
   });
   const cats = sortedCategories();
-  return `<div class="tmgr-block">
-    <div class="tmgr-head">
-      <i class="dot" style="--tg:var(--accent)"></i>${t("主分类", "Category")} <span class="req-mark">${t("可选", "optional")}</span>
-      <span class="cnt">${cats.length} 个</span>
+  const open = tmgrCatOpen();
+  return `<div class="tmgr-block${open ? " open" : ""}" id="tmgrCatBlock">
+    <div class="tmgr-head foldable${open ? "" : " folded"}" id="tmgrCatHead" title="${open ? "收起" : "展开"}主分类管理">
+      <span class="caret">▾</span>
+      <i class="dot" style="--tg:var(--accent)"></i>${t("主分类", "Category")}
+      <span class="cnt">${cats.length} 个 · ${catPhotos} 张已归类</span>
     </div>
-    <div class="tmgr-pills">` + cats.map((c) => {
+    <div class="tmgr-catbody"${open ? "" : " hidden"}>
+      <div class="tmgr-pills">` + cats.map((c) => {
       const n = catUsed[c.name] || 0;
-      return `<span class="tmgr-pill cat" style="--tg:${c.color || "var(--accent)"}">
+      return `<span class="tmgr-pill cat${n ? "" : " empty"}" style="--tg:${c.color || "var(--accent)"}">
         <i class="dot"></i>${esc(c.name)}
-        <span class="cnt">${n} 张</span>
+        <span class="cnt${n ? " on" : ""}">${n}</span>
         <button class="act" data-cact="edit" data-cname="${escAttr(c.name)}" title="编辑 / 改名">✎</button>
         <button class="act danger" data-cact="remove" data-cname="${escAttr(c.name)}" title="删除">×</button>
       </span>`;
-    }).join("") + `</div></div>`;
+    }).join("") + `</div>
+    </div>
+  </div>`;
 }
 
 const TMGR_VIEW_KEY = "rn_tmgr_view";
+/* v0.69：分组视图的两个新状态（重设计）
+   · 标签搜索词：跨组过滤标签名 / 别名 / 拼音，命中时强制展开该组
+   · 标签呈现方式：flow（标签流，紧凑）/ grid（卡片网格，一眼扫角色） */
+let tmgrTagQuery = "";
+const TMGR_TAGVIEW_KEY = "rn_tmgr_tagview";
+const TMGR_CATOPEN_KEY = "rn_tmgr_catopen";
+function tmgrTagView() {
+  try { return localStorage.getItem(TMGR_TAGVIEW_KEY) === "grid" ? "grid" : "flow"; } catch (e) { return "flow"; }
+}
+function setTmgrTagView(v) {
+  try { localStorage.setItem(TMGR_TAGVIEW_KEY, v === "grid" ? "grid" : "flow"); } catch (e) { /* ignore */ }
+}
+function tmgrCatOpen() {
+  try { return localStorage.getItem(TMGR_CATOPEN_KEY) === "1"; } catch (e) { return false; }
+}
+function setTmgrCatOpen(on) {
+  try { localStorage.setItem(TMGR_CATOPEN_KEY, on ? "1" : "0"); } catch (e) { /* ignore */ }
+}
 /* ---------- 分组视图：标签组折叠（v0.29） ----------
    标签多的组（> TMGR_AUTO_FOLD）默认折叠，避免一次铺开几百个标签 pill；
    用户手动展开 / 折叠过的组会记进 localStorage，刷新后保持。 */
@@ -4004,34 +4046,49 @@ function refreshTagManager() {
   const savedView = localStorage.getItem(TMGR_VIEW_KEY);
   let view = savedView === "group" ? "group" : "classify"; // v0.59：「整理」视图已移除，只剩分组 / 分类
 
+  const tagView = tmgrTagView();
   let html = `<div class="tmgr-seg">
       <div class="seg" id="tmgrViewSeg" role="group" aria-label="视图">
         <button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
         <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>
       </div>
+      ${view === "group" ? `<span class="tmgr-tools">
+        <span class="tmgr-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+          <input type="text" id="tmgrTagSearch" placeholder="搜索标签 / 别名 / 拼音…" value="${escAttr(tmgrTagQuery)}" autocomplete="off">
+        </span>
+        <button class="mini-link" id="tmgrTagViewBtn" type="button" title="${tagView === "grid" ? "切换为紧凑标签流" : "切换为卡片网格"}">${tagView === "grid" ? "☰ 标签流" : "▦ 网格"}</button>
+      </span>` : ""}
     </div>`;
 
   if (view === "group") {
-    html += catMgrBlockHTML(); // v0.15 主分类管理（顶部固定区）
+    html += catMgrBlockHTML(); // v0.15 主分类管理（v0.69 起可折叠，默认收起）
     if (!used.length && !TAGS.tags.length) {
       html += `<div class="tag-mgr-empty" style="padding:4px 2px 2px">图库中还没有标签。上传图片时填写标签，即可在此分组管理。</div>`;
     } else {
+      const kw = tmgrTagQuery.trim().toLowerCase();
+      const hitTag = (t) => tagQueryMatch(t, kw);
+      let shownGroups = 0;
       const groups = [...TAGS.groups].sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
-      if (groups.length) {
-        for (const g of groups) {
-          const items = TAGS.tags
-            .filter((t) => t.group === g.id)
-            .sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
-          const folded = isTmgrFolded(g.id, items.length); // v0.29：标签多的组默认折叠
-          html += `<div class="tmgr-head foldable${folded ? " folded" : ""}" data-gfold="${escAttr(g.id)}" data-gcount="${items.length}" style="margin-top:6px" title="${folded ? "点击展开" : "点击折叠"}">
-            <span class="caret">▾</span>
-            <i class="dot" style="--tg:${g.color || "#ff9f0a"}"></i>${esc(g.name)}
-            <span class="cnt">${items.length} 个标签</span>
-            <button class="act" data-gnew="${escAttr(g.id)}" title="在「${escAttr(g.name)}」组新建标签">＋</button>
-            <button class="act" data-gact="edit" data-gid="${escAttr(g.id)}" title="编辑组">✎</button>
-          </div>`;
-          if (!folded) html += mgrPills(items, counts);
-        }
+      for (const g of groups) {
+        const items = TAGS.tags
+          .filter((t) => t.group === g.id)
+          .sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
+        // v0.69：搜索时按标签名 / 别名 / 拼音过滤，没命中的组整组收起（不占版面）
+        const hits = kw ? items.filter(hitTag) : items;
+        if (kw && !hits.length) continue;
+        shownGroups++;
+        const withN = hits.filter((t) => (counts[t.name] || 0) > 0).length;
+        const folded = kw ? false : isTmgrFolded(g.id, items.length); // 搜索时强制展开
+        html += `<div class="tmgr-head foldable${folded ? " folded" : ""}" data-gfold="${escAttr(g.id)}" data-gcount="${items.length}" style="margin-top:6px" title="${folded ? "点击展开" : "点击折叠"}">
+          <span class="caret">▾</span>
+          <i class="dot" style="--tg:${g.color || "#ff9f0a"}"></i>${esc(g.name)}
+          <span class="cnt">${hits.length} 个标签</span>
+          <span class="stat"><b>${withN}</b> 有素材 · ${hits.length - withN} 空</span>
+          <button class="act" data-gnew="${escAttr(g.id)}" title="在「${escAttr(g.name)}」组新建标签">＋</button>
+          <button class="act" data-gact="edit" data-gid="${escAttr(g.id)}" title="编辑组">✎</button>
+        </div>`;
+        if (!folded) html += mgrPills(hits, counts, tagView);
       }
       // v0.31：未分组区同时展示「库里但未归组」的标签与「照片里有但库里没有」的游离标签
       // （此前只显示游离标签，导致新建的未分组标签在分组视图里看不到）
@@ -4039,18 +4096,25 @@ function refreshTagManager() {
         .filter((t) => !t.group)
         .sort((a, b) => ((a.sort || 0) - (b.sort || 0)) || a.name.localeCompare(b.name, "zh"));
       const looseFree = used.filter((n) => !tagByName(n));
-      const looseItems = [
+      const looseAll = [
         ...libLoose,
         ...looseFree.map((n) => ({ name: n, color: null, group: "" })),
       ];
+      const looseItems = kw ? looseAll.filter(hitTag) : looseAll;
       if (looseItems.length) {
-        const foldedFree = isTmgrFolded("__free", looseItems.length);
+        shownGroups++;
+        const withN = looseItems.filter((t) => (counts[t.name] || 0) > 0).length;
+        const foldedFree = kw ? false : isTmgrFolded("__free", looseItems.length);
         html += `<div class="tmgr-head foldable${foldedFree ? " folded" : ""}" data-gfold="__free" data-gcount="${looseItems.length}" style="margin-top:6px" title="${foldedFree ? "点击展开" : "点击折叠"}">
           <span class="caret">▾</span>
           <i class="dot"></i>未分组 · 待整理<span class="cnt">${looseItems.length}</span>
+          <span class="stat"><b>${withN}</b> 有素材 · ${looseItems.length - withN} 空</span>
           <button class="act" data-gnew="" title="新建「未分组」标签">＋</button>
         </div>`;
-        if (!foldedFree) html += mgrPills(looseItems, counts);
+        if (!foldedFree) html += mgrPills(looseItems, counts, tagView);
+      }
+      if (kw && !shownGroups) {
+        html += `<div class="tag-mgr-empty" style="padding:14px 2px">没有匹配「${esc(tmgrTagQuery.trim())}」的标签</div>`;
       }
     }
   } else if (view === "classify") {
@@ -4115,6 +4179,32 @@ function refreshTagManager() {
     });
   }
   if (view === "classify") initCwView(root);
+  /* v0.69：分组视图的两个新控件 —— 标签搜索（重渲染后要还回焦点与光标）、标签流 / 网格切换 */
+  const tagSearchEl = q("#tmgrTagSearch");
+  if (tagSearchEl) {
+    tagSearchEl.addEventListener("input", () => {
+      tmgrTagQuery = tagSearchEl.value;
+      const caret = tagSearchEl.selectionStart;
+      refreshTagManager();
+      const again = document.getElementById("tmgrTagSearch");
+      if (again) { again.focus(); try { again.setSelectionRange(caret, caret); } catch (e) { /* ignore */ } }
+    });
+  }
+  const tagViewBtn = q("#tmgrTagViewBtn");
+  if (tagViewBtn) {
+    tagViewBtn.addEventListener("click", () => {
+      setTmgrTagView(tmgrTagView() === "grid" ? "flow" : "grid");
+      refreshTagManager();
+    });
+  }
+  // 主分类块折叠（默认收起，形态存 localStorage）
+  const catHead = q("#tmgrCatHead");
+  if (catHead) {
+    catHead.addEventListener("click", () => {
+      setTmgrCatOpen(!tmgrCatOpen());
+      refreshTagManager();
+    });
+  }
   // v0.29：分组视图的标签组折叠（v0.68 移除了「全部折叠 / 全部展开」两个按钮）
   root.querySelectorAll("[data-gfold]").forEach((h) => h.addEventListener("click", (e) => {
     if (e.target.closest("button")) return; // 组头右侧的编辑按钮等不触发折叠

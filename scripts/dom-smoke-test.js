@@ -249,6 +249,60 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("点组头可展开", !!again && !again.classList.contains("folded") && !!(pillNext && pillNext.classList.contains("tmgr-pills")));
     // v0.68：「全部折叠 / 全部展开」按钮已移除
     check("分组视图不再有全部折叠 / 展开按钮", !doc.getElementById("tmgrFoldAll") && !doc.getElementById("tmgrOpenAll"));
+    // v0.69 重设计：组头统计 + 降噪 + 顶部搜索 + 双视图
+    const statEl = doc.querySelector("#tagMgrRoot .tmgr-head .stat");
+    check("组头显示「有素材 / 空」统计", !!statEl && /有素材/.test(statEl.textContent), statEl ? statEl.textContent.trim() : "无");
+    check("0 素材的标签被淡化（.empty）", doc.querySelectorAll("#tagMgrRoot .tmgr-pill.empty").length > 0,
+      `${doc.querySelectorAll("#tagMgrRoot .tmgr-pill.empty").length} 个空标签`);
+    check("数量做成角标（.cnt）", doc.querySelectorAll("#tagMgrRoot .tmgr-pill .cnt").length > 0);
+    const catBody = doc.querySelector("#tagMgrRoot .tmgr-catbody");
+    check("主分类块默认收起", !!catBody && catBody.hidden);
+    const catHead = doc.getElementById("tmgrCatHead");
+    const tap = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); // 这段在 clickEl 定义之前
+    if (catHead) {
+      tap(catHead);
+      await wait(400);
+      const body2 = doc.querySelector("#tagMgrRoot .tmgr-catbody");
+      check("点主分类块标题可展开", !!body2 && !body2.hidden);
+      const head2 = doc.getElementById("tmgrCatHead");
+      if (head2) { tap(head2); await wait(350); }
+    }
+
+    // 标签流 ⇄ 卡片网格
+    const viewBtn = doc.getElementById("tmgrTagViewBtn");
+    check("分组视图有标签流 / 网格切换", !!viewBtn, viewBtn ? viewBtn.textContent.trim() : "无");
+    if (viewBtn) {
+      tap(viewBtn);
+      await wait(450);
+      const cardsN = doc.querySelectorAll("#tagMgrRoot .tmgr-tagcard").length;
+      check("切到网格视图（卡片化）", cardsN > 0, `${cardsN} 张卡片`);
+      const backBtn = doc.getElementById("tmgrTagViewBtn");
+      if (backBtn) { tap(backBtn); await wait(450); }
+      check("再点切回标签流", doc.querySelectorAll("#tagMgrRoot .tmgr-tagcard").length === 0);
+    }
+
+    // 标签搜索
+    const searchInp = doc.getElementById("tmgrTagSearch");
+    check("分组视图有标签搜索框", !!searchInp);
+    if (searchInp) {
+      searchInp.value = "冒烟角色01";
+      searchInp.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await wait(450);
+      const headsNow = [...doc.querySelectorAll("#tagMgrRoot [data-gfold]")];
+      const pillsNow = [...doc.querySelectorAll("#tagMgrRoot .tmgr-pill[data-tag]")];
+      check("搜索只保留命中的组", headsNow.length === 1, `${headsNow.length} 个组`);
+      check("搜索只显示命中的标签", pillsNow.length === 1, `${pillsNow.length} 个标签`);
+      const inp2 = doc.getElementById("tmgrTagSearch");
+      if (inp2) {
+        inp2.value = "zzz不存在zzz";
+        inp2.dispatchEvent(new window.Event("input", { bubbles: true }));
+        await wait(450);
+        check("无命中时给出空态提示", /没有匹配/.test(doc.getElementById("tagMgrRoot").textContent));
+        const inp3 = doc.getElementById("tmgrTagSearch");
+        if (inp3) { inp3.value = ""; inp3.dispatchEvent(new window.Event("input", { bubbles: true })); }
+        await wait(450);
+      }
+    }
   } else {
     check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
   }
