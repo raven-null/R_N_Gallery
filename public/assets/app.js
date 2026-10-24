@@ -24,7 +24,7 @@ let PHOTOS = [];
 let USE_API = false;
 
 /* ---------- 标签体系（v0.11 / v0.15 主分类）：配置状态（模块级，菜单/管理页共享） ---------- */
-/* 内置主分类（v0.19 上传必选、可多选）；照片 meta.categories 存名称数组（名称即引用键） */
+/* 内置主分类（可选、可多选；v0.19 起曾是"上传必选"，v0.58 起彻底放开）；照片 meta.categories 存名称数组（名称即引用键） */
 const DEFAULT_CATEGORIES = [
   { id: "cat-2d-girl", name: "次元女", color: "#ff6fa5", sort: 0 },
   { id: "cat-2d-boy", name: "次元男", color: "#6aa5ff", sort: 1 },
@@ -2048,7 +2048,7 @@ function renderTagMenuContent() {
     }
   }
 
-  // 主分类区（v0.15）：上传必选单选的固定大类，独立于标签体系筛选（互斥单选）；搜索标签词时隐藏聚焦结果
+  // 主分类区（v0.15）：可选的内容大类（多选，与标签体系并行叠加）；搜索标签词时隐藏聚焦结果
   const catCounts = { __none: 0 };
   PHOTOS.forEach((p) => {
     const cs = catsOf(p);
@@ -3726,7 +3726,7 @@ function catMgrBlockHTML() {
   const cats = sortedCategories();
   return `<div class="tmgr-block">
     <div class="tmgr-head">
-      <i class="dot" style="--tg:var(--accent)"></i>${t("主分类", "Category")} <span class="req-mark">${t("上传必选其一", "required, one per photo")}</span>
+      <i class="dot" style="--tg:var(--accent)"></i>${t("主分类", "Category")} <span class="req-mark">${t("可选", "optional")}</span>
       <span class="cnt">${cats.length} 个</span>
     </div>
     <div class="tmgr-pills">` + cats.map((c) => {
@@ -3823,8 +3823,8 @@ function refreshTagManager() {
     </div>`;
 
   if (view === "group") {
-    html += `<div class="tag-mgr-hint">${t("主分类 = 每张图必选一个的大类；标签组 = 作品 / 来源（如 原神），组内标签 = 该作品的角色。改名 / 删除会同步所有图片。",
-      "Category is required per photo; tag groups act as series/source (e.g. Genshin), with character tags inside them.")}</div>`;
+    html += `<div class="tag-mgr-hint">${t("主分类 = 内容大类（可选，一张图可以没有，也可以多选）；标签组 = 作品 / 来源（如 原神），组内标签 = 该作品的角色。改名 / 删除会同步所有图片。",
+      "Category is optional (zero or more per photo); tag groups act as series/source (e.g. Genshin), with character tags inside them.")}</div>`;
     html += catMgrBlockHTML(); // v0.15 主分类管理（顶部固定区）
     if (!used.length && !TAGS.tags.length) {
       html += `<div class="tag-mgr-empty" style="padding:4px 2px 2px">图库中还没有标签。上传图片时填写标签，即可在此分组管理。</div>`;
@@ -4463,10 +4463,8 @@ async function rvApply() {
   const hint = document.getElementById("rvHint");
   const cats = selCatsOf(document.getElementById("rvCats"));
   const tags = tagsOfBox(document.getElementById("rvTagBox"));
-  if (!cats.length) { // v0.27：主分类是必选项，防止"空着手点应用"把已有分类清掉
-    if (hint) { hint.style.color = "var(--danger)"; hint.textContent = "请至少选一个主分类（不想改这张就点「跳过」）"; }
-    return;
-  }
+  // v0.58：主分类 / 标签都不是硬性要求 —— 界面里已经预填了这张图原有的值，
+  // 所以「空着提交」就是用户显式清空，不再拦。（v0.27 的「必须先选主分类」已撤销）
   rvBusy = true;
   try {
     const r = await apiFetch(`/api/photos/${p.id}`, {
@@ -4820,7 +4818,7 @@ function openCatModal(mode, payload) {
       <div class="field">
         <label>名称</label>
         <input type="text" id="fName" value="${escAttr(target ? target.name : "")}" maxlength="20" placeholder="如：像素 / 摄影">
-        <div class="hint">${target ? "改名会同步更新所有图片的主分类" : "主分类是上传时必选的大类（单选互斥）"}</div>
+        <div class="hint">${target ? "改名会同步更新所有图片的主分类" : "主分类是内容大类：可选、可多选，一张图也可以没有"}</div>
       </div>
       <div class="field">
         <label>颜色</label>${swatchHTML(selColor)}

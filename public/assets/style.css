@@ -3443,9 +3443,9 @@ body.mode-guest .page-menu-item[data-page="tags"] { display: none !important; }
 .tmgr-head .req-mark {
   font-size: 10px;
   font-weight: 600;
-  color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text-faint);
+  border: 1px solid var(--w010);
+  background: var(--w006);
   border-radius: 99px;
   padding: 1px 7px;
   letter-spacing: 0.04em;

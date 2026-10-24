@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>渡·影·集</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='2' width='20' height='20' rx='5' fill='%2314171f'/%3E%3Crect x='4.5' y='4.5' width='15' height='15' rx='3' fill='none' stroke='%23ff9f0a' stroke-width='1.6'/%3E%3Ccircle cx='9' cy='9' r='1.3' fill='%23ff9f0a'/%3E%3Cpath d='M19.5 14.5l-3.6-3.6a.8.8 0 0 0-1.1 0L7 18.5' stroke='%23ff9f0a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="assets/style.css?v=20261117">
+<link rel="stylesheet" href="assets/style.css?v=20261118">
 </head>
 <body data-page="gallery">
 
@@ -446,11 +446,11 @@
       <h3>编辑图片</h3>
       <form class="tag-form" onsubmit="return false">
         <div class="field">
-          <label>主分类（必选，可多选；全部取消则显示「未分类」）</label>
+          <label>主分类（可选，可多选；一张图可以不选，不选即「未分类」）</label>
           <div class="uq-cats" id="edCats" data-multi="1"></div>
         </div>
         <div class="field">
-          <label>标签</label>
+          <label>标签（可选；一张图可以没有标签）</label>
           <div class="tag-input-wrap">
             <div class="tag-input" id="edTagBox">
               <input type="text" id="edTagInput" placeholder="输入后回车添加…" autocomplete="off">
@@ -562,7 +562,7 @@
       <h3>编辑待上传项</h3>
       <form class="tag-form" onsubmit="return false">
         <div class="field">
-          <label>标签（留空则跟随上方全局标签）</label>
+          <label>标签（可选；留空就是这张图没有标签）</label>
           <div class="tag-input-wrap">
             <div class="tag-input" id="uqTagBox">
               <input type="text" id="uqTagInput" placeholder="输入后回车添加…" autocomplete="off">
@@ -747,6 +747,6 @@
 
 <!-- v0.54：拼音库改为按需加载（原来写死在这里，首屏要多下 316KB / gzip 142KB）：
      首次真正要做拼音匹配时由 app.js 动态注入，见 app.js 的 loadPinyinLib -->
-<script src="assets/app.js?v=20261117" defer></script>
+<script src="assets/app.js?v=20261118" defer></script>
 </body>
 </html>

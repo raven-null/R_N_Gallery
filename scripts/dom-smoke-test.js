@@ -176,6 +176,30 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(400);
   }
 
+  /* v0.58：主分类 / 标签都不是硬性要求 —— 整理视图里全部取消也能「应用」 */
+  {
+    window.localStorage.setItem("rn_tmgr_view", "review");
+    window.__refreshTagManager();
+    await wait(500);
+    const rvA = window.__rvState ? window.__rvState() : null;
+    if (rvA && rvA.ids.length) {
+      const targetId = rvA.ids[0];
+      const idxBefore = rvA.idx;
+      for (const chip of [...doc.querySelectorAll("#rvCats .cat-pick.on")]) {
+        chip.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      }
+      check("整理视图里主分类可以全部取消（不再是必选）", !doc.querySelector("#rvCats .cat-pick.on"));
+      doc.getElementById("rvApply").click();
+      await wait(1500);
+      const rvB = window.__rvState();
+      check("不选主分类也能「应用」（不再被拦）",
+        rvB.done.includes(targetId) && rvB.idx === idxBefore + 1, `idx ${idxBefore} → ${rvB.idx}`);
+      window.localStorage.setItem("rn_tmgr_view", "classify");
+      window.__refreshTagManager();
+      await wait(400);
+    }
+  }
+
   const cssText = fs.readFileSync(path.join(ROOT, "public", "assets", "style.css"), "utf8");
   check("CSS 含 content-visibility 规则", /content-visibility:\s*auto/.test(cssText));
   // v0.47：灯箱图片铺满可用区域且不变形
