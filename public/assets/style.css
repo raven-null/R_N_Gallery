@@ -3760,12 +3760,7 @@ body.perf-lite .card__content {
 }
 .tmgr-head.folded .caret { transform: rotate(-90deg); }
 .tmgr-head.folded .cnt { color: var(--accent); }
-.tmgr-fold-actions {
-  display: flex;
-  gap: 10px;
-  flex: none;
-  align-items: center;
-}
+/* v0.68：.tmgr-fold-actions（全部折叠 / 全部展开）已随按钮移除 */
 
 /* 组头旁的按钮（＋ 在该组新建标签 / ✎ 编辑组）—— v0.30 */
 .tmgr-head .act {

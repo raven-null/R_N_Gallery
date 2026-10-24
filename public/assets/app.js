@@ -3985,16 +3985,7 @@ function toggleTmgrFold(key, count) {
   saveTmgrFold();
   refreshTagManager();
 }
-function setAllTmgrFold(fold) {
-  tmgrFold = tmgrFold || new Set();
-  [...(TAGS.groups || []).map((g) => g.id), "__free"].forEach((k) => {
-    tmgrFold.delete("open:" + k);
-    tmgrFold.delete("fold:" + k);
-    tmgrFold.add((fold ? "fold:" : "open:") + k);
-  });
-  saveTmgrFold();
-  refreshTagManager();
-}
+/* v0.68：setAllTmgrFold 随「全部折叠 / 全部展开」按钮一起移除 —— 折叠改由点组头逐个控制 */
 /* ---------- 分类工作台状态（v0.14.4：统计视图 → 两栏拖拽分类） ---------- */
 let cwFilter = "all";        // all | loose（只显示未入库分类的图片）
 let cwShown = 40;            // 左栏一次性渲染张数
@@ -4018,10 +4009,6 @@ function refreshTagManager() {
         <button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
         <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>
       </div>
-      ${view === "group" ? `<span class="tmgr-fold-actions">
-        <button class="mini-link" id="tmgrFoldAll" type="button" title="折叠所有标签组">全部折叠</button>
-        <button class="mini-link" id="tmgrOpenAll" type="button" title="展开所有标签组">全部展开</button>
-      </span>` : ""}
     </div>`;
 
   if (view === "group") {
@@ -4128,15 +4115,11 @@ function refreshTagManager() {
     });
   }
   if (view === "classify") initCwView(root);
-  // v0.29：分组视图的标签组折叠 + 全部折叠 / 展开
+  // v0.29：分组视图的标签组折叠（v0.68 移除了「全部折叠 / 全部展开」两个按钮）
   root.querySelectorAll("[data-gfold]").forEach((h) => h.addEventListener("click", (e) => {
     if (e.target.closest("button")) return; // 组头右侧的编辑按钮等不触发折叠
     toggleTmgrFold(h.dataset.gfold, Number(h.dataset.gcount) || 0);
   }));
-  const foldAllBtn = q("#tmgrFoldAll");
-  if (foldAllBtn) foldAllBtn.addEventListener("click", () => setAllTmgrFold(true));
-  const openAllBtn = q("#tmgrOpenAll");
-  if (openAllBtn) openAllBtn.addEventListener("click", () => setAllTmgrFold(false));
   root.querySelectorAll("[data-gact='edit']").forEach((b) => b.addEventListener("click", () => openTagModal("edit-group", b.dataset.gid)));
   // v0.30：组头旁的「＋」= 直接在该组新建标签（所属组已预选）
   root.querySelectorAll("[data-gnew]").forEach((b) => b.addEventListener("click", (e) => {

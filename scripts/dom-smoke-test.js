@@ -247,18 +247,8 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     const again = [...doc.querySelectorAll("#tagMgrRoot [data-gfold]")].find((h) => h.dataset.gfold === bigHead.dataset.gfold);
     const pillNext = again && again.nextElementSibling;
     check("点组头可展开", !!again && !again.classList.contains("folded") && !!(pillNext && pillNext.classList.contains("tmgr-pills")));
-    const foldAll = doc.getElementById("tmgrFoldAll");
-    if (foldAll) {
-      foldAll.click();
-      await wait(400);
-      check("「全部折叠」生效", [...doc.querySelectorAll("#tagMgrRoot [data-gfold]")].every((h) => h.classList.contains("folded")));
-    }
-    const openAll = doc.getElementById("tmgrOpenAll");
-    if (openAll) {
-      openAll.click();
-      await wait(400);
-      check("「全部展开」生效", ![...doc.querySelectorAll("#tagMgrRoot [data-gfold]")].some((h) => h.classList.contains("folded")));
-    }
+    // v0.68：「全部折叠 / 全部展开」按钮已移除
+    check("分组视图不再有全部折叠 / 展开按钮", !doc.getElementById("tmgrFoldAll") && !doc.getElementById("tmgrOpenAll"));
   } else {
     check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
   }
