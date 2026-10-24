@@ -2414,19 +2414,22 @@ function initGallery() {
     } catch (e) { /* ignore */ }
     return 240;
   }
-  function loopSlabHTML(list, colW, colCount) {
+  function loopSlabHTML(list, colW, colCount, measureMap) {
     const heights = new Array(colCount).fill(0);
     const buckets = Array.from({ length: colCount }, () => []);
     for (const p of list) {
-      const ratio = (p.width > 0 && p.height > 0) ? (p.height / p.width) : 1.4;
-      const h = colW * ratio + 18; // 卡片高度 + margin-bottom
+      // 高度：能实测就用实测（重排那一轮），否则用列宽 × 图片高宽比估算；
+      // 缺尺寸的老图按 1:1 估，比硬套 1.4 的偏差小
+      const measured = measureMap ? measureMap.get(p.id) : 0;
+      const h = measured || (colW * ((p.width > 0 && p.height > 0) ? (p.height / p.width) : 1) + 18);
       let idx = 0;
       for (let i = 1; i < colCount; i++) if (heights[i] < heights[idx]) idx = i;
       buckets[idx].push(p);
       heights[idx] += h;
     }
+    // 列宽交给 flex 均分（.loop-col { flex: 1 1 0 }），这里不再写死 width
     return `<div class="loop-row">` + buckets.map((b) =>
-      `<div class="loop-col" style="width:${colW}px">${b.map(cardHTML).join("")}</div>`).join("") + `</div>`;
+      `<div class="loop-col">${b.map(cardHTML).join("")}</div>`).join("") + `</div>`;
   }
 
   function updateLoadMore() {
@@ -2475,13 +2478,40 @@ function initGallery() {
        得到完全相同的列结构，高度天然一致，也不会出现某些列尾巴空一大块的问题。 */
     const looping = infiniteActive();
     grid.classList.toggle("looping", looping);
+    let loopRefine = null;
     if (looping) {
-      const colW = colWidthPx();
       const gap = 16;
-      const avail = grid.clientWidth || (colW * 4);
-      const colCount = Math.max(1, Math.floor((avail + gap) / (colW + gap)));
+      const target = colWidthPx();                       // 目标列宽（180 / 240 / 320）
+      const avail = grid.clientWidth || (target * 4);
+      const colCount = Math.max(1, Math.floor((avail + gap) / (target + gap)));
+      // v0.66：列宽要**均分容器**，不能写死 240 —— 否则 1100px 容器放 4 列只占 1008px，右边空一截
+      const colW = Math.max(1, (avail - gap * (colCount - 1)) / colCount);
       const one = loopSlabHTML(slice, colW, colCount);
       grid.innerHTML = `<div class="loop-slab">${one}</div><div class="loop-slab">${one}</div>`;
+      // v0.66：先用估算高度分列，等布局出来再用**实测高度**重排一次 ——
+      // 估算偏差是"某些列尾巴空一大块"的主因，实测能把列高差压到一张卡片以内
+      loopRefine = () => {
+        if (!infiniteActive()) return;
+        const slabsNow = grid.querySelectorAll(".loop-slab");
+        if (slabsNow.length < 2) return;
+        const cardsNow = [...slabsNow[0].querySelectorAll(".card")];
+        if (cardsNow.length !== slice.length || !cardsNow.length) return;
+        const h0 = cardsNow[0].offsetHeight;
+        if (!h0) return; // 还没有布局（jsdom / 尚未渲染）→ 跳过
+        const colsNow = [...slabsNow[0].querySelectorAll(".loop-col")];
+        const heights = colsNow.map((c) => c.offsetHeight);
+        if (heights.length && Math.max(...heights) - Math.min(...heights) < 40) return; // 已经很齐，不折腾
+        const map = new Map(cardsNow.map((c) => [c.dataset.id, c.offsetHeight + 18]));
+        const y = window.scrollY;
+        const one2 = loopSlabHTML(slice, colW, colCount, map);
+        grid.innerHTML = `<div class="loop-slab">${one2}</div><div class="loop-slab">${one2}</div>`;
+        grid.querySelectorAll(".card").forEach((c) => {
+          c.style.transitionDelay = "0s";
+          c.classList.add("visible");
+        });
+        initImgRelease();
+        try { window.scrollTo({ top: y, behavior: "instant" }); } catch (e) { window.scrollTo(0, y); }
+      };
     } else {
       grid.innerHTML = itemsHTML(slice, null, filtered);
     }
@@ -2502,6 +2532,7 @@ function initGallery() {
     }
     initImgRelease(); // v0.25：性能模式下回收屏外卡片图片
     scheduleFill(); // v0.26：渲染后补足视口（首屏一次没填满就继续追加）
+    if (loopRefine) requestAnimationFrame(loopRefine); // v0.66：布局出来后按实测高度再分一次列
   }
   window.__renderGallery = () => render();
   window.__renderGallerySilent = () => render({ skipReveal: true }); // v0.62：不播入场动画的重渲染

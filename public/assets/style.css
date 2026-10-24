@@ -2432,7 +2432,10 @@ input.settings-value:focus {
 .masonry.looping { columns: unset; display: block; }
 .masonry.looping .loop-slab { padding-bottom: 18px; } /* 吸收最后一张卡片的 margin，两份严格同构 */
 .masonry.looping .loop-row { display: flex; gap: 16px; align-items: flex-start; }
-.masonry.looping .loop-col { flex: 0 0 auto; min-width: 0; }
+/* 列宽均分容器（v0.66）—— 写死宽度会在右侧留一条空白 */
+.masonry.looping .loop-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+/* 卡片别被 flex 压缩：高度要按各自 aspect-ratio 走 */
+.masonry.looping .loop-col .card { flex: none; }
 html[data-cols="narrow"] { --col-w: 180px; }
 html[data-cols="wide"] { --col-w: 320px; }
 
