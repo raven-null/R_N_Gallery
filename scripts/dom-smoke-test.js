@@ -443,9 +443,13 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await dbl();
     check("双击菜单按钮开启循环滚动", inf().wanted === true, JSON.stringify(inf()));
     check("开启后主按钮点亮（.inf）", fabMain.classList.contains("inf"));
-    const shownN = doc.querySelectorAll("#grid .card").length;
     const totalN = window.__galleryState ? window.__galleryState().filtered : -1;
-    check("瀑布流下一次性渲染全部结果", shownN === Math.min(totalN, 1200), `渲染 ${shownN} / 共 ${totalN}`);
+    const slabs = [...doc.querySelectorAll("#grid .loop-slab")];
+    check("循环模式渲染两份复本（首尾无缝的前提）", slabs.length === 2, `${slabs.length} 份`);
+    const perSlab = slabs[0] ? slabs[0].querySelectorAll(".card").length : 0;
+    check("瀑布流下每份都渲染全部结果", perSlab === Math.min(totalN, 600), `每份 ${perSlab} / 共 ${totalN}`);
+    check("两份内容完全一致", !!slabs[1] && slabs[1].querySelectorAll(".card").length === perSlab,
+      `${perSlab} vs ${slabs[1] ? slabs[1].querySelectorAll(".card").length : "-"}`);
     check("循环滚动时不显示分批进度条", doc.getElementById("loadMore").style.display === "none");
     // v0.62：切换只换渲染策略，不重播图库的入场动画（卡片直接点亮、无过渡延迟）
     const afterCards = [...doc.querySelectorAll("#grid .card")];
@@ -456,32 +460,46 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       afterCards.every((c) => c.style.transitionDelay === "0s"),
       afterCards[0] ? `delay="${afterCards[0].style.transitionDelay}"` : "");
 
-    // 滚到底 → 回到第一张（jsdom 没有布局，手动给出"内容很长 + 已经在底部"的几何）
-    Object.defineProperty(doc.documentElement, "scrollHeight", { value: 3000, configurable: true });
-    Object.defineProperty(window, "scrollY", { value: 2200, configurable: true });
-    const origScrollTo = window.scrollTo;
-    let scrollArg = null;
-    window.scrollTo = (arg) => { scrollArg = arg; };
-    window.dispatchEvent(new window.Event("scroll"));
-    await wait(350);
-    check("滚到底后循环回到第一张", scrollArg !== null && (scrollArg === 0 || scrollArg.top === 0),
-      JSON.stringify(scrollArg));
-    window.scrollTo = origScrollTo;
-    Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
-    delete doc.documentElement.scrollHeight; // 恢复 jsdom 默认（0）
+    /* v0.64：无缝循环 = 首尾复本 + 平移「一份的高度」（不是瞬移回顶部） */
+    if (slabs.length === 2) {
+      const origScrollTo = window.scrollTo;
+      let scrollArg = null;
+      window.scrollTo = (arg) => { scrollArg = arg; };
+      // 造几何：第一份的文档位置 100、第二份 3100 → 一份高 3000（rect 随 scrollY 变化）
+      const fakeRect = (docTop) => () => {
+        const y = window.scrollY || 0;
+        return { top: docTop - y, bottom: docTop - y + 100, left: 0, right: 0, width: 0, height: 100, x: 0, y: docTop - y, toJSON() { return this; } };
+      };
+      slabs[0].getBoundingClientRect = fakeRect(100);
+      slabs[1].getBoundingClientRect = fakeRect(3100);
+      Object.defineProperty(window, "scrollY", { value: 3500, configurable: true });
+      window.dispatchEvent(new window.Event("scroll"));
+      await wait(350);
+      check("滚进第二份时只平移「一份的高度」（画面不变，用户无感）",
+        scrollArg !== null && (scrollArg === 500 || scrollArg.top === 500),
+        `scrollTo(${JSON.stringify(scrollArg)})　期望 500 = 3500 − 3000`);
 
-    // 还没到底时不该乱跳
-    let jumped = false;
-    window.scrollTo = () => { jumped = true; };
-    Object.defineProperty(doc.documentElement, "scrollHeight", { value: 6000, configurable: true });
-    Object.defineProperty(window, "scrollY", { value: 500, configurable: true });
-    await wait(450); // 等过 loopGuard
-    window.dispatchEvent(new window.Event("scroll"));
-    await wait(350);
-    check("没滚到底时不会跳回顶部", !jumped, jumped ? "误触发" : "正常");
-    window.scrollTo = origScrollTo;
-    Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
-    delete doc.documentElement.scrollHeight;
+      // 还在第一份里 → 不动
+      scrollArg = null;
+      Object.defineProperty(window, "scrollY", { value: 800, configurable: true });
+      window.dispatchEvent(new window.Event("scroll"));
+      await wait(350);
+      check("还在第一份里时不会动滚动位置", scrollArg === null, JSON.stringify(scrollArg));
+
+      // 大跨度（拖滚动条）：一次就折回正确位置，不会连续抖
+      scrollArg = null;
+      Object.defineProperty(window, "scrollY", { value: 9300, configurable: true }); // 跨过 2 份
+      window.dispatchEvent(new window.Event("scroll"));
+      await wait(350);
+      check("大幅跳跃也能一次折回第一份内",
+        scrollArg !== null && (scrollArg.top >= 100 && scrollArg.top < 3100),
+        `scrollTo(${JSON.stringify(scrollArg)})　期望落在 100~3099`);
+
+      window.scrollTo = origScrollTo;
+      Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
+      delete slabs[0].getBoundingClientRect;
+      delete slabs[1].getBoundingClientRect;
+    }
 
     await dbl();
     check("再双击关闭循环滚动", inf().wanted === false, JSON.stringify(inf()));

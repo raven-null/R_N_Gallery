@@ -2422,6 +2422,15 @@ input.settings-value:focus {
    外观设置 v0.11.1：主题 / 瀑布流列宽 / 快捷键说明
    ============================================================ */
 .masonry { columns: var(--col-w, 240px); }
+
+/* ============================================================
+   循环滚动（v0.64）：两份内容各自是独立的瀑布流容器，上下紧贴堆叠
+   —— 外层的 columns 必须关掉，否则两份会被 CSS 连续灌进同一批列里、分不清边界，
+      也就没法把"一份的高度"当作平移量。而首尾无缝正是靠这个平移量。
+   padding-bottom 补齐最后一张卡片的 margin，让两份高度严格同构。
+   ============================================================ */
+.masonry.looping { columns: unset; }
+.masonry.looping .loop-slab { columns: var(--col-w, 240px); padding-bottom: 18px; }
 html[data-cols="narrow"] { --col-w: 180px; }
 html[data-cols="wide"] { --col-w: 320px; }
 

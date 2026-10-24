@@ -2440,7 +2440,18 @@ function initGallery() {
       return;
     }
     showGalleryState(null);
-    grid.innerHTML = itemsHTML(slice, null, filtered);
+    /* v0.64：循环滚动要"无感"，不能靠瞬移回顶部（那一下跳变肉眼可见）。
+       做法是**首尾复本 + 滚动位置平移**：把整份内容渲染两次、各自成为一个瀑布流容器上下堆叠；
+       一旦滚进第二份，就把 scrollTop 减掉「一份的高度」——因为第二份内容与第一份逐像素一致，
+       平移后画面完全相同，用户看不到任何跳变，只觉得可以一直往下滚。 */
+    const looping = infiniteActive();
+    grid.classList.toggle("looping", looping);
+    if (looping) {
+      const one = itemsHTML(slice, null, filtered);
+      grid.innerHTML = `<div class="loop-slab">${one}</div><div class="loop-slab">${one}</div>`;
+    } else {
+      grid.innerHTML = itemsHTML(slice, null, filtered);
+    }
     shown = slice.length;
     updateLoadMore();
     if (skipReveal) {
@@ -2523,22 +2534,32 @@ function initGallery() {
     });
   }, { passive: true });
 
-  /* v0.62：循环滚动（双击 FAB 主按钮开启）—— 这个模式的语义是「滚到底回到第一张继续」。
-     配合 render() 里的一次性全量渲染：结果全都在 DOM 里，到底就无缝跳回顶部，
-     于是可以一直往下滚、永远滚不完。 */
+  /* v0.62 引入循环滚动；v0.64 改成**无感**的复本平移。
+     判据：滚进第二份后，把滚动位置减去「n 份的高度」折回第一份 ——
+     因为第二份是第一份的逐像素复本，折回后视口里看到的画面完全没变，
+     用户只会觉得"可以一直往下滚"，感觉不到任何跳转。
+     n 用除法算而不是固定减一次：拖滚动条那种大跨度跳动也能一次落到正确位置，不会连续抖好几下。 */
   let loopGuard = 0;
   function maybeLoopBack() {
     if (!infiniteActive()) return false;
-    if (Date.now() < loopGuard) return false; // 刚跳过：防同一帧里反复触发
-    const sh = document.documentElement.scrollHeight;
-    const vh = window.innerHeight;
-    if (sh <= vh) return false;              // 内容还没一屏高，谈不上到底
-    if (sh - (window.scrollY + vh) > 40) return false; // 还差得远
-    if (shown < filtered.length) return false;         // 撞了渲染上限，仍按分批走
-    loopGuard = Date.now() + 400;
-    // 用 instant 而不是 smooth：html 上有 scroll-behavior: smooth，平滑回滚会露馅成"倒着滚回去"
-    try { window.scrollTo({ top: 0, behavior: "instant" }); }
-    catch (e) { window.scrollTo(0, 0); }
+    if (Date.now() < loopGuard) return false; // 平移后同一帧里可能再触发一次，挡掉
+    const slabs = grid.querySelectorAll(".loop-slab");
+    if (slabs.length < 2) return false;
+    const r0 = slabs[0].getBoundingClientRect();
+    const r1 = slabs[1].getBoundingClientRect();
+    const oneH = r1.top - r0.top;             // 一份内容的实际高度
+    if (!(oneH > 0)) return false;
+    if (oneH <= window.innerHeight) return false; // 一份还不够一屏，循环没有意义
+    const sy = window.scrollY;
+    const bTopInDoc = sy + r1.top;            // 第二份在文档中的起始位置
+    if (bTopInDoc <= 0) return false;
+    if (sy < bTopInDoc) return false;         // 还在第一份里
+    const n = Math.floor((sy - bTopInDoc) / oneH) + 1;
+    const target = Math.max(bTopInDoc - oneH, sy - oneH * n); // 不越过第一份开头
+    loopGuard = Date.now() + 250;
+    // instant：html 上有 scroll-behavior: smooth，平滑滚动会变成肉眼可见的"倒着滚回去"
+    try { window.scrollTo({ top: target, behavior: "instant" }); }
+    catch (e) { window.scrollTo(0, target); }
     return true;
   }
   window.__maybeLoopBack = maybeLoopBack; // 调试 / 测试钩子
@@ -5032,7 +5053,7 @@ function initLayoutSwitch() {
    之所以只在瀑布流生效：那套排版用 CSS `columns`，分批追加会让已渲染的卡片重新分列、整页跳动。
    正方形网格是 grid 布局，追加不重排，保持分批反而更省 DOM。 */
 const INFINITE_KEY = "rn_infinite";
-const INFINITE_LIMIT = 1200; // 一次渲染的硬上限：上万张硬塞进来会卡死，超出部分退回分批
+const INFINITE_LIMIT = 600; // 一次渲染的硬上限；循环模式会渲染两份复本，所以这里比单份时更保守
 function infiniteWanted() {
   try { return localStorage.getItem(INFINITE_KEY) === "1"; } catch (e) { return false; }
 }
