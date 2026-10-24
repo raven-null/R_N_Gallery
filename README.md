@@ -18,7 +18,7 @@
 - 上传：浏览器端 canvas 压缩 → base64 → Blobs，支持批量队列与逐张编辑标签
 - **主分类与标签都是可选的**：一张图可以没有分类、没有标签（上传时什么都不选也能传）
 - 设置：用量统计 / 导出元数据 / 清空图库
-- 三级访问模式：管理员 / 整理模式（只能打标签）/ 观光模式（只读，自动隐藏 R16·R18）
+- 两级访问模式：管理员（全部功能 + R16/R18）/ 观光模式（只读，自动隐藏 R16·R18）
 
 ## 目录结构
 
@@ -37,7 +37,7 @@ scripts/
   dev-server.js           本地开发服务器（内存 Blobs 模拟）
   dom-smoke-test.js       jsdom 冒烟测试
   seed-local.js           给本地服务灌可控测试数据（冒烟测试前置）
-  api-guard-test.js       服务端守卫测试（保留名 / 整理模式边界，需带 ADMIN_TOKEN 起服务）
+  api-guard-test.js       服务端守卫测试（分级保留名 / 观光边界，需带 ADMIN_TOKEN 起服务）
   find-duplicates.js      本地查重扫描
   import-chars.js         角色数据 → 标签库
   migrate-photos.js       批量迁移标签 / 主分类
@@ -116,11 +116,10 @@ node scripts/api-guard-test.js --url=http://localhost:8789 --admin=dsh-test-admi
 > 静态资源（`/assets/*`）带 `?v=` 版本号并配置了 `immutable` 长缓存 —— **改版时记得同步更新
 > `public/index.html` 里的 `?v=` 值**，否则浏览器会继续用旧文件。
 
-### 访问权限（v0.53 起的现状）
+### 访问权限（v0.53 起的现状；v0.59 移除整理模式）
 
 - **未设置任何密码**：门禁关闭，所有请求按**管理员**处理 —— 等于站点完全公开，请务必设置访问密码。
 - **访问密码**：由环境变量 `ADMIN_TOKEN` 在首次启动时初始化（之后可在设置页修改）；持密码者为管理员。
-- **整理密码**：管理员可在设置页单独设置「整理模式」密码，持该密码者只能看图 + 给照片打标签，且看不到 R16/R18 内容。
 - **观光模式**：未通过门禁时的只读访问，服务端在**分页前**剔除 R16/R18，`raw` / `thumb` 亦二次校验。
 
 ### 分级（v0.57）
@@ -128,8 +127,8 @@ node scripts/api-guard-test.js --url=http://localhost:8789 --admin=dsh-test-admi
 图库分三档，存在照片自己的字段 `meta.rating` 上：`general`（大众级）/ `r16` / `r18`。
 三档**共用同一套标签、标签组与主分类** —— 分级只是并列的一个属性维度，不参与标签体系：
 
-- 只有管理员能改（整理角色的请求会被裁成 tags/categories，写不进 `rating`）；
-- 观光 / 整理模式只能看到「大众级」；
+- 只有管理员能改（观光模式的写请求进不来）；
+- 观光模式只能看到「大众级」；
 - `r18` / `r16` **不能再作为标签或主分类**（新建 / 改名会被拒）；
 - 照片写入时若 `tags` / `categories` 里出现它们，会自动折算进 `rating` 并剔除（兼容老脚本的习惯）。
 
@@ -173,9 +172,10 @@ node scripts/api-guard-test.js --url=http://localhost:8789 --admin=dsh-test-admi
 | GET · PUT | `/api/albums` | 相册配置（v0.56 起前端不再使用：数据与接口保留，浏览页改用派生集合） |
 | GET | `/api/export` | 导出全部元数据 |
 | POST | `/api/import` | URL / 批量导入：`{ items: [{ url, tags }] }` |
-| GET | `/api/auth/state` | 门禁状态（是否已设置访问 / 整理密码） |
-| POST | `/api/auth/login` | 登录：`{ token }` → `{ role: "admin" \| "tagger" }` |
-| POST | `/api/auth/tagger` | 设置 / 清除整理模式密码（仅管理员） |
+| GET | `/api/auth/state` | 门禁状态（是否已设置访问密码） |
+| POST | `/api/auth/login` | 登录：`{ token }` → `{ role: "admin" }` |
+
+> v0.59：`POST /api/auth/tagger`（设置整理模式密码）已随整理模式一起删除，请求返回 404。
 
 ## Blob key 设计
 
@@ -186,6 +186,6 @@ meta/<id>.json      元数据（标题 / 标签 / 主分类 / 分级 / 收藏 / 
 photos-index        列表索引（轻量元数据数组，避免列表接口逐个读 meta）
 tags-config         标签与主分类配置
 albums-config       相册配置（v0.56 起前端不再读取，数据保留）
-auth-config         访问密码 / 整理密码的 SHA-256 哈希
+auth-config         访问密码的 SHA-256 哈希
 logs                操作日志（保留最近 500 条）
 ```

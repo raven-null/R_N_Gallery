@@ -630,14 +630,14 @@ const fmtDate = (s) => {
 const TOKEN_KEY = "rn_token";
 const R18_KEY_STORE = "rn_r18"; // 仅用于清除历史遗留值，不再读写
 function gateToken() { return localStorage.getItem(TOKEN_KEY) || ""; }
-function authState() { return window.__authState || { gate: false, hasTagger: false }; }
+function authState() { return window.__authState || { gate: false }; }
 async function fetchAuthState() {
   try {
     const r = await fetch("/api/auth/state", { cache: "no-store" });
     const d = await r.json();
-    window.__authState = { gate: !!d.gate, hasTagger: !!d.hasTagger };
+    window.__authState = { gate: !!d.gate };
   } catch (e) {
-    window.__authState = { gate: false, hasTagger: false };
+    window.__authState = { gate: false };
   }
   return window.__authState;
 }
@@ -696,13 +696,12 @@ function guestVisiting() {
 }
 function modeValue() {
   try {
-    const v = localStorage.getItem(MODE_KEY);
-    return v === "admin" || v === "tagger" ? v : "guest";
+    return localStorage.getItem(MODE_KEY) === "admin" ? "admin" : "guest";
   } catch (e) { return "guest"; }
 }
 function isAdmin() { return modeValue() === "admin"; }
-function isTagger() { return modeValue() === "tagger"; } // 整理模式
-function manageAllowed() { return isAdmin() || isTagger(); } // 能打开标签管理的整理视图
+/* v0.59：整理模式已移除 —— 能改东西的只有管理员，观光模式一律只读 */
+function manageAllowed() { return isAdmin(); }
 function guestAdultAllowed() {
   try { return localStorage.getItem(GUEST_ADULT_KEY) === "1"; } catch (e) { return false; }
 }
@@ -713,23 +712,18 @@ function applyMode() {
   const mode = modeValue();
   const guest = mode === "guest";
   document.body.classList.toggle("mode-guest", guest);
-  document.body.classList.toggle("mode-tagger", mode === "tagger");
   document.body.classList.toggle("mode-admin", mode === "admin");
   const btn = document.getElementById("fabModeBtn");
   if (btn) {
-    btn.title = guest ? "观光模式 · 点此输入密码进入整理 / 管理员模式"
-      : mode === "tagger" ? "整理模式 · 点此切换模式（可打标签，不看 R18 / R16）"
-        : "管理员模式 · 点此切换模式";
+    btn.title = guest ? "观光模式 · 点此输入密码进入管理员模式" : "管理员模式 · 点此切换模式";
     btn.classList.toggle("on", !guest);
     const g = btn.querySelector(".ico-guest");
-    const tg = btn.querySelector(".ico-tagger");
     const a = btn.querySelector(".ico-admin");
     if (g) g.style.display = guest ? "" : "none";
-    if (tg) tg.style.display = mode === "tagger" ? "" : "none";
     if (a) a.style.display = mode === "admin" ? "" : "none";
   }
   const state = document.getElementById("modeState");
-  if (state) state.textContent = guest ? "观光模式" : (mode === "tagger" ? "整理模式" : "管理员模式");
+  if (state) state.textContent = guest ? "观光模式" : "管理员模式";
   const box = document.getElementById("guestAdult");
   if (box) box.checked = guestAdultAllowed();
   // v0.56：非管理员不显示收藏入口（收藏是照片字段的写操作；卡片上的爱心同理按 manageAllowed 控制）
@@ -741,22 +735,20 @@ function applyMode() {
 function initMode() {
   let saved = null;
   try { saved = localStorage.getItem(MODE_KEY); } catch (e) { /* ignore */ }
-  if (saved !== "admin" && saved !== "tagger" && saved !== "guest") {
+  if (saved !== "admin" && saved !== "guest") {
     saved = gateToken() ? "admin" : "guest";
     try { localStorage.setItem(MODE_KEY, saved); } catch (e) { /* ignore */ }
   }
   applyMode();
 }
 function setMode(mode) {
-  try { localStorage.setItem(MODE_KEY, mode); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(MODE_KEY, mode === "admin" ? "admin" : "guest"); } catch (e) { /* ignore */ }
   applyMode();
 }
 /* 受限模式下拦住管理类操作；返回 true 表示已拦下 */
 function guestBlocked(what) {
   if (isAdmin()) return false;
-  const label = isTagger() ? "整理模式" : "观光模式";
-  const extra = isTagger() ? "整理模式下只能给图片打标签。" : "输入访问密码切换到管理员模式后即可使用。";
-  alert(`${label}下${what ? "不能" + what : "此功能不可用"}。\n${extra}`);
+  alert(`观光模式下${what ? "不能" + what : "此功能不可用"}。\n输入访问密码切换到管理员模式后即可使用。`);
   return true;
 }
 window.__modeState = () => ({
@@ -808,9 +800,9 @@ async function submitModeLogin() {
       throw new Error(d.error || "密码错误");
     }
     const d = await r.json().catch(() => ({}));
-    localStorage.setItem(TOKEN_KEY, v); // 管理类操作需要凭证（整理密码同样作为 token 使用）
+    localStorage.setItem(TOKEN_KEY, v); // 管理类操作需要凭证
     try { localStorage.removeItem(GUEST_VISIT_KEY); } catch (e) { /* ignore */ }
-    setMode(d.role === "tagger" ? "tagger" : "admin"); // v0.51：服务端判断这是整理密码还是访问密码
+    setMode("admin"); // v0.59：只剩管理员 / 观光两种模式
     location.reload();
   } catch (e) {
     if (err) { err.textContent = e.message || "验证失败"; err.style.display = "block"; }
@@ -869,8 +861,7 @@ function showGate() {
       }
       const d = await r.json().catch(() => ({}));
       localStorage.setItem(TOKEN_KEY, v);
-      // v0.51：输入的是整理密码就进整理模式，是访问密码就进管理员模式
-      try { localStorage.setItem(MODE_KEY, d.role === "tagger" ? "tagger" : "admin"); } catch (e2) { /* ignore */ }
+      try { localStorage.setItem(MODE_KEY, "admin"); } catch (e2) { /* ignore */ }
       location.reload();
     } catch (e) {
       err.textContent = "网络错误，请重试";
@@ -893,40 +884,10 @@ function showGate() {
   setTimeout(() => input.focus(), 60);
 }
 
-/* 设置页：访问与保护（v0.50 删掉访问密码 / R18 密钥入口；v0.51 加整理模式密码） */
+/* 设置页：访问与保护（v0.50 删掉访问密码 / R18 密钥入口；v0.59 删掉整理模式密码） */
 function initAuthSettings() {
   const btnLogout = document.getElementById("btnLogoutGate");
-  const taggerInput = document.getElementById("taggerPwdNew");
-  const btnTagger = document.getElementById("btnSetTagger");
-  const taggerState = document.getElementById("taggerState");
-  const paint = () => {
-    const st = authState();
-    if (taggerState) taggerState.textContent = st.hasTagger ? "已设置（可进整理模式）" : "未设置";
-  };
-  paint();
-  window.__refreshAuthState = async () => { await fetchAuthState(); paint(); };
-
-  if (btnTagger) btnTagger.onclick = async () => {
-    if (guestBlocked("设置整理密码")) return;
-    const v = (taggerInput.value || "").trim();
-    if (v && v.length < 4) { window.alert("整理密码至少 4 位"); return; }
-    const tip = v ? "设置 / 修改整理模式密码？" : "留空保存会清除整理模式密码，之后该密码无法登录。确定？";
-    if (!window.confirm(tip)) return;
-    try {
-      const d = await apiFetch("/api/auth/tagger", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taggerKey: v }),
-      }).then((r) => r.json());
-      if (!d.ok) throw new Error(d.error || "保存失败");
-      taggerInput.value = "";
-      window.alert(v ? "整理模式密码已更新" : "整理模式密码已清除");
-      await fetchAuthState();
-      paint();
-    } catch (e) {
-      window.alert("操作失败：" + (e && e.message ? e.message : e));
-    }
-  };
+  window.__refreshAuthState = async () => { await fetchAuthState(); };
 
   if (btnLogout) btnLogout.onclick = () => {
     if (!window.confirm("退出登录会清除本机保存的密码凭据，确定？")) return;
@@ -3798,23 +3759,12 @@ function refreshTagManager() {
   const counts = tagCounts();
   const used = Object.keys(counts);
   const savedView = localStorage.getItem(TMGR_VIEW_KEY);
-  let view = savedView === "group" ? "group" : (savedView === "review" ? "review" : "classify");
-  if (isTagger()) view = "review"; // v0.51 整理模式：只给「整理」视图（其余视图是管理功能）
-  // v0.20：离开「整理」视图时摘掉键盘监听（v0.23 起同时管理分类工作台的数字键）
-  if (view !== "review" && window.__rvKey) {
-    document.removeEventListener("keydown", window.__rvKey, true);
-    window.__rvKey = null;
-  }
-  if (view !== "classify" && window.__cwKey) {
-    document.removeEventListener("keydown", window.__cwKey, true);
-    window.__cwKey = null;
-  }
+  let view = savedView === "group" ? "group" : "classify"; // v0.59：「整理」视图已移除，只剩分组 / 分类
 
   let html = `<div class="tmgr-seg">
       <div class="seg" id="tmgrViewSeg" role="group" aria-label="视图">
-        ${isTagger() ? "" : `<button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
-        <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>`}
-        <button class="seg-btn${view === "review" ? " on" : ""}" data-view="review" title="一次只处理一张图，键盘流快速分类">整理</button>
+        <button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
+        <button class="seg-btn${view === "classify" ? " on" : ""}" data-view="classify">分类</button>
       </div>
       ${view === "group" ? `<span class="tmgr-fold-actions">
         <button class="mini-link" id="tmgrFoldAll" type="button" title="折叠所有标签组">全部折叠</button>
@@ -3823,8 +3773,6 @@ function refreshTagManager() {
     </div>`;
 
   if (view === "group") {
-    html += `<div class="tag-mgr-hint">${t("主分类 = 内容大类（可选，一张图可以没有，也可以多选）；标签组 = 作品 / 来源（如 原神），组内标签 = 该作品的角色。改名 / 删除会同步所有图片。",
-      "Category is optional (zero or more per photo); tag groups act as series/source (e.g. Genshin), with character tags inside them.")}</div>`;
     html += catMgrBlockHTML(); // v0.15 主分类管理（顶部固定区）
     if (!used.length && !TAGS.tags.length) {
       html += `<div class="tag-mgr-empty" style="padding:4px 2px 2px">图库中还没有标签。上传图片时填写标签，即可在此分组管理。</div>`;
@@ -3877,22 +3825,18 @@ function refreshTagManager() {
             <button class="seg-btn sm${cwFilter === "loose" ? " on" : ""}" data-cwf="loose" title="只显示没有入库分类的图片">未分类</button>
           </span>
         </div>
-        <div class="cw-hint" id="cwHint"></div>
         <div class="cw-cards" id="cwCards"></div>
         <div class="cw-more" id="cwMoreWrap"><button class="btn ghost sm" id="cwMore" hidden></button></div>
       </div>
       <div class="cw-right">
         <div class="uq-panel">
-          <div class="uq-panel-title">主分类 <span class="req">点一下 = 设置到选中图片</span>
+          <div class="uq-panel-title">主分类
             <button class="mini-link" id="cwNewCat" type="button" title="新建主分类">＋ 新建</button>
           </div>
-          <div class="uq-panel-sub">选中左侧图片后点分类名即可加上；已全部包含时再点 = 取消。也可把图片直接拖到分类名上；点分类名里的 ✎ 可改名 / 改色 / 删除</div>
           <div class="uq-cats" id="cwCats" data-multi="1" data-can-edit="1"></div>
         </div>
         <div class="uq-panel">
           <div class="uq-panel-title">标签（作品 / 角色）</div>
-          <div class="uq-panel-sub">点左侧图片选中 → 点标签槽即打标（也可拖拽）；组头可折叠，一次只展开一个作品组</div>
-          <div class="rv-help" style="margin:2px 0 6px">快捷键：选中图片后按 <b>1-9</b> = 直接打「最近使用」里的标签，可连续按</div>
           <input type="text" id="cwSlotSearch" class="uq-slot-search" placeholder="搜角色 / 作品（支持拼音，如 ht）" autocomplete="off">
           <div class="uq-panel-status" id="cwSelStatus"></div>
           <div class="uq-slots" id="cwSlots"></div>
@@ -3902,53 +3846,8 @@ function refreshTagManager() {
         </div>
       </div>
     </div>`;
-  } else if (view === "review") {
-    // v0.20 逐张整理：一次只面对一张图，主分类可点选、标签可搜索，键盘流推进
-    html += `<div class="rv">
-      <div class="rv-head">
-        <span class="rv-progress" id="rvProgress">…</span>
-        <span class="seg rv-filters" id="rvFilters" role="group">
-          <button class="seg-btn sm${rvFilter === "todo" ? " on" : ""}" data-rvf="todo" title="缺主分类或还没打过库内标签的图片">待整理</button>
-          <button class="seg-btn sm${rvFilter === "nocat" ? " on" : ""}" data-rvf="nocat">未分类</button>
-          <button class="seg-btn sm${rvFilter === "notag" ? " on" : ""}" data-rvf="notag">无标签</button>
-          <button class="seg-btn sm${rvFilter === "all" ? " on" : ""}" data-rvf="all">全部</button>
-        </span>
-        <button class="btn ghost sm" id="rvReset" type="button" title="清空整理进度：已应用过的图片会重新回到待整理队列">重置进度</button>
-      </div>
-      <div class="rv-body">
-        <div class="rv-photo">
-          <img id="rvImg" alt="">
-          <div class="rv-meta" id="rvMeta"></div>
-        </div>
-        <div class="rv-panel">
-          <div class="uq-panel">
-            <div class="uq-panel-title">主分类 <span class="req">可多选</span>
-              ${isAdmin() ? `<button class="mini-link" id="rvNewCat" type="button" title="新建主分类">＋ 新建</button>` : ""}
-            </div>
-            <div class="uq-cats" id="rvCats" data-multi="1"${isAdmin() ? ` data-can-edit="1"` : ""}></div>
-          </div>
-          <div class="uq-panel">
-            <div class="uq-panel-title">标签</div>
-            <div class="tag-input-wrap">
-              <div class="tag-input" id="rvTagBox">
-                <input type="text" id="rvTagInput" placeholder="输入搜索 / 回车添加…" autocomplete="off">
-              </div>
-              <div class="tag-suggest" id="rvTagSuggest" hidden></div>
-            </div>
-            <div class="quick-pick show" id="rvQuick"></div>
-          </div>
-          <div class="rv-actions">
-            <button class="btn primary" id="rvApply" type="button">应用并下一张 (Enter)</button>
-            <button class="btn ghost" id="rvSkip" type="button">跳过 (S)</button>
-          </div>
-          <div class="rv-help">1-9 = 最近使用标签　｜　Backspace = 删最后一个标签　｜　Esc = 退出整理</div>
-          <div class="hint" id="rvHint"></div>
-        </div>
-      </div>
-    </div>`;
   }
 
-  // v0.51：整理模式下不显示这些标签库管理按钮（只能给图片打标签，不能改标签库本身）
   if (isAdmin()) {
     html += `<div class="tag-mgr-actions">
       <button class="btn ghost sm" id="btnNewCategory">＋ ${t("新建主分类", "New category")}</button>
@@ -3972,12 +3871,11 @@ function refreshTagManager() {
       b.addEventListener("click", () => {
         localStorage.setItem(TMGR_VIEW_KEY, b.dataset.view);
         refreshTagManager();
-        renderTagMenuContent(); // 整理视图改过标签后，筛选菜单计数同步刷新
+        renderTagMenuContent(); // 改过标签后，筛选菜单计数同步刷新
       });
     });
   }
   if (view === "classify") initCwView(root);
-  if (view === "review") initReviewView(root);
   // v0.29：分组视图的标签组折叠 + 全部折叠 / 展开
   root.querySelectorAll("[data-gfold]").forEach((h) => h.addEventListener("click", (e) => {
     if (e.target.closest("button")) return; // 组头右侧的编辑按钮等不触发折叠
@@ -4161,27 +4059,14 @@ function initCwView(root) {
         if (window.__renderGallery) window.__renderGallery();
       } catch (err) { /* 静默 */ }
     });
-    // v0.20：点组头折叠 / 点槽给已选图片打标 / 点「最近使用」同样直接打标
+    // v0.20：点组头折叠 / 点槽给已选图片打标
     slotsEl.addEventListener("click", (e) => {
       const sec = e.target.closest("[data-sg]");
       if (sec) { toggleCwGroup(sec.dataset.sg); return; }
       const slot = e.target.closest(".uq-slot");
       if (slot && slot.dataset.tag) cwApplyTagToSelection(slot.dataset.tag);
     });
-    // v0.23：选中图片后按 1-9 = 直接打「最近使用」里的标签，连续打标不用鼠标
-    if (window.__cwKey) document.removeEventListener("keydown", window.__cwKey, true);
-    window.__cwKey = (e) => {
-      if (localStorage.getItem(TMGR_VIEW_KEY) !== "classify") return;
-      if (document.querySelector(".modal-mask.open")) return;
-      // v0.52：任何输入框 / 可编辑区域里打字时不抢按键
-      if (isTypingTarget(e.target || document.activeElement)) return;
-      if (!/^[1-9]$/.test(e.key)) return;
-      const name = loadRecentTags()[Number(e.key) - 1];
-      if (!name) return;
-      e.preventDefault();
-      cwApplyTagToSelection(name);
-    };
-    document.addEventListener("keydown", window.__cwKey, true);
+    // v0.59：原先「选中图片后按 1-9 = 打最近使用标签」的键盘流已移除（最近使用一并删除）
   }
 }
 /* 主分类面板：高亮「选中图片共有的主分类」（v0.26） */
@@ -4261,7 +4146,7 @@ function renderCwSlots() {
   }
   wrap.innerHTML = slotSectionsHTML((n) => counts[n] || 0, cwExtraSlots,
     "还没有分类。用下方输入框创建临时分类，或先到「分组」页建好标签库再回来。",
-    { collapsible: true, openGroups: cwOpenGroups, recent: loadRecentTags(), query: cwSlotQuery });
+    { collapsible: true, openGroups: cwOpenGroups, query: cwSlotQuery });
 }
 /* 手风琴：展开某作品组时收起其他组 */
 function toggleCwGroup(gid) {
@@ -4322,8 +4207,6 @@ function renderCwCards() {
   if (!wrap) return;
   const total = document.getElementById("cwTotal");
   if (total) total.textContent = cwList.length + " 张";
-  const hint = document.getElementById("cwHint");
-  if (hint) hint.textContent = cwFilter === "loose" ? "未分类 = 没有库里标签的图片（含游离标签）" : "点图片可多选，拖到右侧分类槽打标";
   if (!cwList.length) {
     wrap.innerHTML = `<div class="cw-empty">${cwFilter === "loose" ? "全部图片都已归类 🎉" : "图库暂无图片"}</div>`;
     return;
@@ -4345,219 +4228,7 @@ function renderCwCards() {
   }
 }
 
-/* ---------- 逐张整理视图（v0.20）：一次只面对一张图，键盘流快速分类 ---------- */
-let rvFilter = "todo"; // todo（缺主分类或没打过库内标签）| nocat | notag | all
-let rvIds = [];
-let rvIdx = 0;
-let rvBusy = false;
-/* v0.27：整理进度（localStorage 记已「应用」过的图片 id）
-   原先的问题：默认筛选是「缺主分类 或 没有库内标签」，只设了主分类还没打标签的图
-   应用后仍然符合条件，刷新后又回到待整理队列。现在「应用」过的会记下来并跳过，
-   想重新过一遍可以点「重置进度」。 */
-const RV_DONE_KEY = "rn_rv_done";
-let rvDone = new Set();
-function loadRvDone() {
-  try {
-    const a = JSON.parse(localStorage.getItem(RV_DONE_KEY) || "[]");
-    rvDone = new Set(Array.isArray(a) ? a : []);
-  } catch (e) { rvDone = new Set(); }
-}
-function saveRvDone() {
-  try {
-    const arr = [...rvDone].slice(-3000); // 上限 3000，超出丢最早的
-    localStorage.setItem(RV_DONE_KEY, JSON.stringify(arr));
-  } catch (e) { /* ignore */ }
-}
-
-function rvPickIds() {
-  const hasLibTag = (p) => (p.tags || []).some((n) => tagByName(n));
-  return PHOTOS.filter((p) => {
-    if (rvFilter !== "all" && rvDone.has(p.id)) return false; // 整理过的先跳过（「全部」除外）
-    const hasCat = catsOf(p).length > 0;
-    if (rvFilter === "nocat") return !hasCat;
-    if (rvFilter === "notag") return !(p.tags || []).length;
-    if (rvFilter === "all") return true;
-    return !hasCat || !hasLibTag(p);
-  }).map((p) => p.id);
-}
-
-/* 「最近使用」快捷 chips：点一下加标签，数字键 1-9 同样可用 */
-function rvRefreshQuick() {
-  const wrap = document.getElementById("rvQuick");
-  const box = document.getElementById("rvTagBox");
-  if (!wrap || !box) return;
-  const recent = loadRecentTags();
-  if (!recent.length) {
-    wrap.innerHTML = `<div class="qp-empty">最近还没用过标签；整理几张图后这里会出现快捷入口</div>`;
-    return;
-  }
-  const used = new Set(tagsOfBox(box));
-  wrap.innerHTML = recent.map((n, i) => `<span class="qp-item${used.has(n) ? " sel" : ""}" data-tag="${escAttr(n)}" title="快捷键 ${i + 1}">
-    <span class="qp-num">${i + 1}</span>${esc(n)}</span>`).join("");
-  wrap.querySelectorAll(".qp-item").forEach((el) => el.addEventListener("click", () => {
-    const n = el.dataset.tag;
-    if (used.has(n)) {
-      [...box.querySelectorAll(".t")].forEach((c) => { if (c.childNodes[0].textContent.trim() === n) c.remove(); });
-    } else addTagChip(box, n);
-    rvRefreshQuick();
-  }));
-}
-
-function rvRender() {
-  const img = document.getElementById("rvImg");
-  const meta = document.getElementById("rvMeta");
-  const prog = document.getElementById("rvProgress");
-  const hint = document.getElementById("rvHint");
-  const box = document.getElementById("rvTagBox");
-  if (!img || !meta || !prog) return;
-  const p = PHOTOS.find((x) => x.id === rvIds[rvIdx]);
-  if (!p) {
-    img.removeAttribute("src");
-    img.classList.add("rv-empty-img");
-    meta.innerHTML = rvIds.length
-      ? `🎉 这一轮 ${rvIds.length} 张都过完了<br><span class="rv-sub">换个筛选条件可以继续；点「分组」或「分类」返回</span>`
-      : `这个筛选条件下没有需要整理的图片 🎉<br><span class="rv-sub">试试「全部」或先去上传一些图片</span>`;
-    prog.textContent = rvIds.length
-      ? `已完成 ${rvIds.length} / ${rvIds.length}${rvDone.size ? ` · 累计已整理 ${rvDone.size} 张` : ""}`
-      : (rvDone.size
-        ? `这批没有待整理项 · 累计已整理 ${rvDone.size} 张（需要重新过一遍就点右上「重置进度」）`
-        : "没有待整理项");
-    renderCatPicks(document.getElementById("rvCats"), []);
-    if (box) box.querySelectorAll(".t").forEach((el) => el.remove());
-    if (hint) hint.textContent = "";
-    rvRefreshQuick();
-    return;
-  }
-  img.classList.remove("rv-empty-img");  // v0.23 性能：先用缩略图秒开，再后台换成原图（切换图片不用等大图下载）
-  const thumb = p.thumbUrl || p.url;
-  img.src = thumb;
-  if (p.url && p.url !== thumb) {
-    const full = new Image();
-    const targetId = p.id;
-    full.onload = () => { if (rvIds[rvIdx] === targetId) img.src = p.url; };
-    full.src = p.url;
-  }
-  // 顺手预取下一张的缩略图，切换更跟手
-  const nextP = PHOTOS.find((x) => x.id === rvIds[rvIdx + 1]);
-  if (nextP) { const pre = new Image(); pre.src = nextP.thumbUrl || nextP.url; }
-  const cats = catsOf(p);
-  meta.innerHTML = `<b>${esc(p.title || "未命名")}</b> · ${p.width}×${p.height} · ${fmtSize(p.size)} · ${fmtDate(p.uploadedAt)}`
-    + (cats.length ? ` · 当前分类：${cats.map((c) => esc(c)).join("、")}` : ` · <span style="color:var(--danger)">当前未分类</span>`);
-  prog.textContent = `第 ${rvIdx + 1} / ${rvIds.length} 张 · 还剩 ${rvIds.length - rvIdx} 张`
-    + (rvDone.size ? ` · 本轮已整理 ${rvDone.size} 张` : "");
-  renderCatPicks(document.getElementById("rvCats"), cats);
-  if (box) {
-    box.querySelectorAll(".t").forEach((el) => el.remove());
-    (p.tags || []).forEach((n) => addTagChip(box, n));
-    const inp = document.getElementById("rvTagInput");
-    if (inp) inp.value = "";
-  }
-  if (hint) { hint.textContent = ""; hint.style.color = ""; }
-  rvRefreshQuick();
-}
-
-async function rvApply() {
-  if (rvBusy) return;
-  const p = PHOTOS.find((x) => x.id === rvIds[rvIdx]);
-  if (!p) return;
-  const hint = document.getElementById("rvHint");
-  const cats = selCatsOf(document.getElementById("rvCats"));
-  const tags = tagsOfBox(document.getElementById("rvTagBox"));
-  // v0.58：主分类 / 标签都不是硬性要求 —— 界面里已经预填了这张图原有的值，
-  // 所以「空着提交」就是用户显式清空，不再拦。（v0.27 的「必须先选主分类」已撤销）
-  rvBusy = true;
-  try {
-    const r = await apiFetch(`/api/photos/${p.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ categories: cats, tags }),
-    });
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || "保存失败");
-    p.categories = cats; // 本地同步，免得每张都重拉全量
-    p.tags = tags;
-    pushRecentTags(tags.slice(-3));
-    rvDone.add(p.id); // v0.27：记下"已整理"，刷新后不再回到待整理队列
-    saveRvDone();
-    if (window.__refreshGallery) { /* 图库墙下次筛选时用新数据 */ }
-    rvIdx++;
-    rvRender();
-  } catch (e) {
-    if (hint) { hint.style.color = "var(--danger)"; hint.textContent = "保存失败：" + e.message; }
-  }
-  rvBusy = false;
-}
-function rvSkip() { rvIdx++; rvRender(); }
-
-function initReviewView(root) {
-  loadRvDone(); // v0.27：读回整理进度（已应用过的不再重复出现）
-  rvIds = rvPickIds();
-  rvIdx = 0;
-  rvRender();
-  window.__rvState = () => ({ ids: [...rvIds], idx: rvIdx, done: [...rvDone], filter: rvFilter }); // 测试钩子
-  const q = (sel) => root.querySelector(sel);
-  const resetBtn = q("#rvReset");
-  if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
-      rvDone.clear();
-      saveRvDone();
-      rvIds = rvPickIds();
-      rvIdx = 0;
-      rvRender();
-    });
-  }
-  const rvNewCatBtn = q("#rvNewCat");
-  if (rvNewCatBtn) rvNewCatBtn.addEventListener("click", () => openCatModal("new-category"));
-  const filters = q("#rvFilters");
-  if (filters) {
-    filters.querySelectorAll("[data-rvf]").forEach((b) => b.addEventListener("click", () => {
-      rvFilter = b.dataset.rvf;
-      refreshTagManager();
-    }));
-  }
-  bindCatPicks(document.getElementById("rvCats"));
-  bindTagSuggest(document.getElementById("rvTagInput"), document.getElementById("rvTagSuggest"), document.getElementById("rvTagBox"), rvRefreshQuick);
-  const apply = q("#rvApply");
-  const skip = q("#rvSkip");
-  if (apply) apply.addEventListener("click", rvApply);
-  if (skip) skip.addEventListener("click", rvSkip);
-
-  // 键盘流：Enter 应用并下一张 / S 跳过 / 1-9 最近使用 / Esc 退出
-  if (window.__rvKey) document.removeEventListener("keydown", window.__rvKey, true);
-  window.__rvKey = (e) => {
-    if (localStorage.getItem(TMGR_VIEW_KEY) !== "review") return;
-    if (document.querySelector(".modal-mask.open")) return;
-    // v0.52：焦点在「别的输入框」里时一律不抢按键（原先只排除了自己的输入框，
-    // 导致设置页的密码框里打不了数字 / Enter 会被当成"应用并下一张"）
-    const ae = document.activeElement;
-    const inp = document.getElementById("rvTagInput");
-    const inRvInput = !!(inp && ae === inp);
-    const typingElsewhere = !inRvInput && isTypingTarget(ae); // v0.52
-    if (typingElsewhere) return;
-    const typing = inRvInput && inp.value.trim();
-    if (e.key === "Enter") { e.preventDefault(); rvApply(); return; }
-    if (e.key === "Escape") {
-      localStorage.setItem(TMGR_VIEW_KEY, "group");
-      document.removeEventListener("keydown", window.__rvKey, true);
-      window.__rvKey = null;
-      refreshTagManager();
-      renderTagMenuContent();
-      return;
-    }
-    if (typing) return;
-    if (e.key === "s" || e.key === "S") { e.preventDefault(); rvSkip(); return; }
-    if (/^[1-9]$/.test(e.key)) {
-      const chips = [...document.querySelectorAll("#rvQuick .qp-item")];
-      const el = chips[Number(e.key) - 1];
-      if (el && el.dataset.tag) {
-        addTagChip(document.getElementById("rvTagBox"), el.dataset.tag);
-        rvRefreshQuick();
-      }
-      e.preventDefault();
-    }
-  };
-  document.addEventListener("keydown", window.__rvKey, true);
-}
+/* v0.59：逐张「整理」视图（v0.20 引入）已整体移除 —— 连同 rv 系列函数与键盘流 */
 
 /* ---------- 拖拽分类（v0.14：把图库卡片拖到分组视图标签 pill 上打标） ---------- */
 function bindTagDrops(scope) {
@@ -4686,7 +4357,7 @@ function pushRecentTags(names) {
 }
 /* 槽列表 HTML（标签分类工作台用）：标签库按组 + 临时自定义槽 */
 function slotSectionsHTML(countOf, extraSet, emptyTip, opts = {}) {
-  const { collapsible = false, openGroups = null, recent = null, query = "" } = opts;
+  const { collapsible = false, openGroups = null, query = "" } = opts; // v0.59：recent（最近使用）已移除
   const gmap = new Map();
   (TAGS.groups || []).forEach((g) => gmap.set(g.id, g));
   const grouped = new Map();
@@ -4726,10 +4397,6 @@ function slotSectionsHTML(countOf, extraSet, emptyTip, opts = {}) {
   }
 
   const parts = [];
-  if (recent && recent.length) {
-    parts.push(`<div class="uq-sec static"><i class="dot" style="--tg:var(--accent)"></i>${t("最近使用", "Recent")}</div>`);
-    parts.push(recent.map((n) => slotEl({ name: n }, null, "")).join(""));
-  }
   sections.forEach((sec) => {
     const head = sec.title
       ? `<div class="uq-sec${collapsible && sec.gid ? " clickable" : ""}${sec.gid && openGroups && openGroups.has(sec.gid) ? " open" : ""}"${collapsible && sec.gid ? ` data-sg="${escAttr(sec.gid)}" title="展开 / 收起该作品组"` : ""}>
@@ -5716,13 +5383,12 @@ function initPageSwitch() {
     const el = panels[page];
     if (!el || animating) return;
     // v0.49 观光模式：上传 / 标签管理 / 设置都不给开（搜索只读，放行）
-    // v0.51 整理模式：额外允许打开标签管理（窗口内部只会显示「整理」视图）
-    const allowed = isAdmin() || (isTagger() && page === "tags") || page === "search";
+    const allowed = isAdmin() || page === "search";
     if (!allowed) {
       guestBlocked(page === "upload" ? "上传图片" : page === "tags" ? "管理标签" : "打开设置");
       return;
     }
-    // v0.51：标签管理按当前模式重新渲染（整理模式只显示「整理」视图）
+    // v0.51：标签管理按当前模式重新渲染
     if (page === "tags" && window.__refreshTagManager) window.__refreshTagManager();
     // v0.54：每次打开设置页都刷新一次图库统计（否则只在初始化时拉过一次，数据一变就过期）
     if (page === "settings" && window.__refreshStats) window.__refreshStats();

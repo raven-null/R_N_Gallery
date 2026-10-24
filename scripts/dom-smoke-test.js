@@ -148,57 +148,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
-  /* 整理视图：应用过的图片刷新后不再回到待整理队列（v0.27） */
-  window.localStorage.setItem("rn_tmgr_view", "review");
-  window.__refreshTagManager();
-  await wait(400);
-  const rv1 = window.__rvState ? window.__rvState() : null;
-  check("整理视图有待整理项", !!(rv1 && rv1.ids.length), rv1 ? `${rv1.ids.length} 张` : "无 __rvState（未切换到整理视图）");
-  if (rv1 && rv1.ids.length) {
-    const firstId = rv1.ids[0];
-    // 保证至少选中一个主分类：挑一个当前未选中的 chip 点（点已选中的是取消）
-    const rvChips = [...doc.querySelectorAll("#rvCats .cat-pick")];
-    const pick = rvChips.find((c) => !c.classList.contains("on")) || rvChips[0];
-    if (pick) pick.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-    const picked = [...doc.querySelectorAll("#rvCats .cat-pick.on")].map((c) => c.dataset.cat);
-    console.log(`   选中主分类：[${picked.join(",")}]`);
-    doc.getElementById("rvApply").click();
-    await wait(1500);
-    const rv2 = window.__rvState();
-    check("应用后记入整理进度", rv2.done.includes(firstId));
-    check("应用后前进到下一张", rv2.idx === rv1.idx + 1, `idx ${rv1.idx} → ${rv2.idx}`);
-    window.__refreshTagManager(); // 模拟刷新：重新读进度并重算队列
-    await wait(500);
-    const rv3 = window.__rvState();
-    check("重新加载后不再出现", !rv3.ids.includes(firstId), `队列剩 ${rv3.ids.length} 张`);
-    window.localStorage.setItem("rn_tmgr_view", "classify"); // 切回分类视图，供后续检查
-    window.__refreshTagManager();
-    await wait(400);
-  }
-
-  /* v0.58：主分类 / 标签都不是硬性要求 —— 整理视图里全部取消也能「应用」 */
-  {
-    window.localStorage.setItem("rn_tmgr_view", "review");
-    window.__refreshTagManager();
-    await wait(500);
-    const rvA = window.__rvState ? window.__rvState() : null;
-    if (rvA && rvA.ids.length) {
-      const targetId = rvA.ids[0];
-      const idxBefore = rvA.idx;
-      for (const chip of [...doc.querySelectorAll("#rvCats .cat-pick.on")]) {
-        chip.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-      }
-      check("整理视图里主分类可以全部取消（不再是必选）", !doc.querySelector("#rvCats .cat-pick.on"));
-      doc.getElementById("rvApply").click();
-      await wait(1500);
-      const rvB = window.__rvState();
-      check("不选主分类也能「应用」（不再被拦）",
-        rvB.done.includes(targetId) && rvB.idx === idxBefore + 1, `idx ${idxBefore} → ${rvB.idx}`);
-      window.localStorage.setItem("rn_tmgr_view", "classify");
-      window.__refreshTagManager();
-      await wait(400);
-    }
-  }
+  /* v0.59：逐张「整理」视图已移除 —— 原先这里 6 项 rvState 断言随之删除 */
 
   const cssText = fs.readFileSync(path.join(ROOT, "public", "assets", "style.css"), "utf8");
   check("CSS 含 content-visibility 规则", /content-visibility:\s*auto/.test(cssText));
@@ -899,34 +849,15 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
-  /* 整理模式（v0.51）：能打标签、看不到 R18 / R16，其余管理功能仍然禁用 */
+  /* v0.59：整理模式（tagger）已移除 —— body 不再有 mode-tagger，标签管理也只有「分组 / 分类」两个视图 */
   if (modeSt) {
-    window.__setMode("tagger");
-    await wait(250);
-    check("整理模式：body 带 mode-tagger", doc.body.classList.contains("mode-tagger") && !doc.body.classList.contains("mode-admin"));
-    check("整理模式：拦下编辑操作", window.__guestBlocked("编辑图片") === true);
-    const tmgrItem = doc.querySelector('.page-menu-item[data-page="tags"]');
-    if (tmgrItem) {
-      tmgrItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-      await wait(700);
-      check("整理模式：能打开标签管理", doc.getElementById("panelTags").classList.contains("open"));
-      const segBtns = doc.querySelectorAll("#tmgrViewSeg .seg-btn");
-      check("整理模式：只给「整理」视图", segBtns.length === 1 && segBtns[0].dataset.view === "review",
-        [...segBtns].map((b) => b.dataset.view).join(",") || "(无)");
-      check("整理模式：看不到标签库管理按钮", !doc.getElementById("btnNewTag") && !doc.getElementById("btnNewCategory"));
-      const closeTags = doc.getElementById("closeTags");
-      if (closeTags) clickEl(closeTags);
-      await wait(500);
-    }
-    const setItem = doc.querySelector('.page-menu-item[data-page="settings"]');
-    if (setItem) {
-      setItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-      await wait(500);
-      check("整理模式：不能打开设置", !doc.getElementById("panelSettings").classList.contains("open"));
-    }
     window.__setMode("admin");
-    await wait(250);
-    check("切回管理员模式（整理模式段落结束）", doc.body.classList.contains("mode-admin"));
+    await wait(200);
+    const segBtns = doc.querySelectorAll("#tmgrViewSeg .seg-btn");
+    check("标签管理只剩「分组 / 分类」两个视图",
+      segBtns.length === 2 && [...segBtns].every((b) => b.dataset.view !== "review"),
+      [...segBtns].map((b) => b.dataset.view).join(",") || "(无)");
+    check("body 不再有 mode-tagger 类", !doc.body.classList.contains("mode-tagger"));
   }
 
   /* 服务端 safe=1：观光模式的列表里不返回非大众级（R16 / R18）的图片 —— v0.57 起看 rating 字段 */
@@ -960,7 +891,6 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     const probes = [
       ["GET", "/api/auth/state"],
       ["POST", "/api/auth/login"],
-      ["POST", "/api/auth/tagger", JSON.stringify({ taggerKey: "x" })], // v0.54：空 body 会清除整理密码，传无效值只验路由
       ["GET", "/api/photos?limit=1"],
       ["GET", "/api/tags"],
       ["GET", "/api/albums"],
@@ -977,25 +907,27 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       }
     }
     check("接口都已挂载（没有 404）", missing.length === 0, missing.length ? `404：${missing.join(" / ")}` : `${probes.length} 个接口均可达`);
+    // v0.59：整理模式相关接口已删除（应当 404）
+    try {
+      const r = await fetch(withToken("/api/auth/tagger"), { method: "POST", headers: hdr, body: "{}" });
+      check("整理密码接口已删除（404）", r.status === 404, `HTTP ${r.status}`);
+    } catch (e) {
+      check("整理密码接口已删除（404）", false, e.message);
+    }
   }
 
-  /* v0.52：设置页输入框里打字不该被键盘快捷键抢走（整理视图的 1-9 曾吞掉密码里的数字） */
-  if (window.__refreshTagManager) {
-    window.localStorage.setItem("rn_tmgr_view", "review"); // 让整理视图的键盘流挂上
-    window.__refreshTagManager();
-    await wait(400);
-  }
-  const taggerPwd = doc.getElementById("taggerPwdNew");
-  if (taggerPwd) {
-    taggerPwd.focus();
+  /* v0.52：输入框里打字不该被键盘快捷键抢走（曾出现「整理视图的 1-9 吞掉密码里的数字」） */
+  const probeInput = doc.getElementById("modePwd") || doc.querySelector("#panelSettings input") || doc.querySelector(".modal-mask input");
+  if (probeInput) {
+    probeInput.focus();
     const keys = ["1", "3", "9", "0", "s", "S", "Enter", "ArrowLeft", "ArrowRight", "/"];
     const stolen = keys.filter((k) => {
       const ev = new window.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
-      taggerPwd.dispatchEvent(ev);
+      probeInput.dispatchEvent(ev);
       return ev.defaultPrevented;
     });
-    check("设置页输入框里按键不被快捷键抢走", stolen.length === 0, stolen.length ? `被拦截：${stolen.join(" ")}` : "全部放行");
-    if (taggerPwd.blur) taggerPwd.blur();
+    check("输入框里按键不被快捷键抢走", stolen.length === 0, stolen.length ? `被拦截：${stolen.join(" ")}` : "全部放行");
+    if (probeInput.blur) probeInput.blur();
   }
   window.localStorage.setItem("rn_tmgr_view", "group"); // 复位，别影响后续断言
 

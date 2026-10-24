@@ -1016,6 +1016,26 @@ async function aiTagSearch(query) {
 - 测试：前端 **148 项全通过**，新增 2 项 ——「整理视图里主分类可以全部取消（不再是必选）」「不选主分类也能应用（不再被拦）」
 - 顺带修：`dom-smoke-test.js` 里改分级后「按原值还原」，不再把 seed 的 R16 图洗成大众级；`app.js` 补 `window.__reloadData` 测试钩子（严格模式下 `eval` 的声明不会自动挂到 `window`）
 
+### 批次 51 · 精简标签管理 + 废掉整理模式（v0.59，2026-11-19）✅
+> 用户要求：删除标签管理里的「整理」部分；分类部分删除「最近使用」；删除全部解释文案。
+> 连带影响确认后：**整理模式（tagger）整块废掉** —— 它唯一的界面就是被删掉的整理视图，只剩管理员 / 观光两种模式。
+
+- **删除「整理」视图**（v0.20 引入的逐张整理）：
+  - 前端整块移除约 264 行：`initReviewView` + `rvRender` / `rvApply` / `rvSkip` / `rvPickIds` / `rvRefreshQuick`、整理进度 `rn_rv_done`、视图按钮、HTML 容器、键盘流（Enter / S / 1-9 / Esc）
+  - 标签管理只剩「分组 / 分类」两个视图
+- **废掉整理模式（tagger 角色）**：
+  - 后端：`checkAuth` 只返回 `admin` / `null`；`POST /api/auth/tagger` 删除并**从 `config.path` 摘除**（现在请求 404）；路由层的 tagger 拦截、`list()` 的成人向强制过滤、`patch()` 的字段裁剪全部移除；`GET /api/auth/state` 不再返回 `hasTagger`；`list` / `patch` 去掉不再使用的 `role` 参数
+  - 前端：`isTagger()` 删除，`manageAllowed()` 收敛为 `isAdmin()`；模式切换只剩两态（FAB 去掉 `.ico-tagger` 图标）；设置页「整理模式密码」整行删除；`openWindow` 白名单与 `guestBlocked` 文案同步；登录只剩「访问密码 → 管理员」
+  - 存量 `auth-config.taggerHash` 字段不删也不读，等于自动失效
+- **分类工作台删除「最近使用」**：不再向 `slotSectionsHTML` 传 `recent`，其 recent 渲染移除；「选中图片后按 1-9 打最近使用标签」的键盘流（`__cwKey`）一并删除
+  - 保留：`loadRecentTags` / `pushRecentTags` 仍服务于「编辑图片」弹窗里的快捷标签 chips（本次范围只到标签管理页）
+- **删除标签管理页的解释文案**：分类工作台两段 `.uq-panel-sub`、`.rv-help` 快捷键说明、主分类标题里的「点一下 = 设置到选中图片」、动态 `#cwHint`、分组视图顶部 `.tag-mgr-hint`
+  - 保留空态提示（"还没有标签 / 还没有分类"）与错误提示 —— 那些是状态而不是操作说明
+- 测试：
+  - 前端 **138 项全通过**（删 12 项整理视图 / 整理模式断言，新增 2 项：「标签管理只剩分组 / 分类两个视图」「body 不再有 mode-tagger」）
+  - 服务端守卫 **22 项全通过**（删 8 项 tagger 边界，新增 4 项：整理密码接口 404、未带凭证的列表不含成人向、未带凭证 raw 401、未带凭证写操作 401）
+
+
 
 
 

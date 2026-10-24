@@ -13,7 +13,7 @@
      $env:PORT="8789"; $env:ADMIN_TOKEN="dsh-test-admin"; node scripts/dev-server.js
      node scripts/api-guard-test.js --url=http://localhost:8789 --admin=dsh-test-admin
 
-   脚本自给自足：自己上传两张图、自己收尾（删图 / 清整理密码 / 清测试标签）。
+   脚本自给自足：自己上传两张图、自己收尾（删图 / 清测试标签）。
    ============================================================ */
 "use strict";
 
@@ -25,7 +25,6 @@ const argVal = (prefix, def) => {
 };
 const BASE = argVal("--url=", process.env.GUARD_URL || "http://localhost:8789").replace(/\/+$/, "");
 const ADMIN = argVal("--admin=", process.env.GALLERY_TOKEN || "dsh-test-admin");
-const TAGGER_PWD = "guard-tagger-9271";
 
 let failed = 0;
 const results = [];
@@ -65,8 +64,9 @@ const hasR18Tag = (photo) => (photo.tags || []).some((t) => ["r18", "r16"].inclu
   }
   const adminT = ADMIN;
 
-  const setT = await req("/api/auth/tagger", { method: "POST", token: adminT, body: { taggerKey: TAGGER_PWD } });
-  check("设置整理模式密码", setT.status === 200 && setT.data && setT.data.hasTagger === true, `HTTP ${setT.status} hasTagger=${setT.data && setT.data.hasTagger}`);
+  // v0.59：整理模式已移除，设置整理密码的接口应当不存在了
+  const taggerGone = await req("/api/auth/tagger", { method: "POST", token: adminT, body: { taggerKey: "x" } });
+  check("整理密码接口已删除（404）", taggerGone.status === 404, `HTTP ${taggerGone.status}`);
 
   const upA = await req("/api/photos", {
     method: "POST", token: adminT,
@@ -103,35 +103,20 @@ const hasR18Tag = (photo) => (photo.tags || []).some((t) => ["r18", "r16"].inclu
   check("旧写法「打 r18 标签」仍折算成 R18", legacy.status === 200 && legacy.data.photo.rating === "r18", `rating=${legacy.data && legacy.data.photo && legacy.data.photo.rating}`);
   check("r18 不会留在照片标签里", legacy.status === 200 && !hasR18Tag(legacy.data.photo), JSON.stringify(legacy.data && legacy.data.photo && legacy.data.photo.tags));
 
-  /* ---------- 3. 整理角色边界 ---------- */
-  const tLogin = await req("/api/auth/login", { method: "POST", body: { token: TAGGER_PWD } });
-  const taggerOK = tLogin.status === 200 && tLogin.data && tLogin.data.role === "tagger";
-  check("用整理密码登录得到 role=tagger", taggerOK, `HTTP ${tLogin.status} role=${tLogin.data && tLogin.data.role}`);
-  const taggerT = TAGGER_PWD;
+  /* ---------- 3. 观光 / 未登录视角 ---------- */
+  // v0.59：只剩管理员与观光两种模式，未带凭证的请求一律按观光处理
+  const listAnon = await req("/api/photos?limit=100&safe=1");
+  check("未带凭证的列表不含非大众级图片", !!listAnon.data && !(listAnon.data.photos || []).some((p) => (p.rating || "general") !== "general"),
+    `返回 ${((listAnon.data && listAnon.data.photos) || []).length} 张`);
 
-  if (taggerOK) {
-    const tryRating = await req(`/api/photos/${idA}`, { method: "PATCH", token: taggerT, body: { rating: "general" } });
-    check("整理模式不能直接改分级（400）", tryRating.status === 400, `HTTP ${tryRating.status} ${(tryRating.data && tryRating.data.error) || ""}`);
+  const rawAnon = await fetch(`${BASE}/api/photos/${idA}/raw`);
+  check("未带凭证看不到 R18 原图（401）", rawAnon.status === 401, `HTTP ${rawAnon.status}`);
 
-    const tryTag = await req(`/api/photos/${idA}`, { method: "PATCH", token: taggerT, body: { tags: ["r18"] } });
-    check("整理模式不能借标签设置分级（400）", tryTag.status === 400, `HTTP ${tryTag.status}`);
+  const rawA = await fetch(`${BASE}/api/photos/${idA}/raw`, { headers: { "X-Auth-Token": adminT } });
+  check("管理员能看 R18 原图（200）", rawA.status === 200, `HTTP ${rawA.status}`);
 
-    // 核心回归：整理角色给 R18 图加普通标签，分级不能被解锁
-    const okPatch = await req(`/api/photos/${idA}`, { method: "PATCH", token: taggerT, body: { tags: ["守卫测试标签", "整理打的标签"] } });
-    check("整理模式正常打标签仍放行", okPatch.status === 200 && (okPatch.data.photo.tags || []).includes("整理打的标签"), `HTTP ${okPatch.status}`);
-    const afterPatch = await req(`/api/photos/${idA}`, { token: adminT });
-    check("打标签不会改变分级（R18 仍是 R18）", !!afterPatch.data && afterPatch.data.photo.rating === "r18", `rating=${afterPatch.data && afterPatch.data.photo && afterPatch.data.photo.rating}`);
-
-    const listT = await req("/api/photos?limit=100", { token: taggerT });
-    check("整理角色的列表里没有非大众级图片", !!listT.data && !(listT.data.photos || []).some((p) => (p.rating || "general") !== "general"),
-      `返回 ${((listT.data && listT.data.photos) || []).length} 张`);
-
-    const rawT = await fetch(`${BASE}/api/photos/${idA}/raw`, { headers: { "X-Auth-Token": taggerT } });
-    check("整理角色看不到 R18 原图（401）", rawT.status === 401, `HTTP ${rawT.status}`);
-
-    const rawA = await fetch(`${BASE}/api/photos/${idA}/raw`, { headers: { "X-Auth-Token": adminT } });
-    check("管理员能看 R18 原图（200）", rawA.status === 200, `HTTP ${rawA.status}`);
-  }
+  const patchAnon = await req(`/api/photos/${idA}`, { method: "PATCH", body: { tags: ["x"] } });
+  check("未带凭证不能写照片（401）", patchAnon.status === 401, `HTTP ${patchAnon.status}`);
 
   /* ---------- 4. safe=1（观光视角） ---------- */
   const safe = await req("/api/photos?limit=100&safe=1", { token: adminT });
@@ -171,13 +156,12 @@ const hasR18Tag = (photo) => (photo.tags || []).some((t) => ["r18", "r16"].inclu
   /* ---------- 7. 收尾 ---------- */
   await req(`/api/photos/${idA}`, { method: "DELETE", token: adminT });
   await req(`/api/photos/${idB}`, { method: "DELETE", token: adminT });
-  await req("/api/auth/tagger", { method: "POST", token: adminT, body: { taggerKey: "" } }); // 清除整理密码
   const cfg3 = await req("/api/tags", { token: adminT });
   await req("/api/tags", {
     method: "PUT", token: adminT,
     body: { categories: cfg3.data.categories, groups: cfg3.data.groups, tags: (cfg3.data.tags || []).filter((t) => !/^守卫测试/.test(t.name)) },
   });
-  console.log("› 已收尾：删测试图 / 清整理密码 / 清守卫测试标签");
+  console.log("› 已收尾：删测试图 / 清守卫测试标签");
 
   console.log(`\n${failed === 0 ? "✓ 全部通过" : "✗ 有失败项"}（共 ${results.length} 项，失败 ${failed}）\n`);
   process.exit(failed === 0 ? 0 : 1);

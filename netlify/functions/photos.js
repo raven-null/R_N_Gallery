@@ -187,21 +187,15 @@ exports.default = async (req) => {
     if (method === "POST" && path.endsWith("/api/auth/login")) return authLogin(req);
 
     /* ---- 其余端点默认都需要密码（未设置密码时自动放行）----
-       role：admin = 访问密码（全部权限）；tagger = 整理密码（只能看图 + 给照片打标签）
-       v0.49 观光模式：既没密码也没整理密码时，仍放行「只读 + 已做安全过滤」的请求 */
+       role：admin = 持访问密码（全部权限）；null = 无凭证
+       v0.49 观光模式：无凭证时仍放行「只读 + 已做安全过滤」的请求
+       v0.59：整理模式（tagger 角色 / 整理密码）已整体移除，只剩管理员与观光两种模式 */
     const auth = await checkAuth(req, url);
     const role = auth.ok ? auth.role : null;
     const guest = !auth.ok && guestReadOK(method, path, url, rest);
     if (!auth.ok && !guest) return unauthorized("需要访问密码，或密码已失效");
-    // 整理模式：只允许读取 + 修改单张照片的标签 / 主分类，其余管理操作一律拒绝
-    if (role === "tagger") {
-      const isPatchPhoto = method === "PATCH" && path.startsWith("/api/photos/") && rest.length === 1;
-      if (method !== "GET" && !isPatchPhoto) return unauthorized("整理模式只能给图片添加标签");
-    }
 
-    if (method === "POST" && path.endsWith("/api/auth/tagger")) return authTagger(req, role); // v0.51 设置整理密码（仅管理员）
-
-    if (method === "GET" && path.endsWith("/api/photos")) return list(url, role);
+    if (method === "GET" && path.endsWith("/api/photos")) return list(url);
     if (method === "GET" && path.endsWith("/api/tags")) return tagsGet();
     if (method === "PUT" && path.endsWith("/api/tags")) return tagsPut(req);
     if (method === "POST" && path.endsWith("/api/tags/rename")) return tagsRename(req);
@@ -223,7 +217,7 @@ exports.default = async (req) => {
     if (method === "POST" && path.endsWith("/api/photos")) return upload(req);
     if (method === "POST" && path.endsWith("/api/photos/reindex-dhash")) return reindexDHash(req); // v0.21 补算感知哈希
     if (method === "POST" && path.endsWith("/api/photos/reindex")) return reindexIndex(req); // v0.24 重建列表索引
-    if (method === "PATCH" && path.startsWith("/api/photos/") && rest.length === 1) return patch(req, rest[0], role);
+    if (method === "PATCH" && path.startsWith("/api/photos/") && rest.length === 1) return patch(req, rest[0]);
     if (method === "DELETE" && path.endsWith("/api/photos")) return clearAll(req);
     if (method === "DELETE" && path.startsWith("/api/photos/") && rest.length === 1) return remove(req, rest[0]);
     if (method === "POST" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "image") return replaceImage(req, rest[0]);
@@ -259,48 +253,28 @@ exports.config = {
     "/api/meta/logs",
     "/api/auth/state",
     "/api/auth/login",
-    "/api/auth/tagger", // v0.51：设置整理模式密码（漏加这个会让请求直接 404）
   ],
 };
 
 /* ============================================================
-   访问控制（v0.16）
+   访问控制（v0.16；v0.59 移除整理模式，只剩管理员 / 观光）
    ============================================================ */
 async function authState() {
   const cfg = await authConfig();
-  return json({ gate: !!cfg.accessHash, hasTagger: !!cfg.taggerHash });
+  return json({ gate: !!cfg.accessHash });
 }
 
-/* 登录：一次输入，服务端判断是管理员还是整理角色 */
+/* 登录：一次输入，服务端判断是不是管理员 */
 async function authLogin(req) {
   const body = await req.json().catch(() => ({}));
   const cfg = await authConfig();
-  if (!cfg.accessHash && !cfg.taggerHash) return json({ ok: true, gate: false, role: "admin" }); // 未设置密码：直接通过
+  if (!cfg.accessHash) return json({ ok: true, gate: false, role: "admin" }); // 未设置密码：直接通过
   const t = String(body.token || "").trim();
   if (t && cfg.accessHash && sha256hex(t) === cfg.accessHash) return json({ ok: true, gate: true, role: "admin" });
-  if (t && cfg.taggerHash && sha256hex(t) === cfg.taggerHash) return json({ ok: true, gate: true, role: "tagger" });
   return unauthorized("密码错误");
 }
 
-/* 设置 / 清除整理模式密码（v0.51；只有管理员能改，taggerKey 传空串即清除） */
-async function authTagger(req, role) {
-  if (role !== "admin") return unauthorized("只有管理员能设置整理密码");
-  const body = await req.json().catch(() => ({}));
-  const k = String(body.taggerKey || "").trim();
-  const cfg = await authConfig();
-  if (!k) {
-    delete cfg.taggerHash;
-    await saveAuthConfig(cfg);
-    await logAction(req, "清除整理模式密码", "");
-    return json({ ok: true, hasTagger: false });
-  }
-  if (k.length < 4) return badRequest("整理密码至少 4 位");
-  if (cfg.accessHash && sha256hex(k) === cfg.accessHash) return badRequest("整理密码不能与访问密码相同");
-  cfg.taggerHash = sha256hex(k);
-  await saveAuthConfig(cfg);
-  await logAction(req, "设置整理模式密码", "");
-  return json({ ok: true, hasTagger: true });
-}
+/* v0.59：设置 / 清除整理模式密码的接口（POST /api/auth/tagger）已随整理模式一起删除 */
 
 /* v0.50：修改访问密码 / 设置 R18 密钥的接口已删除 ——
    访问密码只能通过 Netlify 环境变量 ADMIN_TOKEN + 清空 auth-config 重新初始化 */
@@ -521,12 +495,12 @@ async function indexHeal(s) {
    观光 / 整理模式：必须「分页前过滤」成人向，否则能靠翻页反推数量 ——
    这条路径读全量索引后在内存里过滤分页（cursor 是数字偏移）。
    两种模式的 cursor 语义不同，但前端切换模式时会从头重新加载，不会混用。 */
-async function list(url, role) {
+async function list(url) {
   const q = url.searchParams;
   const limit = Math.min(parseInt(q.get("limit"), 10) || 60, 500);
   const s = store();
   const healed = await indexHeal(s); // v0.54：老库首次访问自动重建索引
-  const hideAdult = safeMode(q) || role === "tagger"; // v0.51：整理模式同样看不到成人向
+  const hideAdult = safeMode(q); // 观光模式（safe=1）：分页前剔除成人向
   let photos;
   let cursor = null;
   let total;
@@ -796,7 +770,7 @@ async function upload(req) {
 }
 
 /* ---------- 更新元数据 ---------- */
-async function patch(req, id, role) {
+async function patch(req, id) {
   let body;
   try {
     body = await req.json();
@@ -811,22 +785,7 @@ async function patch(req, id, role) {
   if (!RATINGS.includes(String(meta.rating || "").trim().toLowerCase())) meta.rating = ratingOf(meta);
   delete meta.r18;
   delete meta.r16;
-  // v0.51 整理模式：只能改标签与主分类（其余字段一律忽略，防止越权改名 / 标分级）
-  // v0.57：分级已与标签解耦 —— tagger 改不动 rating（body 被裁掉），
-  //        而且 tags / categories 里一旦出现 r18 / r16 会折算分级，所以这两类保留名直接拒绝
-  if (role === "tagger") {
-    if (body.tags === undefined && body.categories === undefined && body.category === undefined) {
-      return badRequest("整理模式只能添加标签或设置主分类");
-    }
-    body = { tags: body.tags, categories: body.categories, category: body.category };
-    if (body.tags !== undefined && sanitizeTags(body.tags).some(isReservedName)) {
-      return badRequest("整理模式不能设置分级（r18 / r16 是分级档位，不是标签）");
-    }
-    if ((body.categories !== undefined || body.category !== undefined)
-      && sanitizeCats(body.categories !== undefined ? body.categories : body.category).some(isReservedName)) {
-      return badRequest("整理模式不能设置分级（r18 / r16 是分级档位，不是主分类）");
-    }
-  }
+  // v0.59：整理模式已移除，PATCH 的 role 只剩 admin（观光模式连写操作都进不来）
   if (body.title !== undefined) meta.title = String(body.title).trim() || "未命名";
   // v0.41：描述（desc）字段已整体移除，不再接受写入
   if (body.tags !== undefined) {
@@ -849,8 +808,7 @@ async function patch(req, id, role) {
     // 兼容旧调用方：r18: true → R18，false → 大众级
     meta.rating = (body.r18 === true || body.r18 === "true" || body.r18 === 1) ? "r18" : "general";
   }
-  // v0.56 收藏夹：照片上的标记。整理模式的 body 上面已被裁剪成 tags/categories，
-  // 所以整理角色改不动收藏（只有管理员能收藏）——这正是想要的边界
+  // v0.56 收藏夹：照片上的标记（只有管理员能写 —— 观光模式的写请求根本进不来）
   if (body.fav !== undefined) meta.fav = body.fav === true || body.fav === "true" || body.fav === 1;
   if (body.takenAt !== undefined) meta.takenAt = body.takenAt;
   await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));

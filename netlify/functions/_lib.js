@@ -230,20 +230,16 @@ function tokenFrom(req, url) {
 }
 
 /* 返回 { ok, gate, role }：
-   role = "admin"（持访问密码，全部权限）/ "tagger"（持整理密码，只能看图 + 给照片打标签）
-   gate 表示是否启用了门禁（以访问密码为准） */
+   role = "admin"（持访问密码，全部权限）/ null（无凭证 → 走观光只读白名单）
+   gate 表示是否启用了门禁（以访问密码为准）
+   v0.59：整理模式（tagger 角色 / 整理密码）整块删除 —— 只剩管理员与观光两种模式。
+   存量 auth-config 里可能还留着 taggerHash 字段，这里不再读取，等于自动失效。 */
 async function checkAuth(req, url) {
   const cfg = await authConfig();
   const t = tokenFrom(req, url);
   const hitAdmin = !!cfg.accessHash && !!t && sha256hex(t) === cfg.accessHash;
-  const hitTagger = !!cfg.taggerHash && !!t && sha256hex(t) === cfg.taggerHash;
-  if (!cfg.accessHash) {
-    // 未设访问密码：门禁关闭；但若带了整理密码，仍然按整理角色对待（前端据此进入整理模式）
-    if (hitTagger) return { ok: true, gate: false, role: "tagger" };
-    return { ok: true, gate: false, role: "admin" };
-  }
+  if (!cfg.accessHash) return { ok: true, gate: false, role: "admin" }; // 未设访问密码：门禁关闭
   if (hitAdmin) return { ok: true, gate: true, role: "admin" };
-  if (hitTagger) return { ok: true, gate: true, role: "tagger" };
   return { ok: false, gate: true, role: null };
 }
 
