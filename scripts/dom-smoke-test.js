@@ -446,6 +446,14 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     const totalN = window.__galleryState ? window.__galleryState().filtered : -1;
     const slabs = [...doc.querySelectorAll("#grid .loop-slab")];
     check("循环模式渲染两份复本（首尾无缝的前提）", slabs.length === 2, `${slabs.length} 份`);
+    check("外层 grid 切到分列模式（不再用 CSS columns）", doc.getElementById("grid").classList.contains("looping"));
+    const cols0 = slabs[0] ? [...slabs[0].querySelectorAll(".loop-col")] : [];
+    const cols1 = slabs[1] ? [...slabs[1].querySelectorAll(".loop-col")] : [];
+    check("循环模式按列容器分列", cols0.length > 0, `${cols0.length} 列`);
+    check("两份的列结构完全一致（无缝平移的前提）",
+      cols0.length > 0 && cols0.length === cols1.length
+        && cols0.every((c, i) => c.querySelectorAll(".card").length === cols1[i].querySelectorAll(".card").length),
+      `${cols0.map((c) => c.querySelectorAll(".card").length).join("/")} vs ${cols1.map((c) => c.querySelectorAll(".card").length).join("/")}`);
     const perSlab = slabs[0] ? slabs[0].querySelectorAll(".card").length : 0;
     check("瀑布流下每份都渲染全部结果", perSlab === Math.min(totalN, 600), `每份 ${perSlab} / 共 ${totalN}`);
     check("两份内容完全一致", !!slabs[1] && slabs[1].querySelectorAll(".card").length === perSlab,
@@ -504,6 +512,63 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await dbl();
     check("再双击关闭循环滚动", inf().wanted === false, JSON.stringify(inf()));
     check("关闭后主按钮取消点亮", !fabMain.classList.contains("inf"));
+  }
+
+  /* v0.65：批量条上的「⚑ 分级」—— 给选中的多张一次性设置分级 */
+  {
+    const btnRating = doc.getElementById("batchRating");
+    check("批量条有「分级」按钮", !!btnRating);
+    if (btnRating) {
+      const headers = TOKEN ? { "X-Auth-Token": TOKEN } : {};
+      doc.getElementById("fabSelectBtn").click();
+      await wait(250);
+      const cards = [...doc.querySelectorAll("#grid .card")].slice(0, 2);
+      const ids = cards.map((c) => c.dataset.id);
+      // 记下原分级：测完按原值还原，别把 seed 的 R16 / R18 洗成大众级
+      const origRatings = [];
+      for (const id of ids) {
+        const d = await (await fetch(`${BASE}/api/photos/${id}?_=${Math.random()}`, { headers })).json();
+        origRatings.push((d.photo && d.photo.rating) || "general");
+      }
+      for (const c of cards) clickEl(c);
+      await wait(250);
+      const selN = window.__selectionState ? window.__selectionState().ids.length : -1;
+      check("已选中 2 张", selN === 2, `${selN} 张`);
+
+      clickEl(btnRating);
+      await wait(300);
+      const modal = doc.getElementById("batchRatingModal");
+      check("点「分级」打开档位选择", !!modal && modal.classList.contains("open"));
+      check("弹窗里有三个档位", doc.querySelectorAll("#btRatingPicks .rating-pick").length === 3);
+
+      const pick18 = doc.querySelector('#btRatingPicks .rating-pick[data-rating="r18"]');
+      if (pick18) {
+        clickEl(pick18);
+        await wait(1500);
+        const states = [];
+        for (const id of ids) {
+          const d = await (await fetch(`${BASE}/api/photos/${id}?_=${Math.random()}`, { headers })).json();
+          states.push(d.photo && d.photo.rating);
+        }
+        check("选中的图片都被设为 R18", states.length === 2 && states.every((r) => r === "r18"), JSON.stringify(states));
+        check("应用后弹窗自动关闭", !!modal && !modal.classList.contains("open"));
+
+        // 按原值还原
+        for (let i = 0; i < ids.length; i++) {
+          await fetch(`${BASE}/api/photos/${ids[i]}`, {
+            method: "PATCH",
+            headers: Object.assign({ "Content-Type": "application/json" }, headers),
+            body: JSON.stringify({ rating: origRatings[i] }),
+          });
+        }
+        await wait(250);
+        if (window.__reloadData) await window.__reloadData();
+        if (window.__refreshGallery) window.__refreshGallery();
+        await wait(400);
+      }
+      window.__exitSelectMode && window.__exitSelectMode();
+      await wait(300);
+    }
   }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));

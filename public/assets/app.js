@@ -2386,8 +2386,7 @@ function initGallery() {
     }).join("");
   }
 
-  function cardHTML(p) {
-    // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
+  function cardHTML(p) {    // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
     // 老数据缺尺寸时不写，退回原来的自然高度
     const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";
     const favorite = favOf(p);
@@ -2401,6 +2400,33 @@ function initGallery() {
         <p class="card__meta">${fmtDate(p.takenAt)} · ${fmtSize(p.size)}</p>
       </div>
     </div>`;
+  }
+
+  /* v0.65：循环模式的分列 —— 按「最短列优先」把卡片分进 colCount 列。
+     用估算高度（列宽 × 图片高宽比）而不是实际测量，原因有两个：
+     ① 两份内容走同一个算法，列结构必然完全一致 —— 这是"两份高度相同"的前提，也是无缝平移的基础；
+     ② 不依赖图片是否已解码，不会出现"加载前分错列 → 加载后留下大片空白"。 */
+  function colWidthPx() {
+    try {
+      const v = getComputedStyle(document.documentElement).getPropertyValue("--col-w").trim();
+      const n = parseInt(v, 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    } catch (e) { /* ignore */ }
+    return 240;
+  }
+  function loopSlabHTML(list, colW, colCount) {
+    const heights = new Array(colCount).fill(0);
+    const buckets = Array.from({ length: colCount }, () => []);
+    for (const p of list) {
+      const ratio = (p.width > 0 && p.height > 0) ? (p.height / p.width) : 1.4;
+      const h = colW * ratio + 18; // 卡片高度 + margin-bottom
+      let idx = 0;
+      for (let i = 1; i < colCount; i++) if (heights[i] < heights[idx]) idx = i;
+      buckets[idx].push(p);
+      heights[idx] += h;
+    }
+    return `<div class="loop-row">` + buckets.map((b) =>
+      `<div class="loop-col" style="width:${colW}px">${b.map(cardHTML).join("")}</div>`).join("") + `</div>`;
   }
 
   function updateLoadMore() {
@@ -2441,13 +2467,20 @@ function initGallery() {
     }
     showGalleryState(null);
     /* v0.64：循环滚动要"无感"，不能靠瞬移回顶部（那一下跳变肉眼可见）。
-       做法是**首尾复本 + 滚动位置平移**：把整份内容渲染两次、各自成为一个瀑布流容器上下堆叠；
-       一旦滚进第二份，就把 scrollTop 减掉「一份的高度」——因为第二份内容与第一份逐像素一致，
-       平移后画面完全相同，用户看不到任何跳变，只觉得可以一直往下滚。 */
+       做法是**首尾复本 + 滚动位置平移**：把整份内容渲染两次、上下堆叠；
+       一旦滚进第二份，就把 scrollTop 减掉「一份的高度」——因为第二份与第一份逐像素一致，
+       平移后画面完全相同，用户看不到任何跳变，只觉得可以一直往下滚。
+       v0.65：分列改用 JS —— CSS `columns` 做不了这件事：它既给不出「一份的高度」，
+       两份内容还会被灌进同一批列里互相交错；而按「最短列优先」分配后，两份用同样的算法
+       得到完全相同的列结构，高度天然一致，也不会出现某些列尾巴空一大块的问题。 */
     const looping = infiniteActive();
     grid.classList.toggle("looping", looping);
     if (looping) {
-      const one = itemsHTML(slice, null, filtered);
+      const colW = colWidthPx();
+      const gap = 16;
+      const avail = grid.clientWidth || (colW * 4);
+      const colCount = Math.max(1, Math.floor((avail + gap) / (colW + gap)));
+      const one = loopSlabHTML(slice, colW, colCount);
       grid.innerHTML = `<div class="loop-slab">${one}</div><div class="loop-slab">${one}</div>`;
     } else {
       grid.innerHTML = itemsHTML(slice, null, filtered);
@@ -2472,6 +2505,19 @@ function initGallery() {
   }
   window.__renderGallery = () => render();
   window.__renderGallerySilent = () => render({ skipReveal: true }); // v0.62：不播入场动画的重渲染
+
+  /* v0.65：循环模式的列数是 JS 算出来的，窗口尺寸变化会改变列数 → 重排一次并尽量守住滚动位置 */
+  let loopResizeT = null;
+  window.addEventListener("resize", () => {
+    if (!infiniteActive()) return;
+    clearTimeout(loopResizeT);
+    loopResizeT = setTimeout(() => {
+      const y = window.scrollY;
+      if (window.__renderGallerySilent) window.__renderGallerySilent();
+      else if (window.__renderGallery) window.__renderGallery();
+      try { window.scrollTo({ top: y, behavior: "instant" }); } catch (e) { window.scrollTo(0, y); }
+    }, 250);
+  }, { passive: true });
   // v0.24：后台补齐照片后，把新数据纳入当前筛选；显示数量不多时直接重建列表（保留已显示张数）
   window.__photosGrown = () => {
     renderTagMenuContent();
@@ -3501,6 +3547,65 @@ window.__albumsState = () => ({
 window.__setPhotoIds = setPhotoIds; // 集合派生规则（测试 / 调试用）
 window.__openAlbumPage = openAlbumPage;
 window.__closeAlbumPage = closeAlbumPage;
+
+/* v0.65：批量设置分级（批量条上的「⚑ 分级」）—— 逐张 PATCH，本地同步后重绘 */
+async function applyBatchRating(rating) {
+  const ids = [...selected];
+  if (!ids.length) return 0;
+  const v = normRating(rating);
+  let ok = 0;
+  let bad = 0;
+  for (const id of ids) {
+    try {
+      await apiFetch(`/api/photos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating: v }),
+      });
+      const p = PHOTOS.find((x) => x.id === id);
+      if (p) p.rating = v; // 本地同步，免得整页重拉
+      ok++;
+    } catch (e) { bad++; }
+  }
+  const modal = document.getElementById("batchRatingModal");
+  if (modal) modal.classList.remove("open");
+  if (window.__refreshGallery) window.__refreshGallery();
+  if (typeof renderTagMenuContent === "function") renderTagMenuContent(); // 筛选菜单里的分级计数
+  const cnt = document.getElementById("batchCount");
+  if (cnt) {
+    cnt.textContent = bad
+      ? `已设 ${ok} 张为 ${RATING_LABEL[v]}（${bad} 张失败）`
+      : `已设 ${ok} 张为 ${RATING_LABEL[v]}`;
+  }
+  return ok;
+}
+function initBatchRating() {
+  const btn = document.getElementById("batchRating");
+  const modal = document.getElementById("batchRatingModal");
+  if (!btn || !modal || btn.dataset.bound === "1") return;
+  btn.dataset.bound = "1";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!selected.size) return;
+    if (guestBlocked("设置分级")) return;
+    const hint = document.getElementById("batchRatingHint");
+    if (hint) hint.textContent = `当前选中 ${selected.size} 张 · 点一个档位立即应用`;
+    [...document.querySelectorAll("#btRatingPicks .rating-pick")].forEach((b) => b.classList.remove("on"));
+    modal.classList.add("open");
+  });
+  const cancel = document.getElementById("btRatingCancel");
+  if (cancel) cancel.addEventListener("click", () => modal.classList.remove("open"));
+  const picks = document.getElementById("btRatingPicks");
+  if (picks) {
+    picks.addEventListener("click", (e) => {
+      const pick = e.target.closest(".rating-pick");
+      if (!pick) return;
+      pick.classList.add("on");
+      applyBatchRating(pick.dataset.rating);
+    });
+  }
+}
+window.__applyBatchRating = applyBatchRating;
 
 /* v0.56：批量条上的「♥ 收藏」（原「＋ 入相册」的位置） */
 function initBatchFav() {
@@ -5370,6 +5475,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initUqModal();
   initImportUrl();
   initBatchFav();
+  initBatchRating(); // v0.65：批量设置分级
   initAlbumPage(); // v0.34：相册整页（FAB 相册按钮 / 右边缘左滑进入）
   initLogsUI();
   initLang();

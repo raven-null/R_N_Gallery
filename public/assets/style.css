@@ -2424,13 +2424,15 @@ input.settings-value:focus {
 .masonry { columns: var(--col-w, 240px); }
 
 /* ============================================================
-   循环滚动（v0.64）：两份内容各自是独立的瀑布流容器，上下紧贴堆叠
-   —— 外层的 columns 必须关掉，否则两份会被 CSS 连续灌进同一批列里、分不清边界，
-      也就没法把"一份的高度"当作平移量。而首尾无缝正是靠这个平移量。
-   padding-bottom 补齐最后一张卡片的 margin，让两份高度严格同构。
+   循环滚动（v0.64；v0.65 改为 JS 分列）
+   两份内容上下紧贴堆叠；每份内部由 JS 按「最短列优先」分进若干 .loop-col。
+   之所以不用 CSS `columns`：它既给不出「一份的高度」，两份内容还会被连续灌进同一批列里
+   互相交错 —— 而且列平衡受 break-inside 影响时会留下大片空白。
    ============================================================ */
-.masonry.looping { columns: unset; }
-.masonry.looping .loop-slab { columns: var(--col-w, 240px); padding-bottom: 18px; }
+.masonry.looping { columns: unset; display: block; }
+.masonry.looping .loop-slab { padding-bottom: 18px; } /* 吸收最后一张卡片的 margin，两份严格同构 */
+.masonry.looping .loop-row { display: flex; gap: 16px; align-items: flex-start; }
+.masonry.looping .loop-col { flex: 0 0 auto; min-width: 0; }
 html[data-cols="narrow"] { --col-w: 180px; }
 html[data-cols="wide"] { --col-w: 320px; }
 
@@ -2564,6 +2566,12 @@ body.select-mode .card .pick { display: grid; }
   color: var(--text-dim);
   padding: 0 4px;
   white-space: nowrap;
+}
+/* v0.65：批量条多了「分级」按钮，窄屏收紧间距避免溢出 */
+.batch-bar { max-width: calc(100vw - 20px); }
+@media (max-width: 560px) {
+  .batch-bar { gap: 5px; padding: 8px 10px; }
+  .batch-bar .btn { font-size: 12px; padding-left: 9px; padding-right: 9px; }
 }
 [data-theme="light"] .batch-bar {
   background: linear-gradient(160deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.82) 100%);
