@@ -3675,7 +3675,7 @@ const I18N_DICT = {
   "图片加载": "Image Quality", "高画质": "High", "平衡": "Balanced", "省流": "Low Data", "语言": "Language",
   "图片数量": "Photos", "已用空间": "Used Space",
   "导出元数据": "Export Metadata", "操作日志": "Activity Log", "清空整个图库": "Erase Library",
-  "返回图库": "Back", "上传": "Upload",
+  "返回": "Back", "上传": "Upload",
   "打开搜索窗口": "Open search window", "灯箱中切换上一张 / 下一张": "Prev / next in lightbox",
   "关闭灯箱 / 弹窗 / 悬浮菜单": "Close lightbox / dialogs / menus",
   "幻灯片间隔": "Slideshow interval", "灯箱中开始 / 暂停幻灯片放映": "Start / pause slideshow in lightbox",
