@@ -54,9 +54,10 @@ let filterNegMode = false;            // 菜单处于「排除」模式：接下
 const SAVED_KEY = "rn_saved_filters"; // 「我的筛选」收藏（v0.55）
 const collapsedGroups = new Set(); // 筛选菜单中折叠的组 id
 
-/* ---------- 排序 / 批量选择（v0.11.2；收藏功能已在 v0.35 移除，改用「加入相册」） ---------- */
+/* ---------- 排序 / 批量选择（v0.11.2；v0.74 重做：三种模式 + 方向切换） ---------- */
 const SORT_KEY = "rn_sort";
-let SORT_MODE = "newest"; // newest | oldest | title | size
+let SORT_MODE = "time"; // time | size | tag
+let SORT_DESC = true;   // time/size: true=降序；tag: true=主分类在前, false=标签在前
 let selectMode = false;
 /* v0.60：长按卡片激活多选（移动端手势）—— 状态
    · 按住 LP_MS 且没挪动超过 LP_SLOP → 进入多选并选中这张
@@ -76,9 +77,17 @@ const photoTimeOf = (p) => String((p && (p.takenAt || p.uploadedAt)) || "");
 
 function sortPhotos(list) {
   const out = [...list];
-  if (SORT_MODE === "oldest") out.sort((a, b) => photoTimeOf(a).localeCompare(photoTimeOf(b)));
-  else if (SORT_MODE === "size") out.sort((a, b) => (b.size || 0) - (a.size || 0));
-  else out.sort((a, b) => photoTimeOf(b).localeCompare(photoTimeOf(a)));
+  if (SORT_MODE === "size") {
+    out.sort((a, b) => SORT_DESC ? (b.size || 0) - (a.size || 0) : (a.size || 0) - (b.size || 0));
+  } else if (SORT_MODE === "tag") {
+    // v0.74：SORT_DESC=true → 有主分类的在前；false → 有标签的在前
+    const rank = (p) => (SORT_DESC ? (catsOf(p).length ? 1 : 0) : ((p.tags && p.tags.length) ? 1 : 0));
+    out.sort((a, b) => rank(b) - rank(a));
+  } else {
+    out.sort((a, b) => SORT_DESC
+      ? photoTimeOf(b).localeCompare(photoTimeOf(a))
+      : photoTimeOf(a).localeCompare(photoTimeOf(b)));
+  }
   return out;
 }
 
@@ -2366,7 +2375,7 @@ function initGallery() {
     return `${y} 年 ${m} 月 ${d} 日`;
   }
   function groupingByDay() {
-    return typeof layoutMode === "function" && layoutMode() === "square" && (SORT_MODE === "newest" || SORT_MODE === "oldest");
+    return typeof layoutMode === "function" && layoutMode() === "square" && SORT_MODE === "time";
   }
   /* 生成「日期分组头 + 卡片」序列；prevKey 传上一段最后一天，追加时分段不会断开 */
   function itemsHTML(list, prevKey, allForCount) {
@@ -3410,7 +3419,7 @@ function initEditModal() {
   document.getElementById("btOk").addEventListener("click", applyBatchTag);
 }
 
-/* ---------- 排序菜单（v0.11.2） ---------- */
+/* ---------- 排序菜单（v0.11.2；v0.74 重做：三种模式 + 点击/滚轮切换方向） ---------- */
 function initSortMenu() {
   const btn = document.getElementById("fabSortBtn");
   const menu = document.getElementById("sortMenu");
@@ -3418,19 +3427,56 @@ function initSortMenu() {
   const flyout = initFlyout(btn, menu);
   const items = menu.querySelectorAll(".page-menu-item");
   const saved = localStorage.getItem(SORT_KEY);
-  if (saved === "title") localStorage.removeItem(SORT_KEY); // 标题排序已移除（v0.13.1）
-  if (saved) SORT_MODE = saved;
-  const apply = (mode) => {
+  // 迁移旧值：newest→time|desc，oldest→time|asc，size→size|desc
+  if (saved === "newest") { SORT_MODE = "time"; SORT_DESC = true; }
+  else if (saved === "oldest") { SORT_MODE = "time"; SORT_DESC = false; }
+  else if (saved === "size") { SORT_MODE = "size"; SORT_DESC = true; }
+  else if (saved === "title") { localStorage.removeItem(SORT_KEY); }
+  else if (saved && saved.includes("|")) {
+    const [m, d] = saved.split("|");
+    if (["time", "size", "tag"].includes(m)) { SORT_MODE = m; SORT_DESC = d !== "asc"; }
+  }
+
+  const LABELS = {
+    time: () => [t("最新在前", "Newest first"), t("最早在前", "Oldest first")],
+    size: () => [t("大文件在前", "Largest first"), t("小文件在前", "Smallest first")],
+    tag: () => [t("主分类在前", "Categorized first"), t("标签在前", "Tagged first")],
+  };
+
+  function refreshUI() {
+    items.forEach((it) => {
+      const mode = it.dataset.sort;
+      const active = mode === SORT_MODE;
+      it.classList.toggle("on", active);
+      const lbl = it.querySelector(".sort-label");
+      if (!lbl || !LABELS[mode]) return;
+      const desc = active ? SORT_DESC : true; // 未选中的项展示默认方向
+      lbl.textContent = desc ? LABELS[mode]()[0] : LABELS[mode]()[1];
+    });
+  }
+
+  function apply(mode, desc) {
     SORT_MODE = mode;
-    localStorage.setItem(SORT_KEY, mode);
-    items.forEach((it) => it.classList.toggle("on", it.dataset.sort === mode));
+    SORT_DESC = desc;
+    localStorage.setItem(SORT_KEY, `${mode}|${desc ? "desc" : "asc"}`);
+    refreshUI();
     if (window.__applyFilter) window.__applyFilter();
     flyout.close();
-  };
+  }
+
   items.forEach((it) => {
-    it.classList.toggle("on", it.dataset.sort === SORT_MODE);
-    it.addEventListener("click", () => apply(it.dataset.sort));
+    const mode = it.dataset.sort;
+    it.addEventListener("click", () => {
+      if (mode === SORT_MODE) apply(mode, !SORT_DESC); // 已选中 → 切换方向
+      else apply(mode, true);                          // 未选中 → 选中并用默认方向
+    });
+    it.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      if (mode === SORT_MODE) apply(mode, !SORT_DESC);
+      else apply(mode, true);
+    }, { passive: false });
   });
+  refreshUI();
 }
 
 
@@ -3833,7 +3879,9 @@ const I18N_DICT = {
   "取消": "Cancel", "关闭": "Close", "保存": "Save", "应用": "Apply", "删除": "Delete", "确认": "Confirm",
   "确认删除": "Delete", "清空": "Clear", "清空日志": "Clear logs",
   "加标签": "Add Tags", "入相册": "Add to Album", "全部": "All",
-  "最新上传": "Newest", "最早上传": "Oldest", "标题 A–Z": "Title A–Z", "文件大小": "Size",
+  "最新在前": "Newest first", "最早在前": "Oldest first",
+  "大文件在前": "Largest first", "小文件在前": "Smallest first",
+  "主分类在前": "Categorized first", "标签在前": "Tagged first",
   "标题": "Title", "标签": "Tags",
   "加入相册": "Add to Album", "新建相册名称…": "New album name…", "＋ 新建并加入": "Create & add",
   "编辑待上传项": "Edit upload item", "编辑图片信息": "Edit photo",

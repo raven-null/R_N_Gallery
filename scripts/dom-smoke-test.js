@@ -733,6 +733,47 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       await wait(250);
     }
   }
+
+  /* v0.74：排序菜单重做 —— 三种模式（time/size/tag）+ 点击切换方向 */
+  {
+    const sortBtn = doc.getElementById("fabSortBtn");
+    const sortMenu = doc.getElementById("sortMenu");
+    if (sortBtn && sortMenu) {
+      const items = [...sortMenu.querySelectorAll(".page-menu-item")];
+      check("排序菜单有 3 项（time/size/tag）", items.length === 3 && items.every((i) => ["time", "size", "tag"].includes(i.dataset.sort)),
+        items.map((i) => i.dataset.sort).join(","));
+      const timeItem = items.find((i) => i.dataset.sort === "time");
+      const sizeItem = items.find((i) => i.dataset.sort === "size");
+      const tagItem = items.find((i) => i.dataset.sort === "tag");
+      // 初始：time 选中、降序
+      check("默认选中时间排序（降序）", timeItem.classList.contains("on"));
+      // 再点 time → 切换为升序
+      timeItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(80);
+      check("再点时间切换为升序（localStorage time|asc）", window.localStorage.getItem("rn_sort") === "time|asc", window.localStorage.getItem("rn_sort") || "(空)");
+      // 点 size → 选中且默认降序
+      sizeItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(80);
+      check("点大小选中且默认降序（size|desc）", sizeItem.classList.contains("on") && !timeItem.classList.contains("on") && window.localStorage.getItem("rn_sort") === "size|desc", window.localStorage.getItem("rn_sort") || "(空)");
+      // 再点 size → 升序
+      sizeItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(80);
+      check("再点大小切换为升序（size|asc）", window.localStorage.getItem("rn_sort") === "size|asc", window.localStorage.getItem("rn_sort") || "(空)");
+      // 点 tag → 选中且默认主分类在前
+      tagItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(80);
+      check("点标签选中且默认主分类在前（tag|desc）", tagItem.classList.contains("on") && window.localStorage.getItem("rn_sort") === "tag|desc", window.localStorage.getItem("rn_sort") || "(空)");
+      // 再点 tag → 标签在前
+      tagItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(80);
+      check("再点标签切换为标签在前（tag|asc）", window.localStorage.getItem("rn_sort") === "tag|asc", window.localStorage.getItem("rn_sort") || "(空)");
+      // 滚轮在 time 项上 → 选中并回到降序（未选中项滚轮 = 选中默认方向）
+      timeItem.dispatchEvent(new window.WheelEvent("wheel", { bubbles: true, deltaY: 120 }));
+      await wait(80);
+      check("滚轮触发时间项选中并回到降序（time|desc）", timeItem.classList.contains("on") && window.localStorage.getItem("rn_sort") === "time|desc", window.localStorage.getItem("rn_sort") || "(空)");
+      window.localStorage.removeItem("rn_sort"); // 清理，不污染后续断言
+    }
+  }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
   check("灯箱工具条有收藏按钮（v0.56 归来）", !!doc.getElementById("lbToolFav"));
