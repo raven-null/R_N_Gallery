@@ -14,6 +14,7 @@
      --concurrency=3                 并发数（默认 3）
      --dry                           只打印计划，不上传
      --skip-existing                 已存在同内容（sha1）时跳过（默认行为，传 --no-skip-existing 关闭）
+     --exclude=a.webp,b.jpg          按相对路径或文件名排除（逗号分隔）
      --report=path                   结果写入 JSON（默认 .local-data/upload-report-<时间>.json）
 
    说明:
@@ -45,6 +46,14 @@ const CATEGORIES = flag("categories", "")
       .filter(Boolean)
   : [];
 const TITLE_MODE = String(flag("title", "stem"));
+const EXCLUDE = flag("exclude", "")
+  ? new Set(
+      String(flag("exclude", ""))
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    )
+  : new Set();
 const CONCURRENCY = Math.max(1, Number(flag("concurrency", 3)) || 3);
 const DRY = !!flag("dry", false);
 const SKIP_EXISTING = flag("no-skip-existing", false) ? false : true;
@@ -128,6 +137,11 @@ async function main() {
       const idx = cursor++;
       const file = files[idx];
       const rel = path.relative(root, file);
+      if (EXCLUDE.has(rel) || EXCLUDE.has(path.basename(file))) {
+        skipped.push({ file: rel, reason: "--exclude 排除" });
+        console.log(`  - ${rel}: 按 --exclude 排除`);
+        continue;
+      }
       const tag = tagFor(file, root);
       const tags = tag ? [TAG_PREFIX + tag] : [];
       let prep;

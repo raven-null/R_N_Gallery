@@ -2732,9 +2732,65 @@ function initGallery() {
   grid.addEventListener("mouseup", lpMouseCancel);
   grid.addEventListener("mouseleave", lpMouseCancel);
 
+  /* v0.73：按住向左拖 = 批量选择（框选划过）
+     卡片本身是可拖拽的（拖到标签组打标），所以用**方向**区分：
+     向左横拖 → 框选；其余方向 → 交给原来的拖拽打标。
+     已经在多选模式时没有拖拽用途，此时任意方向划过都可以加选。 */
+  let swipe = null;
+  let swipeRAF = 0;
+  let swipeLast = null;
+  function swipeEnd() {
+    swipe = null;
+    swipeLast = null;
+    if (swipeRAF) { cancelAnimationFrame(swipeRAF); swipeRAF = 0; }
+  }
+  grid.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (!manageAllowed()) return;
+    const card = e.target.closest(".card");
+    if (!card || !card.dataset.id) return;
+    swipe = { x: e.clientX, y: e.clientY, card, active: selectMode, leftward: false };
+  });
+  function swipeApply(x, y) {
+    const el = document.elementFromPoint ? document.elementFromPoint(x, y) : null;
+    const c = el && el.closest ? el.closest(".card") : null;
+    if (!c || !c.dataset.id || selected.has(c.dataset.id)) return;
+    selected.add(c.dataset.id);
+    c.classList.add("sel");
+    updateBatchUI();
+  }
+  window.addEventListener("mousemove", (e) => {
+    if (!swipe) return;
+    const dx = e.clientX - swipe.x;
+    const dy = e.clientY - swipe.y;
+    if (!swipe.active) {
+      if (Math.abs(dx) < 18 && Math.abs(dy) < 18) return;         // 还没挪动够，先不判定
+      const leftward = dx < -18 && Math.abs(dx) > Math.abs(dy) * 1.2;
+      if (!leftward && !swipe.leftward) { swipe = null; return; } // 不是左滑 → 让浏览器去拖拽打标
+      swipe.active = true;
+      enterSelectModeWith(swipe.card.dataset.id);                 // 起点那张先选上
+      lpFiredAt = Date.now();                                     // 抑制松手后的 click（否则会开灯箱）
+    }
+    if (!swipe.active) return;
+    swipeLast = { x: e.clientX, y: e.clientY };
+    if (swipeRAF) return;
+    swipeRAF = requestAnimationFrame(() => {                      // elementFromPoint 会强制布局，rAF 节流
+      swipeRAF = 0;
+      if (swipe && swipeLast) swipeApply(swipeLast.x, swipeLast.y);
+    });
+  }, { passive: true });
+  window.addEventListener("mouseup", swipeEnd);
+  window.addEventListener("blur", swipeEnd);
+
   /* 卡片拖拽（v0.14：拖到标签管理窗口的标签上打标） */
   grid.addEventListener("dragstart", (e) => {
     const card = e.target.closest(".card");
+    // v0.73：向左拖是"框选"，不是拖拽打标 —— 哪怕 mousemove 还没判定出来，也能从坐标看出来
+    if (swipe && (e.clientX - swipe.x) < -6) {
+      swipe.leftward = true;
+      e.preventDefault();
+      return;
+    }
     if (!card || selectMode) { e.preventDefault(); return; }
     lpMouseCancel(); // v0.61：开始拖拽 → 取消还没触发的鼠标长按（两者互斥）
     card.classList.add("dragging");

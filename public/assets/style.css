@@ -2211,7 +2211,10 @@ input.settings-value:focus {
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.tag-suggest .ts-item:hover,
+.tag-suggest .ts-item:hover {
+  background: var(--w006);
+  color: var(--text);
+}
 .tag-suggest .ts-item .dot {
   width: 6px;
   height: 6px;

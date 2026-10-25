@@ -691,6 +691,48 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("退出多选后全选按钮隐藏（body 无 select-mode）", !doc.body.classList.contains("select-mode"));
     if (gridEl && gridEl.classList.contains("grid-square")) { tap(layoutBtn); await wait(600); }
   }
+
+  /* v0.73：鼠标按住向左拖 = 批量选择（框选划过） */
+  {
+    const selIds = () => (window.__selectionState ? window.__selectionState().ids : []);
+    window.__exitSelectMode && window.__exitSelectMode();
+    await wait(250);
+    const cards = [...doc.querySelectorAll("#grid .card")];
+    const cardA = cards[0];
+    const cardB = cards[1];
+    if (cardA && cardB) {
+      // 先确认向右拖不会误触发（那个方向留给「拖到标签组打标」）
+      cardA.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 400, clientY: 300 }));
+      await wait(60);
+      window.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 520, clientY: 300 }));
+      await wait(200);
+      check("向右拖动不会触发框选（留给拖拽打标）", !doc.body.classList.contains("select-mode"));
+      window.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+      await wait(150);
+
+      // 按住向左拖 → 进入批量选择，起点先选上
+      cardA.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 400, clientY: 300 }));
+      await wait(60);
+      window.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 290, clientY: 300 }));
+      await wait(220);
+      check("按住左滑进入批量选择", doc.body.classList.contains("select-mode"), `body=${doc.body.className}`);
+      check("起点那张已被选中", selIds().includes(cardA.dataset.id), JSON.stringify(selIds()));
+
+      // 划过第二张 → 加选
+      const origEFP = doc.elementFromPoint;
+      doc.elementFromPoint = () => cardB;
+      window.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 240, clientY: 302 }));
+      await wait(250);
+      check("划过（向左拖经过）的卡片被加选", selIds().includes(cardB.dataset.id), JSON.stringify(selIds()));
+      doc.elementFromPoint = origEFP;
+
+      window.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+      await wait(200);
+      check("松手后不会顺手打开灯箱", !doc.getElementById("lightbox").classList.contains("open"));
+      window.__exitSelectMode && window.__exitSelectMode();
+      await wait(250);
+    }
+  }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
   check("灯箱工具条有收藏按钮（v0.56 归来）", !!doc.getElementById("lbToolFav"));
@@ -706,7 +748,8 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(150);
     clickEl(firstCard);
     await wait(350);
-    check("打开灯箱后工具条仍隐藏", lbBox.classList.contains("open") && !lbBox.classList.contains("tools-visible"));
+    check("打开灯箱后工具条仍隐藏", lbBox.classList.contains("open") && !lbBox.classList.contains("tools-visible"),
+      `open=${lbBox.classList.contains("open")} tools=${lbBox.classList.contains("tools-visible")} select=${doc.body.classList.contains("select-mode")}`);
     lbBox.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 400, clientY: 300 }));
     await wait(100);
     check("鼠标移动后工具条浮现", lbBox.classList.contains("tools-visible"));

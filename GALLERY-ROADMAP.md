@@ -1203,10 +1203,25 @@ async function aiTagSearch(query) {
 - 顺带：既然只在选择模式出现，就不用再管 touch 设备没有 hover 的问题
 - 测试：前端 **191 项全通过**，把原来 4 项断言改写成 5 项 —— 全选入口存在于 DOM、**CSS 断言「默认隐藏 / select-mode 下 inline-block」**
   （jsdom 不加载外部 CSS，只能查样式文本）、先进多选再点全选选中当天（18 张）、卡片高亮数一致、退出多选后按钮隐藏
-
-
-
 - 顺带：`.req-mark`（v0.58 的「可选」徽标）随主分类块收起而失去使用者，样式留着未删
+
+### 批次 64 · 左滑框选 + 标签建议下拉修复 + 打标工具链（v0.73，2026-10-25）✨
+> 图库页按住卡片向左拖 = 批量框选；顺带修了标签建议下拉 hover 抽搐的老 bug。
+
+- **左滑框选**（app.js）：卡片本身可拖到标签组打标，所以用**方向**区分 —— 向左横拖（|dx| 足够且明显偏左）进入框选，
+  划过即加选；其余方向仍走拖拽打标。已在多选模式时无拖拽用途，任意方向划过均可加选。
+  `elementFromPoint` 用 rAF 节流；`dragstart` 里看坐标提前识破左滑并 `preventDefault`，避免误触发拖拽。
+  起点卡片直接选上，同时抑制松手后的 click（不误开灯箱）。
+- **标签建议下拉 hover 抽搐修复**（style.css）：`.ts-item:hover` 与 `.ts-item .dot` 两条规则被误合并成一条，
+  导致 hover 时整个选项行继承圆点的 6px 尺寸，行塌缩 → 下方列表上移 → 鼠标又悬到新行 → 再塌缩，
+  形成悬停↔回流反馈循环。拆回两条规则，hover 恢复为正常高亮（`--w006` + 亮字）。
+- **打标工具链**（scripts/）：
+  - `bump-assets.js`（`npm run bump`）：正则替换 index.html 里 `style.css?v=` / `app.js?v=` / `pinyin-pro.min.js?v=`，
+    默认「日期+时分」，避免同日多次改码浏览器仍吃 immutable 旧缓存
+  - `set-category.js`：读 upload-folder 报告批量补主分类（categories 整体覆盖，先读再合并）
+  - `upload-folder.js` 新增 `--exclude=a.webp,b.jpg`：按相对路径或文件名排除
+- 测试：前端 **195 项全通过**，新增左滑框选 5 项 —— 向右拖不误触发、按住左滑进入多选、起点选中、
+  划过加选、松手不开灯箱
 
 
 
