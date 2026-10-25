@@ -2379,7 +2379,9 @@ function initGallery() {
       let head = "";
       if (key && key !== last) {
         const n = counts[key];
-        head = `<div class="grid-group">${esc(dayLabelOf(key))}${n ? `<span class="cnt">${n} ${t("张", "photos")}</span>` : ""}</div>`;
+        // v0.71：日期头直接给出「全选这一天」入口（正方形网格 + 按时间排序时才有日期分段）
+        head = `<div class="grid-group">${esc(dayLabelOf(key))}${n ? `<span class="cnt">${n} ${t("张", "photos")}</span>` : ""}
+          <button class="day-pick" type="button" data-daypick="${escAttr(key)}" title="${t("选中这一天的全部图片", "Select every photo from this day")}">${t("全选", "select all")}</button></div>`;
         last = key;
       }
       return head + cardHTML(p);
@@ -2751,6 +2753,29 @@ function initGallery() {
       lpFiredAt = 0;
       e.preventDefault();
       e.stopPropagation();
+      return;
+    }
+    // v0.71：日期头的「全选」= 选中这一天在**当前筛选结果**里的全部图片
+    const dayBtn = e.target.closest("[data-daypick]");
+    if (dayBtn) {
+      e.stopPropagation();
+      if (guestBlocked("多选")) return;
+      const key = dayBtn.dataset.daypick;
+      const ids = filtered.filter((p) => dayKeyOf(p) === key).map((p) => p.id);
+      if (!ids.length) return;
+      if (!selectMode) {
+        selectMode = true;
+        document.body.classList.add("select-mode");
+        const sb = document.getElementById("fabSelectBtn");
+        if (sb) sb.classList.add("on");
+        selected.clear();
+      }
+      ids.forEach((id) => selected.add(id));
+      // 只更新已渲染卡片的选中态，不整屏重绘（保留滚动位置）
+      grid.querySelectorAll(".card").forEach((c) => {
+        c.classList.toggle("sel", selected.has(c.dataset.id));
+      });
+      updateBatchUI();
       return;
     }
     const card = e.target.closest(".card");
@@ -3191,23 +3216,52 @@ async function applyBatchTag() {
   try {
     const ids = [...selected];
     const catSel = selCatsOf(document.getElementById("btCats")); // [] = 不改主分类（v0.19 多选）
-    await Promise.all(ids.map(async (id) => {
+    // v0.71：先算出每张的新标签，**本地立即生效**再发请求。
+    // 原来这里是发完请求就 loadData() 整页重拉 —— 已加载的后续页会被丢掉、卡片全部重建，
+    // 于是"批量打完标签还得刷新才看得到"，正是这个原因。
+    const plans = [];
+    for (const id of ids) {
       const p = PHOTOS.find((x) => x.id === id);
-      if (!p) return;
+      if (!p) continue;
       let next;
       if (btMode === "clear") next = [];
       else if (btMode === "replace") next = inputTags.slice(0, 10);
       else next = [...new Set([...(p.tags || []), ...inputTags])].slice(0, 10);
-      await apiFetch(`/api/photos/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags: next, ...(catSel.length ? { categories: catSel } : {}) }),
-      });
-    }));
+      plans.push({ id, p, next, prevTags: p.tags, prevCats: p.categories });
+    }
+    // 乐观更新：先改本地 + 重绘，界面 0 延迟
+    for (const pl of plans) {
+      pl.p.tags = pl.next;
+      if (catSel.length) pl.p.categories = catSel;
+    }
     document.getElementById("batchTagModal").classList.remove("open");
-    await loadData();
     if (window.__refreshGallery) window.__refreshGallery();
+    renderTagMenuContent(); // 标签计数变了
     exitSelectMode();
+    // 再落库；失败的整批回滚
+    const fails = [];
+    await Promise.all(plans.map(async (pl) => {
+      try {
+        await apiFetch(`/api/photos/${pl.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags: pl.next, ...(catSel.length ? { categories: catSel } : {}) }),
+        });
+      } catch (e) {
+        fails.push(pl);
+      }
+    }));
+    if (fails.length) {
+      for (const pl of fails) {
+        pl.p.tags = pl.prevTags;
+        pl.p.categories = pl.prevCats;
+      }
+      if (window.__refreshGallery) window.__refreshGallery();
+      renderTagMenuContent();
+      err.textContent = `${fails.length} 张保存失败，已回滚`;
+      err.style.display = "block";
+      document.getElementById("batchTagModal").classList.add("open");
+    }
   } catch (e) {
     err.textContent = "操作失败：" + e.message;
     err.style.display = "block";

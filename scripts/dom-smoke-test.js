@@ -614,6 +614,75 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       await wait(300);
     }
   }
+
+  /* v0.71：批量加标签后**立即**生效（不再整页重拉，不需要刷新） */
+  {
+    const tap = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    tap(doc.getElementById("fabSelectBtn"));
+    await wait(250);
+    // 选标签最少的 2 张：卡片上最多只显示 3 个标签 chip，选多的会看不到新标签
+    const cards = [...doc.querySelectorAll("#grid .card")]
+      .sort((a, b) => a.querySelectorAll(".card__tags .tg").length - b.querySelectorAll(".card__tags .tg").length)
+      .slice(0, 2);
+    const ids = cards.map((c) => c.dataset.id);
+    const origTags = cards.map((c) => [...c.querySelectorAll(".card__tags .tg")].map((x) => x.textContent.trim()));
+    for (const c of cards) tap(c);
+    await wait(250);
+    check("批量加标签前已选中 2 张", (window.__selectionState ? window.__selectionState().ids.length : -1) === 2);
+
+    const newTag = "即时标签" + Math.random().toString(36).slice(2, 5);
+    tap(doc.getElementById("batchTag"));
+    await wait(350);
+    const inp = doc.getElementById("btTagInput");
+    if (inp) {
+      inp.value = newTag;
+      inp.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await wait(250);
+    }
+    tap(doc.getElementById("btOk"));
+    await wait(1600); // 只等请求，不重新加载页面/数据
+    const after = [...doc.querySelectorAll("#grid .card")].filter((c) => ids.includes(c.dataset.id));
+    const hit = after.filter((c) => (c.querySelector(".card__tags") || {}).textContent?.includes(newTag)).length;
+    check("批量加标签后卡片立即显示新标签（无需刷新）", after.length === 2 && hit === 2, `${hit}/${after.length} 张已显示`);
+    check("批量加标签后仍停在原列表（没被整页重载）", doc.querySelectorAll("#grid .card").length > 2,
+      `${doc.querySelectorAll("#grid .card").length} 张卡片`);
+
+    // 还原标签，别污染后续断言
+    const headers2 = TOKEN ? { "X-Auth-Token": TOKEN } : {};
+    for (let i = 0; i < ids.length; i++) {
+      await fetch(`${BASE}/api/photos/${ids[i]}`, {
+        method: "PATCH",
+        headers: Object.assign({ "Content-Type": "application/json" }, headers2),
+        body: JSON.stringify({ tags: origTags[i] }),
+      });
+    }
+    await wait(200);
+    if (window.__reloadData) await window.__reloadData();
+    if (window.__refreshGallery) window.__refreshGallery();
+    await wait(400);
+  }
+
+  /* v0.71：正方形网格下的「日期全选」 */
+  {
+    const tap = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const layoutBtn = doc.getElementById("fabLayoutBtn");
+    const gridEl = doc.getElementById("grid");
+    if (gridEl && !gridEl.classList.contains("grid-square")) { tap(layoutBtn); await wait(600); }
+    const pickBtn = doc.querySelector("#grid .day-pick");
+    check("正方形网格的日期头有「全选」入口", !!pickBtn, pickBtn ? pickBtn.textContent.trim() : "无");
+    if (pickBtn) {
+      tap(pickBtn);
+      await wait(450);
+      const selN = window.__selectionState ? window.__selectionState().ids.length : -1;
+      const hiN = doc.querySelectorAll("#grid .card.sel").length;
+      check("点日期全选会选中这一天的图片", selN > 0, `${selN} 张`);
+      check("全选后自动进入多选模式", doc.body.classList.contains("select-mode"));
+      check("对应的卡片都变成选中态", hiN === selN, `高亮 ${hiN} / 选中 ${selN}`);
+      window.__exitSelectMode && window.__exitSelectMode();
+      await wait(300);
+    }
+    if (gridEl && gridEl.classList.contains("grid-square")) { tap(layoutBtn); await wait(600); }
+  }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
   check("灯箱工具条有收藏按钮（v0.56 归来）", !!doc.getElementById("lbToolFav"));

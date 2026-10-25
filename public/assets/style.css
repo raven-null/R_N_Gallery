@@ -907,6 +907,25 @@ body.perf-lite .masonry.grid-square .card { transition: none; }
 }
 .masonry.grid-square .grid-group:first-child { margin-top: 0; }
 .masonry.grid-square .grid-group .cnt { font-size: 11px; font-weight: 400; color: var(--text-faint); }
+/* v0.71：日期头右侧的「全选」—— 平时几乎隐形，hover 才明显；触摸屏没有 hover，常显 */
+.masonry.grid-square .grid-group .day-pick {
+  margin-left: 2px;
+  padding: 0 2px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.masonry.grid-square .grid-group:hover .day-pick { opacity: 1; }
+.masonry.grid-square .grid-group .day-pick:hover { color: var(--accent); }
+@media (hover: none) {
+  .masonry.grid-square .grid-group .day-pick { opacity: 0.75; }
+}
 
 .card {
   break-inside: avoid;
