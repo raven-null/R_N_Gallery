@@ -662,25 +662,33 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(400);
   }
 
-  /* v0.71：正方形网格下的「日期全选」 */
+  /* v0.71/v0.72：正方形网格下的「日期全选」—— 只在批量选择模式里出现 */
   {
     const tap = (el) => el && el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     const layoutBtn = doc.getElementById("fabLayoutBtn");
     const gridEl = doc.getElementById("grid");
     if (gridEl && !gridEl.classList.contains("grid-square")) { tap(layoutBtn); await wait(600); }
+    check("正方形网格里存在日期全选入口（DOM）", !!doc.querySelector("#grid .day-pick"));
+    // v0.72：按钮默认 display:none，只有 body.select-mode 才露出来 —— jsdom 不加载外部 CSS，用样式文本校验
+    check("CSS：全选按钮默认隐藏、只在批量选择模式显示",
+      /\.grid-group \.day-pick \{[^}]*display:\s*none/.test(cssText) &&
+      /body\.select-mode[^{]*\.grid-group \.day-pick \{[^}]*display:\s*inline-block/.test(cssText));
+
+    // 先进入批量选择模式，再点全选（真实使用路径）
+    tap(doc.getElementById("fabSelectBtn"));
+    await wait(300);
     const pickBtn = doc.querySelector("#grid .day-pick");
-    check("正方形网格的日期头有「全选」入口", !!pickBtn, pickBtn ? pickBtn.textContent.trim() : "无");
     if (pickBtn) {
       tap(pickBtn);
       await wait(450);
       const selN = window.__selectionState ? window.__selectionState().ids.length : -1;
       const hiN = doc.querySelectorAll("#grid .card.sel").length;
-      check("点日期全选会选中这一天的图片", selN > 0, `${selN} 张`);
-      check("全选后自动进入多选模式", doc.body.classList.contains("select-mode"));
+      check("多选模式下点日期全选，选中这一天的图片", selN > 0, `${selN} 张`);
       check("对应的卡片都变成选中态", hiN === selN, `高亮 ${hiN} / 选中 ${selN}`);
-      window.__exitSelectMode && window.__exitSelectMode();
-      await wait(300);
     }
+    window.__exitSelectMode && window.__exitSelectMode();
+    await wait(300);
+    check("退出多选后全选按钮隐藏（body 无 select-mode）", !doc.body.classList.contains("select-mode"));
     if (gridEl && gridEl.classList.contains("grid-square")) { tap(layoutBtn); await wait(600); }
   }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */

@@ -907,24 +907,27 @@ body.perf-lite .masonry.grid-square .card { transition: none; }
 }
 .masonry.grid-square .grid-group:first-child { margin-top: 0; }
 .masonry.grid-square .grid-group .cnt { font-size: 11px; font-weight: 400; color: var(--text-faint); }
-/* v0.71：日期头右侧的「全选」—— 平时几乎隐形，hover 才明显；触摸屏没有 hover，常显 */
+/* v0.71：日期头右侧的「全选」—— 平时完全不出现，只有进了批量选择模式才露出来
+   （v0.72：原来是 hover 才显著，但选择时鼠标未必停在日期头上，等于看不见） */
 .masonry.grid-square .grid-group .day-pick {
+  display: none;
   margin-left: 2px;
-  padding: 0 2px;
+  padding: 1px 8px;
   font-family: inherit;
   font-size: 11px;
   font-weight: 500;
-  color: var(--text-faint);
-  background: none;
-  border: none;
+  color: var(--text-dim);
+  background: var(--w008);
+  border: 1px solid var(--w010);
+  border-radius: 99px;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.masonry.grid-square .grid-group:hover .day-pick { opacity: 1; }
-.masonry.grid-square .grid-group .day-pick:hover { color: var(--accent); }
-@media (hover: none) {
-  .masonry.grid-square .grid-group .day-pick { opacity: 0.75; }
+body.select-mode .masonry.grid-square .grid-group .day-pick { display: inline-block; }
+body.select-mode .masonry.grid-square .grid-group .day-pick:hover {
+  color: #fff;
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .card {
