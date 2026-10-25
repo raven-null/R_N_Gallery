@@ -4126,24 +4126,38 @@ body.perf-lite .card .fv { transition: none; }
 /* ============================================================
    分级（v0.57）：三档 —— 大众级 / R16 / R18
    ============================================================ */
-/* 卡片右上角分级角标（放在收藏爱心下面，常驻显示） */
+/* 卡片左上角分级角标（v0.69：挪到左上、hover 才现、颜色压淡）
+   注意两点：① 左上角原本是勾选圈 .pick 的位置，多选模式下让位；
+            ② 触摸屏没有 hover，那边给一个很淡的常显态，否则永远看不到。 */
 .card .rating-badge {
   position: absolute;
-  top: 36px;
-  right: 8px;
+  top: 8px;
+  left: 8px;
   z-index: 3;
-  padding: 1px 6px;
-  font-size: 10px;
-  font-weight: 700;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 600;
   letter-spacing: 0.02em;
-  line-height: 1.5;
-  color: #fff;
-  border-radius: 99px;
+  line-height: 1.6;
+  color: rgba(255,255,255,0.8);
+  background: rgba(0,0,0,0.38);
+  border-radius: 4px;
   pointer-events: none;
-  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 0.18s var(--ease-out);
 }
-.card .rating-badge.r-r16 { background: rgba(255,159,10,0.85); }
-.card .rating-badge.r-r18 { background: rgba(255,69,58,0.88); }
+/* 只是淡淡地提示一下分级，不要抢图片的风头 */
+.card .rating-badge.r-r16 { color: rgba(255, 214, 160, 0.85); }
+.card .rating-badge.r-r18 { color: rgba(255, 178, 178, 0.85); }
+/* 只有能悬停的设备才显示；触摸屏没有 hover，就一直它是透明的（等于不显示） */
+@media (hover: hover) {
+  .card:hover .rating-badge { opacity: 1; }
+}
+/* 多选模式下勾选圈占着左上角，分级角标先让位 */
+body.select-mode .card .rating-badge { display: none; }
+body.perf-lite .card .rating-badge { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(0,0,0,0.5); }
 
 /* 编辑弹窗里的三档选择（单选 pill，与 .cat-pick 同款手感） */
 .rating-picks { display: flex; gap: 8px; flex-wrap: wrap; }
