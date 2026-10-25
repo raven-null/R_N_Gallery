@@ -3050,12 +3050,14 @@ body.mode-guest .page-menu-item[data-page="tags"] { display: none !important; }
 }
 /* ============================================================
    FAB 双分支布局适配（v0.13.3）：菜单从对应按钮上方弹出
+   v0.75：筛选菜单移到主按钮（fabMain）正上方 —— 原来在左分支上方，
+   离主按钮太远，展开分支后视觉上"飞"到左边去了
    ============================================================ */
-.tag-menu { right: 216px; bottom: 78px; }
+.tag-menu { right: 28px; bottom: 88px; }
 .sort-menu { right: 128px; bottom: 78px; }
 @media (max-width: 720px) {
   .fab-group { right: 16px; bottom: 20px; }
-  .tag-menu { right: 96px; bottom: 130px; }
+  .tag-menu { right: 16px; bottom: 76px; }
   .sort-menu { right: 76px; bottom: 130px; }
 }
 /* 修正（v0.13.3）：.fab 通用规则 position:relative 会覆盖主按钮绝对定位 */

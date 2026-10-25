@@ -1333,7 +1333,8 @@ function initFlyout(btn, menu) {
   });
   menu.addEventListener("mouseenter", open);
   menu.addEventListener("mouseleave", (e) => {
-    if (e.relatedTarget !== btn) schedule();
+    // v0.75：菜单内有输入框聚焦时（如标签搜索），不因布局抖动触发的 mouseleave 关闭
+    if (e.relatedTarget !== btn && !menu.contains(document.activeElement)) schedule();
   });
   // 点击 = 开关切换（v0.8.10 移除"点击固定"，移开鼠标即正常关闭）
   btn.addEventListener("click", () => {
@@ -1341,7 +1342,10 @@ function initFlyout(btn, menu) {
     else open();
   });
   document.addEventListener("click", (e) => {
-    if (!btn.contains(e.target) && !menu.contains(e.target)) close();
+    // v0.75：用 composedPath 判定 —— 菜单内点击常伴随 innerHTML 重渲染（如组头折叠），
+    // e.target 已被摘出 DOM，直接用 contains(e.target) 会误判在菜单外而关闭
+    const path = e.composedPath ? e.composedPath() : [];
+    if (!btn.contains(e.target) && !menu.contains(e.target) && !path.includes(menu) && !path.includes(btn)) close();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") close();

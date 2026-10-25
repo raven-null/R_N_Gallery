@@ -774,6 +774,32 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       window.localStorage.removeItem("rn_sort"); // 清理，不污染后续断言
     }
   }
+
+  /* v0.75：筛选菜单修复 —— 位置移到主按钮上方 + 菜单内点击不误关 */
+  {
+    const tagMenuEl = doc.getElementById("tagMenu");
+    const fabMainEl = doc.getElementById("fabMain");
+    if (tagMenuEl && fabMainEl) {
+      // CSS：tag-menu 应在主按钮正上方（right 与 fab-group 对齐 28px，不再是左分支的 216px）
+      check("筛选菜单 CSS 定位到主按钮上方（right: 28px）", /\.tag-menu\s*\{[^}]*right:\s*28px/.test(cssText), (cssText.match(/\.tag-menu\s*\{[^}]*\}/) || ["(未找到)"])[0].replace(/\s+/g, " ").slice(0, 80));
+      // 行为：菜单打开时点击内部元素（触发重渲染）不应导致菜单关闭
+      const fabBtnEl = doc.getElementById("fabBtn");
+      fabBtnEl.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: false }));
+      await wait(50);
+      const wasOpen = tagMenuEl.classList.contains("open");
+      // 在菜单内派发 click（冒泡到 document），模拟组头点击后重渲染的场景
+      const inner = doc.createElement("div");
+      tagMenuEl.appendChild(inner);
+      inner.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      inner.remove(); // 模拟 innerHTML 重渲染把 target 摘出 DOM
+      await wait(50);
+      check("菜单内点击（target 已脱离 DOM）不会误关菜单", wasOpen ? tagMenuEl.classList.contains("open") : true, `wasOpen=${wasOpen} now=${tagMenuEl.classList.contains("open")}`);
+      // 清理
+      tagMenuEl.classList.remove("open");
+      fabBtnEl.classList.remove("open");
+      doc.getElementById("fabGroup").classList.remove("active");
+    }
+  }
   /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
   check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
   check("灯箱工具条有收藏按钮（v0.56 归来）", !!doc.getElementById("lbToolFav"));

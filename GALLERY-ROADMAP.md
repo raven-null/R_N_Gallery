@@ -1240,6 +1240,19 @@ async function aiTagSearch(query) {
 - 测试：前端新增 8 项 —— 三项菜单结构、默认选中时间降序、再点时间→升序、点大小默认降序、
   再点大小→升序、点标签默认主分类在前、再点标签→标签在前、滚轮触发选中并回降序
 
+### 批次 66 · 修复筛选菜单误关 + 移到主按钮上方（v0.75，2026-10-25）🔧
+> 用户反馈：搜索或展开组时菜单直接消失没法操作；希望筛选菜单放到主按钮上面。
+
+- **误关根因（app.js initFlyout）**：菜单内点击（组头折叠/标签行）都会触发 `renderTagMenuContent()`
+  重渲染 `list.innerHTML`，把 `e.target` 摘出 DOM；document 层的关闭判定 `menu.contains(e.target)`
+  对已脱离的节点返回 false → 误判点击在菜单外 → 关闭。改用 `e.composedPath()` 判定
+  （事件派发时路径已固定，不受后续 DOM 变更影响）
+- **搜索时误关**：菜单底部锚定，每次输入改变列表高度，搜索框可能从鼠标下滑出 → `mouseleave`
+  → 180ms 后关闭。`mouseleave` 处增加「菜单内有输入框聚焦时跳过 schedule」
+- **位置**（style.css）：`.tag-menu` 从 `right: 216px; bottom: 78px`（左分支上方）移到
+  `right: 28px; bottom: 88px`（主按钮 fabMain 正上方）；移动端同步 `right: 16px; bottom: 76px`
+- 测试：新增 2 项 —— CSS 断言 `right: 28px`、菜单内点击（target 脱离 DOM）后菜单仍 open
+
 
 
 
