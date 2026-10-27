@@ -180,6 +180,9 @@ exports.default = async (req) => {
     const seg = path.split("/").filter(Boolean); // ["api", "photos", id?, "raw"?]
     const rest = seg.slice(2);
 
+    /* ---- CORS 预检：博客（raven-blog.netlify.app）等外部站点直连图库接口 ---- */
+    if (method === "OPTIONS") return corsPreflight();
+
 
 
     /* ---- 访问控制端点（无需登录） ---- */
@@ -521,6 +524,19 @@ async function list(url) {
   return json({ photos, cursor, hasMore: !!cursor, total });
 }
 
+/* ---------- CORS 预检（v0.77：前端图库改由博客等外部站点直连） ---------- */
+function corsPreflight() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, X-Auth-Token, X-R18-Key",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+}
+
 /* ---------- 观光模式（v0.49） ---------- */
 /* 是否属于「观光访客可读」的请求：只读、且不涉及成人向内容 */
 function safeMode(q) {
@@ -560,6 +576,7 @@ async function raw(id, req, url, role) {
       "Content-Type": m.mime || "application/octet-stream",
       "Cache-Control": "public, max-age=31536000, immutable",
       "X-Content-Type-Options": "nosniff",
+      "Access-Control-Allow-Origin": "*",
     },
   });
 }
@@ -637,6 +654,7 @@ async function thumb(id, req, url, role) {
     headers: {
       "Content-Type": meta.thumbMime || "image/webp",
       "Cache-Control": "public, max-age=31536000, immutable",
+      "Access-Control-Allow-Origin": "*",
       "X-Content-Type-Options": "nosniff",
     },
   });

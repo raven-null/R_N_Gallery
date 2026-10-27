@@ -106,6 +106,8 @@ function json(body, statusCode = 200) {
       "X-Content-Type-Options": "nosniff",
       // 列表/元数据禁止缓存，避免清空/更新后浏览器仍显示旧数据
       "Cache-Control": "no-store",
+      // 允许博客等外部站点直连（前端图库改为引用本图库的图片）
+      "Access-Control-Allow-Origin": "*",
     },
   });
 }
