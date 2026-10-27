@@ -1274,6 +1274,21 @@ async function aiTagSearch(query) {
   而不是直接摘 `.open` —— `askConfirmAsync` / `askChoice` 这类 Promise 版确认只有点取消才 resolve，
   直接摘 `.open` 会让 await 永远挂着（上传查重就卡在那一步）。mousedown 与 click 都落在遮罩上才算，
   从弹窗里拖选文字松手在空白处不会误关
+
+### 批次 68 · 修 `/api/tags/category-rename` 400（v0.77，2026-10-27）🔧
+> 控制台报 `/api/tags/category-rename` 400，改名直接失败。
+
+- **根因**：服务端 `categoryRename` 在「目标主分类已存在」时直接 `badRequest("主分类已存在: X")`。
+  而 Blobs 写后读有 1~2 分钟延迟，前端本地配置可能比服务端**新**（刚改过的名字服务端还认为是旧名字），
+  客户端校验（`catByName`）放行 → 服务端却报 400，于是改名失败。
+- **改法（netlify/functions/photos.js）**：与 `tagsRename` 对齐 —— 目标已存在 = **合并**（旧名从配置里去掉、
+  照片引用全部改指向新名），返回 `{ ok, photos, merged }`；保留 `r18 / r16` 保留名 400 守卫；
+  照片 categories 改写时顺便去重（合并后同张图不会出现两个同名分类）
+- **前端**（app.js）：`renameCategoryLocally` 增加合并分支（本地也不会留下两个同名分类）；
+  `loadTags()` 改成 `cache: "no-store"`，避免 HTTP 缓存让本地分类 / 标签列表落后于服务端
+- 测试：`npm run test:api` 新增 2 项（重复改名幂等、改名为已存在名 = 合并），并在用例末尾把分类列表写回，
+  可重复运行 —— 共 24 项全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

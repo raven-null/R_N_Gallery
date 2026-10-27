@@ -413,7 +413,8 @@ function bindCatPicks(container, onChange) {
 /* ---------- 标签配置加载与保存 ---------- */
 async function loadTags() {
   try {
-    const res = await apiFetch("/api/tags");
+    // v0.77：no-store —— 配置要读到最新的一份；命中 HTTP 缓存会让本地分类 / 标签列表落后于服务端
+    const res = await apiFetch("/api/tags", { cache: "no-store" });
     const d = await res.json();
     TAGS = (d && Array.isArray(d.groups) && Array.isArray(d.tags))
       ? { categories: Array.isArray(d.categories) ? d.categories : DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: d.groups, tags: d.tags }
@@ -537,13 +538,22 @@ function removeTagLocally(name) {
     }
   });
 }
+/* v0.77：目标名已存在 = 合并（与服务端 category-rename 一致）——
+   旧名从本地分类里去掉、照片引用都指向新名，免得本地留下两个同名分类 */
 function renameCategoryLocally(from, to) {
-  const c = (TAGS.categories || []).find((x) => x.name === from);
-  if (c) c.name = to;
+  const cats = TAGS.categories || (TAGS.categories = []);
+  if (cats.some((c) => c.name === to)) {
+    TAGS.categories = cats.filter((c) => c.name !== from);
+  } else {
+    const c = cats.find((x) => x.name === from);
+    if (c) c.name = to;
+    else TAGS.categories.push({ id: "", name: to, color: null, sort: cats.length }); // 游离分类：本地先补上
+  }
   syncFilterRename("cat", from, to);
   PHOTOS.forEach((p) => {
-    const cats = catsOf(p);
-    if (cats.includes(from)) p.categories = cats.map((x) => (x === from ? to : x));
+    const cs = catsOf(p);
+    if (!cs.includes(from)) return;
+    p.categories = [...new Set(cs.map((x) => (x === from ? to : x)))].slice(0, 6);
   });
 }
 function removeCategoryLocally(name) {

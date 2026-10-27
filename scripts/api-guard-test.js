@@ -138,6 +138,26 @@ const hasR18Tag = (photo) => (photo.tags || []).some((t) => ["r18", "r16"].inclu
   const catRenRes = await req("/api/tags/category-rename", { method: "POST", token: adminT, body: { from: "插画", to: "r16" } });
   check("主分类不能改名为 r16（400）", catRenRes.status === 400, `HTTP ${catRenRes.status}`);
 
+  /* ---------- 5b. 主分类改名幂等 / 合并（v0.77：原来第二次就 400「主分类已存在」） ----------
+     Blobs 写后读有 1~2 分钟延迟：前端本地配置可能比服务端新，
+     于是「改名成功后再改一次」或「改成一个服务端已有、本地已删的名字」都会撞上 400。 */
+  const cfgBefore = await req("/api/tags", { token: adminT });
+  const catOnce = await req("/api/tags/category-rename", { method: "POST", token: adminT, body: { from: "插画", to: "插画·改" } });
+  const catTwice = await req("/api/tags/category-rename", { method: "POST", token: adminT, body: { from: "插画", to: "插画·改" } });
+  check("主分类重复改名不再 400（幂等）", catOnce.status === 200 && catTwice.status === 200,
+    `HTTP ${catOnce.status} / ${catTwice.status} ${catTwice.data && catTwice.data.error ? catTwice.data.error : ""}`);
+  const catMerge = await req("/api/tags/category-rename", { method: "POST", token: adminT, body: { from: "插画·改", to: "风景" } });
+  const cfgCat = await req("/api/tags", { token: adminT });
+  const catNames = ((cfgCat.data && cfgCat.data.categories) || []).map((c) => c.name);
+  check("主分类改名为已存在的名字 = 合并（200 + merged）",
+    catMerge.status === 200 && catMerge.data && catMerge.data.merged === true && catNames.includes("风景") && !catNames.includes("插画·改"),
+    `HTTP ${catMerge.status} merged=${catMerge.data && catMerge.data.merged} 分类=${catNames.join("/")}`);
+  // 合并不可逆，这里把改名 / 合并前的分类列表写回去，别给后续用例（和自己的重跑）留下改动
+  await req("/api/tags", {
+    method: "PUT", token: adminT,
+    body: { categories: cfgBefore.data.categories, groups: cfgBefore.data.groups, tags: cfgBefore.data.tags },
+  });
+
   /* ---------- 6. 改名保留旧名为别名 / 标签清洗 ---------- */
   const ren2 = await req("/api/tags/rename", { method: "POST", token: adminT, body: { from: "守卫测试标签", to: "守卫测试标签二号" } });
   const cfg2 = await req("/api/tags", { token: adminT });

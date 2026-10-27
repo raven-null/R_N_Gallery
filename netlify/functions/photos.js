@@ -1322,7 +1322,10 @@ async function tagsRemove(req) {
   return json({ ok: true, photos });
 }
 
-/* ---------- POST /api/tags/category-rename：主分类改名（同步照片 meta.category） ---------- */
+/* ---------- POST /api/tags/category-rename：主分类改名（同步照片 meta.category） ----------
+   v0.77：目标名已存在 = 合并（与 tagsRename 一致），不再 400 失败。
+   前端本地配置可能比服务端新（Blobs 写后读有 1~2 分钟延迟），
+   旧行为会对着一个"服务端还认为是空"的名字硬报「主分类已存在」，改名直接失败。 */
 async function categoryRename(req) {
   let body;
   try {
@@ -1333,24 +1336,31 @@ async function categoryRename(req) {
   const from = sanitizeCat(body.from);
   const to = sanitizeCat(body.to);
   if (!from || !to) return badRequest("需要 from 与 to");
-  if (from === to) return json({ ok: true, photos: 0 });
+  if (from === to) return json({ ok: true, photos: 0, merged: false });
 
   const s = store();
   const cfg = await loadConfig(s);
   const cats = normCategories(cfg.categories);
-  const idx = cats.findIndex((c) => c.name === from);
-  const toExists = cats.some((c) => c.name === to);
-  if (toExists) return badRequest(`主分类已存在: ${to}`);
+  const fromCat = cats.find((c) => c.name === from);
+  const toCat = cats.find((c) => c.name === to);
   // v0.55 / v0.57：不允许新造 r18 / r16 主分类（它们是分级档位）；合并进已存在的同名分类仍放行
-  if (isReservedName(to) && !toExists) return badRequest("r18 / r16 是图库分级档位，不能作为主分类名");
-  if (idx >= 0) cats[idx].name = to;
-  else cats.push({ id: `c-${nanoid(6)}`, name: to, color: null, sort: cats.length }); // v0.33：宽容处理（配置暂不可见旧名时不失败）
-  cfg.categories = cats;
+  if (!toCat && isReservedName(to)) return badRequest("r18 / r16 是图库分级档位，不能作为主分类名");
+
+  const merged = !!toCat;
+  if (merged) {
+    cfg.categories = cats.filter((c) => c.name !== from); // 合并：旧名从配置里去掉，引用都指向新名
+  } else if (fromCat) {
+    fromCat.name = to;
+    cfg.categories = cats;
+  } else {
+    // v0.33：配置里暂时看不到旧名（刚新建、Blobs 写入还没传播）时不要失败，至少保证新名在配置里
+    cfg.categories = [...cats, { id: `c-${nanoid(6)}`, name: to, color: null, sort: cats.length }];
+  }
   await s.set(KEY_TAGS, JSON.stringify(cfg));
 
-  const photos = await rewriteByCategory(s, (cats2) => (cats2.includes(from) ? cats2.map((c) => (c === from ? to : c)) : null));
-  await logAction(req, "主分类改名", `${from} → ${to}（${photos} 张照片）`);
-  return json({ ok: true, photos });
+  const photos = await rewriteByCategory(s, (cats2) => (cats2.includes(from) ? [...new Set(cats2.map((c) => (c === from ? to : c)))] : null));
+  await logAction(req, merged ? "主分类合并" : "主分类改名", `${from} → ${to}（${photos} 张照片）`);
+  return json({ ok: true, photos, merged });
 }
 
 /* ---------- POST /api/tags/category-remove：删除主分类（同步清空照片引用） ---------- */
