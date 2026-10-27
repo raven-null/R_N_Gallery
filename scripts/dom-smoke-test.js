@@ -161,6 +161,8 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   // v0.78：新建标签的「所属组」下拉 = 毛玻璃 + 限高可滚动
   check("CSS：所属组下拉是毛玻璃且可滚动",
     /\.gs-menu\s*\{[^}]*backdrop-filter:\s*blur\(24px\)/.test(cssText) && /\.gs-menu\s*\{[^}]*overflow-y:\s*auto/.test(cssText) && /\.gs-menu\s*\{[^}]*max-height:\s*220px/.test(cssText));
+  // v0.79：通用确认框要压在所有弹窗上面（它常从别的弹窗里弹出）
+  check("CSS：确认弹窗 z-index 高于其他弹窗", /#confirmModal\s*\{[^}]*z-index:\s*240/.test(cssText));
 
   /* 分类工作台：选中一张卡片 → 点主分类 chips → 真能写进图库 */
   const cwCard = doc.querySelector("#cwCards .cw-card");

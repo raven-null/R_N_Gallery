@@ -1304,6 +1304,23 @@ async function aiTagSearch(query) {
 - 测试：`npm run test:dom` 新增 4 项（毛玻璃 / 可滚动的 CSS 断言、自定义下拉存在、点开、选择后写回 `#fGroup` 并收起），
   共 209 项全过
 
+### 批次 70 · 确认框层级 + 改标签「signal timed out」（v0.79，2026-10-27）🔧
+> 用户反馈：① 通用确认框（#confirmModal）被别的弹窗压住，要放最上面；
+> ② 删标签时弹窗里报 `signal timed out`。
+
+- **层级根因**：所有 `.modal-mask` 都是 `z-index: 120`，同层级时按 DOM 顺序决定谁在上面。
+  `#confirmModal` 排在 `#editModal` / `#batchTagModal` 之前，而它恰恰常从这些弹窗里弹出来
+  （编辑图片 → 删除这张图片），于是确认框被盖在下面
+  → 改法：`#confirmModal { z-index: 240 }`，通用确认框永远最上层（`askConfirm` / `askConfirmAsync` / `askChoice` 共用一个容器）
+- **超时根因**：`rewritePhotos` / `rewriteByCategory` 是**串行**改写每张图的元数据（每张 1 读 + 1 写网络往返），
+  77 张图能跑 20s+，正好撞上前端 `apiFetch` 的 20s 超时 → 浏览器抛 `TimeoutError`，原样显示就是 `signal timed out`
+  → 两头都改：
+  - 服务端：新增 `mapLimit()`，两个批量改写函数改成**并发 10**（耗时压到 1/5 左右，也不至于打爆 Blobs）
+  - 前端：`apiFetch` 支持 `timeout` 选项；标签 / 主分类的改名与删除用 `API_TIMEOUT_HEAVY = 60s`；
+    超时与断网都翻译成人话（「请求超时，请重试…」/「网络错误：…」），不再把 DOMException 原文甩给用户
+- 测试：`npm run test:dom` 新增 1 项 CSS 断言（`#confirmModal` z-index 240），共 210 项全过；
+  `test:api` 24 项、`test:tagrefresh` 24 项同样全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

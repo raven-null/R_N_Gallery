@@ -1856,6 +1856,10 @@ input.settings-value:focus {
   padding: 24px;
 }
 .modal-mask.open { display: flex; animation: lb-in 0.3s var(--ease-out) both; }
+/* v0.79：通用确认框永远压在最上层。它常从别的弹窗里弹出来（编辑图片 → 删除这张图），
+   而各弹窗同层级（120）时按 DOM 顺序决定谁在上 —— confirmModal 排在 editModal 之前，
+   于是确认框反而被编辑弹窗盖住。 */
+#confirmModal { z-index: 240; }
 .modal {
   background: linear-gradient(
     160deg,

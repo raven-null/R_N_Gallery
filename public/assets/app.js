@@ -442,6 +442,7 @@ async function apiSaveTags() {
 async function apiRenameTag(from, to) {
   const res = await apiFetch("/api/tags/rename", {
     method: "POST",
+    timeout: API_TIMEOUT_HEAVY,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ from, to }),
   });
@@ -452,6 +453,7 @@ async function apiRenameTag(from, to) {
 async function apiRemoveTag(name) {
   const res = await apiFetch("/api/tags/remove", {
     method: "POST",
+    timeout: API_TIMEOUT_HEAVY,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
@@ -463,6 +465,7 @@ async function apiRemoveTag(name) {
 async function apiRenameCategory(from, to) {
   const res = await apiFetch("/api/tags/category-rename", {
     method: "POST",
+    timeout: API_TIMEOUT_HEAVY,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ from, to }),
   });
@@ -473,6 +476,7 @@ async function apiRenameCategory(from, to) {
 async function apiRemoveCategory(name) {
   const res = await apiFetch("/api/tags/category-remove", {
     method: "POST",
+    timeout: API_TIMEOUT_HEAVY,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   });
@@ -645,10 +649,22 @@ function apiHeaders() {
   const t = localStorage.getItem("rn_token") || "";
   return t ? { "X-Auth-Token": t } : {};
 }
+const API_TIMEOUT = 20000;        // 普通请求
+const API_TIMEOUT_HEAVY = 60000;  // 要批量改写照片元数据的操作（标签 / 主分类的改名、删除）
 async function apiFetch(path, options = {}) {
-  const opts = { ...options, headers: { ...apiHeaders(), ...(options.headers || {}) } };
-  if (!opts.signal) opts.signal = timeoutSignal(20000); // v0.54：原来完全没有超时，弱网下会一直挂着
-  const res = await fetch(path, opts);
+  const { timeout, ...rest } = options;
+  const opts = { ...rest, headers: { ...apiHeaders(), ...(rest.headers || {}) } };
+  if (!opts.signal) opts.signal = timeoutSignal(Number(timeout) > 0 ? Number(timeout) : API_TIMEOUT); // v0.54：原来完全没有超时，弱网下会一直挂着
+  let res;
+  try {
+    res = await fetch(path, opts);
+  } catch (e) {
+    // v0.79：浏览器抛的是 TimeoutError / AbortError，原样显示给用户就是一句 "signal timed out"
+    if (e && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      throw new Error("请求超时，请重试（图片多时改名 / 删除要等十几秒）");
+    }
+    throw new Error("网络错误：" + ((e && e.message) || "请检查连接后重试"));
+  }
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try { msg = (await res.json()).error || msg; } catch (e) { /* ignore */ }
