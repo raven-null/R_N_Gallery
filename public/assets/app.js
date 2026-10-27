@@ -1373,6 +1373,8 @@ const layerObs = new MutationObserver((muts) => {
     }
   });
   if (!document.querySelector(".modal-mask.open, .lightbox.open")) layerTop = 120; // 全关了 → 计数复位
+  // v0.83：有弹窗 / 灯箱开着就锁住底层页面滚动（否则滚到尽头会穿透到图库）
+  document.body.classList.toggle("modal-open", !!document.querySelector(".modal-mask.open, .lightbox.open"));
 });
 document.querySelectorAll(".modal-mask, .lightbox").forEach((el) => {
   layerObs.observe(el, { attributes: true, attributeFilter: ["class"] });

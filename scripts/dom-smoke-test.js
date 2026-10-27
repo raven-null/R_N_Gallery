@@ -1277,10 +1277,13 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     const dupTxt = (dupBody ? dupBody.textContent : "").replace(/\s+/g, " ").trim().slice(0, 160);
     check("扫描结果有状态钩子", !!st && st.scanned > 0,
       st ? `扫了 ${st.scanned} 张，${st.groups} 组（完全相同 ${st.exact}）` : `无 ｜ 弹窗内容：${dupTxt}`);
+    // v0.83：弹窗开着时锁住底层页面滚动（避免滚动穿透到图库）
+    check("弹窗开着时底层页面被锁滚动", doc.body.classList.contains("modal-open"));
     const dc = doc.getElementById("dupClose");
     if (dc) clickEl(dc);
     await wait(250);
     check("查重弹窗可关闭", !!dupModal && !dupModal.classList.contains("open"));
+    check("关闭弹窗后恢复页面滚动", !doc.body.classList.contains("modal-open"));
   }
 
   /* 清道夫（v0.39）：本测试会新建 / 改名 / 删除临时标签，而改名与删除后的 `apiSaveTags()`

@@ -100,7 +100,13 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; scrollbar-gutter: stable; }
+
+/* v0.83：弹窗 / 灯箱打开时锁住底层页面滚动 ——
+   否则弹窗里滚到尽头会「滚动穿透」，把底下的图库一起滚走。
+   scrollbar-gutter: stable 让锁滚动时右侧留白不变，页面不会左右抖一下。 */
+body.modal-open { overflow: hidden; }
+.modal-mask .modal { overscroll-behavior: contain; }
 
 /* ---------- 背景：动态光斑（液态玻璃的氛围光源） ---------- */
 body {
@@ -1405,6 +1411,7 @@ body.perf-lite .lightbox .lb-tool { transition: none; }
   z-index: 16;
   max-height: 62vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 18px 22px calc(20px + env(safe-area-inset-bottom));
   box-sizing: border-box;
   border-radius: 20px 20px 0 0;
@@ -3082,6 +3089,7 @@ iOS 风格开关（通用设置项：性能模式 / R18 观光开关）
 .dup-body {
   max-height: 56vh;
   overflow-y: auto;
+  overscroll-behavior: contain; /* v0.83：滚到列表尽头也别带着底层图库滚 */
   margin: 4px 0 14px;
   display: flex;
   flex-direction: column;

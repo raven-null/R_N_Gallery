@@ -1363,6 +1363,19 @@ async function aiTagSearch(query) {
 - 测试：`test:tagrefresh` 新增 5 项（29 项全过）——删一张卡片后其余节点 `isConnected`、总数 -1、
   弹窗 z-index 121 < 灯箱 122；`test:dom` 215 项同样全过
 
+### 批次 74 · 弹窗里滚动不再穿透到底层图库（v0.83，2026-10-27）🔧
+> 用户反馈：在「重复 / 相似图片」窗口里往下滚，滚到列表尽头就把底下的图库一起滚走了。
+
+- **原因**：`.dup-body` 虽然有 `max-height: 56vh; overflow-y: auto`，但滚到尽头后浏览器会继续
+  把滚轮事件「链」给外层文档 —— 页面本身没锁，图库就跟着滚了
+- **改法**：
+  - 层级监听里顺手开关 `body.modal-open` —— 只要有 `.modal-mask` / `.lightbox` 打开就锁住底层滚动
+    （`body.modal-open { overflow: hidden }`）
+  - `html { scrollbar-gutter: stable }`：锁滚动时右侧留白不变，页面不会因为滚动条消失左右抖一下
+  - `.dup-body`、`.lb-info`、`.modal-mask .modal` 都加 `overscroll-behavior: contain`，
+    列表滚到尽头不再把滚动链传给父级
+- 测试：`test:dom` 新增 2 项（弹窗打开 → `body.modal-open`；关闭 → 恢复），共 217 项全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）
