@@ -1234,12 +1234,13 @@ async function runDupScan() {
 
 function dropFromDupResults(ids) {
   const set = new Set(ids);
-  for (let i = PHOTOS.length - 1; i >= 0; i--) if (set.has(PHOTOS[i].id)) PHOTOS.splice(i, 1);
   dupAll = dupAll.filter((x) => !set.has(x.id));
   dupGroups = dupGroups
     .map((g) => ({ ...g, photos: g.photos.filter((x) => !set.has(x.id)) }))
     .filter((g) => g.photos.length > 1); // 组里只剩一张就不再是「重复」
-  if (window.__refreshGallery) window.__refreshGallery();
+  // v0.82：图库那边就地摘卡片（原来 __refreshGallery 会整块重建 = 一次整页刷新）
+  if (window.__removePhotosLocally) window.__removePhotosLocally(ids);
+  else if (window.__refreshGallery) window.__refreshGallery();
   renderDupResults();
 }
 
@@ -1349,6 +1350,32 @@ document.addEventListener("click", (e) => {
   const ghost = btns.find((b) => b.classList.contains("ghost"));
   if (ghost) { ghost.click(); return; }
   mask.classList.remove("open");
+});
+
+/* ---------- v0.82：窗口层级「谁最后打开谁在上面」 ----------
+   以前 .modal-mask 统一 z-index: 120，而灯箱是 100 —— 于是从「查找重复」窗口点
+   「看大图」时，灯箱反而被压在弹窗下面。现在任何 .modal-mask / .lightbox 拿到 .open
+   就赋一个递增的 z-index（关掉时清掉内联值，回落到 CSS 基准层级），
+   灯箱想看大图就在最上层，之后再开编辑 / 确认弹窗又压在灯箱上。 */
+let layerTop = 120;
+const layerOpen = new WeakSet();
+const layerObs = new MutationObserver((muts) => {
+  muts.forEach((m) => {
+    const el = m.target;
+    if (!el.classList) return;
+    const on = el.classList.contains("open");
+    if (on && !layerOpen.has(el)) {
+      layerOpen.add(el);
+      el.style.zIndex = String(++layerTop);
+    } else if (!on && layerOpen.has(el)) {
+      layerOpen.delete(el);
+      el.style.removeProperty("z-index");
+    }
+  });
+  if (!document.querySelector(".modal-mask.open, .lightbox.open")) layerTop = 120; // 全关了 → 计数复位
+});
+document.querySelectorAll(".modal-mask, .lightbox").forEach((el) => {
+  layerObs.observe(el, { attributes: true, attributeFilter: ["class"] });
 });
 
 /* ---------- 通用：悬浮弹出菜单（悬停弹出 + 点击固定 + 延迟收起，v0.8.4） ---------- */
@@ -2746,6 +2773,47 @@ function initGallery() {
   }
   window.__refreshTagChange = refreshTagChange;
 
+  /* ---------- v0.82：删除图片也不整页刷新 ----------
+     以前删一张图就 loadData() 整库重拉 + __refreshGallery() 全量重建：
+     已加载的后续页被丢掉、滚动位置弹回顶部、入场动画重播。
+     现在只把这几张从 PHOTOS 与 grid 里摘掉，再顺手补几张填满视口。 */
+  window.__removePhotosLocally = (ids) => {
+    const set = new Set(Array.isArray(ids) ? ids : [ids]);
+    if (!set.size) return 0;
+    const before = PHOTOS.length;
+    PHOTOS = PHOTOS.filter((p) => !set.has(p.id));
+    const removed = before - PHOTOS.length;
+    if (!removed) return 0;
+    const y = window.scrollY;
+    filtered = sortPhotos(PHOTOS.filter((p) => basePred(p)));
+    // ① 已渲染出来的卡片：直接摘节点（不重建 grid → 不跳滚动、不重播动画）
+    const hit = [...grid.querySelectorAll(".card")].filter((c) => set.has(c.dataset.id));
+    if (hit.length) {
+      hit.forEach((c) => {
+        const prev = c.previousElementSibling; // 方格 + 按时间排序时的日期分段头
+        c.remove();
+        if (prev && prev.classList && prev.classList.contains("grid-group")
+          && !(prev.nextElementSibling && prev.nextElementSibling.classList.contains("card"))) prev.remove();
+      });
+      shown = grid.querySelectorAll(".card").length;
+      if (!filtered.length) {
+        render({ skipReveal: true }); // 删空了 → 交给空态
+      } else {
+        updateLoadMore();
+        renderTagMenuContent();
+        if (window.__fillViewport) window.__fillViewport(); // 少了几张，补回来
+      }
+      try { window.scrollTo({ top: Math.min(y, window.scrollY), behavior: "instant" }); } catch (e) { /* ignore */ }
+      return removed;
+    }
+    // ② 删的不是当前渲染的卡片（比如在查重窗口里删）→ 静默重渲，守住滚动位置
+    shown = Math.max(PAGE, Math.min(shown || PAGE, filtered.length));
+    render({ skipReveal: true });
+    renderTagMenuContent();
+    try { window.scrollTo({ top: y, behavior: "instant" }); } catch (e) { window.scrollTo(0, y); }
+    return removed;
+  };
+
 
   /* v0.65：循环模式的列数是 JS 算出来的，窗口尺寸变化会改变列数 → 重排一次并尽量守住滚动位置 */
   let loopResizeT = null;
@@ -3252,9 +3320,12 @@ function initUpload() {
             if (choice === "replace") {
               try {
                 await apiFetch(`/api/photos/${target.photo.id}`, { method: "DELETE" });
-                const bi = PHOTOS.findIndex((x) => x.id === target.photo.id);
-                if (bi >= 0) PHOTOS.splice(bi, 1);
-                if (window.__renderGallery) window.__renderGallery();
+                if (window.__removePhotosLocally) window.__removePhotosLocally([target.photo.id]);
+                else {
+                  const bi = PHOTOS.findIndex((x) => x.id === target.photo.id);
+                  if (bi >= 0) PHOTOS.splice(bi, 1);
+                  if (window.__renderGallery) window.__renderGallery();
+                }
                 setSub(`已替换库中「${target.photo.title}」`);
               } catch (e) {
                 setSub("替换失败，仍按新图上传");
@@ -3428,8 +3499,12 @@ async function batchDelete() {
   askConfirm(`删除选中的 ${ids.length} 张图片？`, "原图与元数据将被永久删除，不可恢复。建议先导出元数据备份。", "全部删除", async () => {
     try {
       await Promise.all(ids.map((id) => apiFetch(`/api/photos/${id}`, { method: "DELETE" })));
-      await loadData();
-      if (window.__refreshGallery) window.__refreshGallery();
+      // v0.82：原地摘掉这些卡片，不再 loadData() 整库重拉
+      if (window.__removePhotosLocally) window.__removePhotosLocally(ids);
+      else {
+        await loadData();
+        if (window.__refreshGallery) window.__refreshGallery();
+      }
       exitSelectMode();
     } catch (e) {
       alert("删除失败：" + e.message);
@@ -3599,8 +3674,9 @@ function delFromEditModal() {
     document.getElementById("editModal").classList.remove("open");
     // v0.38：图片已删除 → 关灯箱（顺带停幻灯片、收工具条）
     if (lbIsOpen()) closeLightbox();
-    await loadData();
-    if (window.__refreshGallery) window.__refreshGallery();
+    /* v0.82：只把这张从图库里摘掉（loadData() 整库重拉 + 全量重渲 = 一次整页刷新，已删除） */
+    if (window.__removePhotosLocally) window.__removePhotosLocally([id]);
+    else { await loadData(); if (window.__refreshGallery) window.__refreshGallery(); }
   });
 }
 function initEditModal() {

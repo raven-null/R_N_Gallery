@@ -1348,6 +1348,21 @@ async function aiTagSearch(query) {
 - 测试：`test:dom` 更新 + 新增 6 项（信息面板存在且默认收起 / 点开有 10 行 / 内容对应当前图 /
   Esc 只收面板、工具条按钮数 5→6 / 标签条不换行裁剪的 CSS 断言 / 卡片不再渲染日期大小），共 215 项全过
 
+### 批次 73 · 删除图片原地移除 + 灯箱层级（v0.82，2026-10-27）🔧
+> 用户反馈：① 删图片后整个图库都会刷新一次，不要这样。② 查重窗口点「看大图」，灯箱被压在弹窗下面。
+
+- **删除**：`delFromEditModal` / `batchDelete` / 查重窗口删图 / 上传时「用新图替换旧图」
+  原来都是 `await loadData()` + `__refreshGallery()` —— 整库重拉 + 全量重建，已加载的后续页丢掉、滚动弹回顶部
+  → 新增 `__removePhotosLocally(ids)`：从 `PHOTOS` 里摘掉，再把**已渲染的卡片节点直接 remove()**
+  （方格 + 按时间排序时，顺带把因此变空的日期分段头删掉），`shown` 跟着修正、`__fillViewport()` 补几张填满视口；
+  删的不是当前渲染的卡片（例如在查重窗口里删）才退回「静默重渲 + 守住滚动位置」
+- **层级**：`.modal-mask` 统一 `z-index: 120`、灯箱只有 `100`，从查重弹窗打开灯箱必然被盖住
+  → 新增 MutationObserver：任何 `.modal-mask` / `.lightbox` 拿到 `.open` 就赋一个**递增的 z-index**，
+  关掉时清掉内联值回落到 CSS 基准；全部关闭后计数复位到 120。
+  于是「弹窗 → 灯箱」灯箱在上，再开编辑 / 确认弹窗又压在灯箱上，不再出现谁被谁盖住
+- 测试：`test:tagrefresh` 新增 5 项（29 项全过）——删一张卡片后其余节点 `isConnected`、总数 -1、
+  弹窗 z-index 121 < 灯箱 122；`test:dom` 215 项同样全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

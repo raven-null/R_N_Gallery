@@ -210,6 +210,32 @@ function mockFetch(url, opts) {
   await wait(60);
   check("点空白处关闭编辑弹窗", !editMask.classList.contains("open"));
 
+  /* ---- 7. v0.82：删除图片 = 原地摘卡片，不整库重渲 ---- */
+  const total0 = window.__galleryState().total;
+  const victim = cards()[1];
+  const victimId = victim.dataset.id;
+  const survivors = cards().filter((c) => c.dataset.id !== victimId);
+  window.__removePhotosLocally([victimId]);
+  await wait(120);
+  check("删除后这张卡片从 DOM 里消失", !cards().some((c) => c.dataset.id === victimId));
+  check("删除后其余卡片是同一批 DOM 节点（没有整库重建）", survivors.every((c) => c.isConnected), `${survivors.length} 张`);
+  check("删除后图库总数 -1", window.__galleryState().total === total0 - 1, `${total0} → ${window.__galleryState().total}`);
+
+  /* ---- 8. v0.82：灯箱层级要压住打开它的弹窗 ---- */
+  const dupModal = doc.getElementById("dupModal");
+  dupModal.classList.add("open");
+  await wait(60);
+  cards()[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  await wait(120);
+  const lbEl = doc.getElementById("lightbox");
+  const zDup = Number(dupModal.style.zIndex || 0);
+  const zLb = Number(lbEl.style.zIndex || 0);
+  check("灯箱打开了", lbEl.classList.contains("open"));
+  check("灯箱 z-index 高于打开它的弹窗", zLb > zDup && zDup > 0, `弹窗 ${zDup} / 灯箱 ${zLb}`);
+  dupModal.classList.remove("open");
+  doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await wait(60);
+
   const okAll = results.every(Boolean);
   console.log(`\n${okAll ? "全部通过" : "有失败项"}：${results.filter(Boolean).length}/${results.length}`);
   process.exit(okAll ? 0 : 1);
