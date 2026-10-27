@@ -1321,6 +1321,17 @@ async function aiTagSearch(query) {
 - 测试：`npm run test:dom` 新增 1 项 CSS 断言（`#confirmModal` z-index 240），共 210 项全过；
   `test:api` 24 项、`test:tagrefresh` 24 项同样全过
 
+### 批次 71 · 移除编辑弹窗的「快捷点选」胶囊墙（v0.80，2026-10-27）🧹
+> 用户反馈：编辑图片弹窗里那一整块标签胶囊（#edQuickPick）不需要了。
+
+- **移除内容**：`index.html` 的 `<div class="quick-pick" id="edQuickPick">`；
+  `app.js` 的 `renderQuickPick()` / `refreshQuickPickAll()` / `renderAllUqRowTags()`（后两者只服务于它）、
+  `window.__refreshQuickPick` 钩子、`loadTags` / `openEditModal` / 启动流程里的三处调用，
+  以及 `bindTagSuggest` 第四个参数传 `refreshQuickPickAll` 的写法；
+  `style.css` 的 `.quick-pick` / `.qp-item` / `.qp-empty` / `.uq-panel .quick-pick` / `.qp-item .qp-num` 与 perf-lite 里的引用
+- 打标签仍走输入框的**建议下拉**（`#edTagSuggest`，输入即匹配标签名 / 别名 / 拼音），功能不减
+- 测试：`test:dom` 210 项、`test:tagrefresh` 24 项全过（没有用例依赖快捷点选）
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

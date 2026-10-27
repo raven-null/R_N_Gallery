@@ -3163,39 +3163,7 @@ body.mode-guest .page-menu-item[data-page="tags"] { display: none !important; }
 /* ============================================================
    标签借鉴模块 v0.14：快捷点选 / 统计视图 / 拖拽分类
    ============================================================ */
-/* 快捷点选 pills */
-.quick-pick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.25s var(--ease-out);
-}
-.quick-pick.show { max-height: 132px; overflow-y: auto; }
-.qp-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--w008);
-  background: var(--w005);
-  color: var(--text-dim);
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-  user-select: none;
-}
-.qp-item:hover { border-color: rgba(255,159,10,0.4); color: var(--text); }
-.qp-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tg, rgba(255,255,255,0.3)); flex: none; }
-.qp-item.sel {
-  background: rgba(255,159,10,0.12);
-  border-color: rgba(255,159,10,0.35);
-  color: var(--accent);
-}
-.qp-empty { font-size: 11.5px; color: var(--text-faint); }
+/* v0.80：编辑弹窗的「快捷点选」胶囊墙（.quick-pick / .qp-item）已移除，样式一并删除 */
 
 /* 标签分类工作台（v0.14.4：左=图片小卡，右=分类槽，替换原统计视图） */
 .tmgr-seg { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -3411,7 +3379,6 @@ body.mode-guest .page-menu-item[data-page="tags"] { display: none !important; }
   font-weight: 600;
   box-shadow: 0 2px 9px color-mix(in srgb, var(--tg, var(--accent)) 32%, transparent);
 }
-.uq-panel .quick-pick { margin-top: 8px; }
 .uq-slots {
   display: flex;
   flex-direction: column;
@@ -3837,19 +3804,6 @@ body.mode-guest .page-menu-item[data-page="tags"] { display: none !important; }
 .rv-actions { display: flex; gap: 8px; }
 .rv-actions .btn { flex: 1; justify-content: center; }
 .rv-help { font-size: 11.5px; line-height: 1.7; color: var(--text-faint); }
-.qp-item .qp-num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: var(--w010);
-  color: var(--text-faint);
-  font-size: 9.5px;
-  font-weight: 700;
-  flex: none;
-}
 @media (max-width: 900px) {
   .rv-body { flex-direction: column; }
   .rv-panel { min-width: 0; width: 100%; }
@@ -3876,7 +3830,6 @@ body.perf-lite .sort-menu,
 body.perf-lite .modal,
 body.perf-lite .lightbox,
 body.perf-lite .fab,
-body.perf-lite .quick-pick,
 body.perf-lite .tag-suggest,
 body.perf-lite .batch-bar,
 body.perf-lite .dock-bar,

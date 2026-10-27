@@ -50,6 +50,7 @@ const DEFAULT_CATEGORIES = [
 ];
 const sha1hex = (buf) => crypto.createHash("sha1").update(buf).digest("hex");
 const thumbKeyOf = (id) => `thumb-${id}`;
+const THUMB_W = 960; // 缩略图最长边（v0.78：480 → 960，瀑布流放大后不再糊）
 const sanitizeCat = (v) => String(v || "").trim().slice(0, 20); // 单个主分类名清洗（配置增删改时用）
 /* 照片主分类数组清洗：字符串 / 数组都接受，去重、去空、上限 6（v0.19 主分类改为多选） */
 function sanitizeCats(v) {
@@ -111,11 +112,11 @@ function normCategories(list) {
   return out;
 }
 
-/* 服务端生成 480px 缩略图（v0.13.8）：最长边 480、webp q80、自动旋转、不放大 */
+/* 服务端生成缩略图（v0.13.8 / v0.78）：最长边 THUMB_W、webp q80、自动旋转、不放大 */
 async function genThumbBuf(buf) {
   const out = await sharp(buf, { failOn: "none", animated: false })
     .rotate()
-    .resize(480, 480, { fit: "inside", withoutEnlargement: true })
+    .resize(THUMB_W, THUMB_W, { fit: "inside", withoutEnlargement: true })
     .webp({ quality: 80, effort: 4 })
     .toBuffer();
   return out;
@@ -151,11 +152,13 @@ async function saveThumb(s, meta, id, origBuf, frontThumb) {
     if (frontThumb) {
       meta.thumbKey = thumbKeyOf(id);
       meta.thumbMime = frontThumb.mime;
+      delete meta.thumbW; // 前端缩略图尺寸未知：下次访问按 THUMB_W 重新生成（v0.78）
       await s.set(meta.thumbKey, frontThumb.buf);
     } else if (origBuf) {
       const out = await genThumbBuf(origBuf);
       meta.thumbKey = thumbKeyOf(id);
       meta.thumbMime = "image/webp";
+      meta.thumbW = THUMB_W;
       await s.set(meta.thumbKey, out);
     }
   } catch (e) { /* 缩略图失败不影响主流程 */ }
@@ -643,15 +646,17 @@ async function thumb(id, req, url, role) {
   // 成人向内容：只有管理员能看（观光访客与整理模式都拒绝）
   if (isAdultPhoto(meta) && role !== "admin") return unauthorized("当前模式不可查看该内容");
   let buf = null;
-  if (meta.thumbKey) buf = await s.get(meta.thumbKey, { type: "arrayBuffer" });
+  // 只有「当前尺寸」的缩略图才算有效缓存；旧尺寸（480）或前端上传的未知尺寸会在下面自动升级为 THUMB_W
+  if (meta.thumbKey && meta.thumbW === THUMB_W) buf = await s.get(meta.thumbKey, { type: "arrayBuffer" });
   if (!buf) {
-    // 懒生成：读原图 → sharp 480px → 存入 Blobs（下次直接命中，immutable 缓存）
+    // 懒生成：读原图 → sharp THUMB_W → 存入 Blobs（下次直接命中，immutable 缓存）
     const orig = await s.get(meta.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" });
     if (!orig) return notFound("Image data not found");
     try {
       const out = await genThumbBuf(Buffer.from(orig));
       meta.thumbKey = thumbKeyOf(id);
       meta.thumbMime = "image/webp";
+      meta.thumbW = THUMB_W;
       await s.set(meta.thumbKey, out);
       await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
       await indexPut(s, meta); // v0.54 懒生成缩略图后同步索引

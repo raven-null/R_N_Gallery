@@ -419,7 +419,6 @@ async function loadTags() {
     TAGS = (d && Array.isArray(d.groups) && Array.isArray(d.tags))
       ? { categories: Array.isArray(d.categories) ? d.categories : DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: d.groups, tags: d.tags }
       : { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] };
-    if (window.__refreshQuickPick) window.__refreshQuickPick();
     clearGroupNameCache(); // v0.55：标签 / 组变了，整组筛选用的名字集合必须重建
   } catch (e) {
     TAGS = { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] }; // API 不可用时降级为纯自由标签
@@ -3481,7 +3480,6 @@ function openEditModal(id) {
   const err = document.getElementById("edErr");
   err.style.display = "none";
   document.getElementById("editModal").classList.add("open");
-  if (window.__refreshQuickPick) window.__refreshQuickPick();
 }
 async function saveEditModal() {
   const id = editTargetId;
@@ -3545,7 +3543,7 @@ function initEditModal() {
   document.getElementById("edSave").addEventListener("click", saveEditModal);
   const delBtn = document.getElementById("edDelete");
   if (delBtn) delBtn.addEventListener("click", delFromEditModal);
-  bindTagSuggest(document.getElementById("edTagInput"), document.getElementById("edTagSuggest"), document.getElementById("edTagBox"), refreshQuickPickAll);
+  bindTagSuggest(document.getElementById("edTagInput"), document.getElementById("edTagSuggest"), document.getElementById("edTagBox"));
   bindCatPicks(document.getElementById("edCats")); // v0.15 主分类单选
   bindRatingPicks(document.getElementById("edRating")); // v0.57 分级三档
   const btSeg = document.getElementById("btMode");
@@ -4889,55 +4887,13 @@ function bindTagDrops(scope) {
   });
 }
 
-/* ---------- 快捷点选（v0.14：编辑/上传时点击即选） ---------- */
-function renderQuickPick(boxEl, wrapEl) {
-  if (!wrapEl || !boxEl) return;
-  if (!TAGS.tags.length) {
-    wrapEl.classList.remove("show");
-    wrapEl.innerHTML = `<div class="qp-empty">标签库为空，可先到「标签」页新建</div>`;
-    return;
-  }
-  const used = new Set(tagsOfBox(boxEl));
-  wrapEl.classList.add("show");
-  wrapEl.innerHTML = TAGS.tags.slice(0, 60).map((t) => {
-    const c = t.color || tagGroupColor(t.group) || null;
-    return `<span class="qp-item${used.has(t.name) ? " sel" : ""}" data-tag="${escAttr(t.name)}">
-      <i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>${esc(t.name)}</span>`;
-  }).join("");
-  wrapEl.querySelectorAll(".qp-item").forEach((el) => {
-    el.addEventListener("click", () => {
-      const n = el.dataset.tag;
-      const has = tagsOfBox(boxEl).includes(n);
-      if (has) {
-        [...boxEl.querySelectorAll(".t")].forEach((chip) => {
-          if (chip.childNodes[0].textContent.trim() === n) chip.remove();
-        });
-      } else {
-        addTagChip(boxEl, n);
-      }
-      renderQuickPick(boxEl, wrapEl);
-      const pick = document.getElementById("edQuickPick") === wrapEl ? "ed" : "up";
-      if (pick === "up") {
-        // 上传页需要重新启用按钮（chips 变化不影响 disabled 逻辑，无需处理）
-      }
-    });
-  });
-}
-function refreshQuickPickAll() {
-  renderQuickPick(document.getElementById("edTagBox"), document.getElementById("edQuickPick"));
-  renderAllUqRowTags();
-}
+/* v0.80：编辑弹窗里的「快捷点选」（#edQuickPick 标签胶囊墙）已移除 ——
+   标签改成走输入框的建议下拉（bindTagSuggest），一行行铺 60 个胶囊太占地方。
+   原 renderQuickPick / refreshQuickPickAll / renderAllUqRowTags 一并删除。 */
 
 /* 行发送的标签 = 该行自己的标签（v0.54：上传面板的全局标签与分类槽已移除） */
 function rowSendTags(it) {
   return [...new Set(it.tags || [])].slice(0, 10);
-}
-function renderAllUqRowTags() {
-  const queue = document.getElementById("queue");
-  if (!queue) return;
-  queue.querySelectorAll(".uq-item").forEach((rowEl) => {
-    if (rowEl.__item) renderUqRowTags(rowEl.__item);
-  });
 }
 /* 行 chips = 该行专属标签；全局标签见右侧输入（v0.54：上传不再选主分类） */
 function renderUqRowTags(it) {
@@ -5034,7 +4990,6 @@ function setUqStatus(msg) {
   const el = document.getElementById("upHint");
   if (el && msg) el.innerHTML = msg;
 }
-window.__refreshQuickPick = refreshQuickPickAll;
 
 
 function closeTagModal() {
@@ -5973,7 +5928,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (window.__refreshGallery) window.__refreshGallery();
   renderTagMenuContent();
   refreshTagManager();
-  refreshQuickPickAll();
 });
 
 /* ---------- 页面窗口（v0.8）· 上传/设置以独立窗口层叠悬浮于图库上方 ---------- */
