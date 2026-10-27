@@ -1331,6 +1331,31 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(200);
     check("切回管理员模式", doc.body.classList.contains("mode-admin") && doc.getElementById("editModal") !== null);
   }
+  /* v0.85：观光模式的放行开关拆成两个（R18 / R16 各一个，互不影响） */
+  {
+    const r18 = doc.getElementById("guestAdultR18");
+    const r16 = doc.getElementById("guestAdultR16");
+    check("设置页有 R18 / R16 两个放行开关", !!r18 && !!r16 && !doc.getElementById("guestAdult"));
+    if (r18 && r16 && window.__modeState) {
+      window.localStorage.setItem("rn_guest_r18", "0");
+      window.localStorage.setItem("rn_guest_r16", "1");
+      window.__setMode("guest");
+      await wait(120);
+      const st = window.__modeState();
+      check("两个开关互不影响（只隐藏 R18）", st.hidden.length === 1 && st.hidden[0] === "r18",
+        `hidden=${JSON.stringify(st.hidden)} r18=${st.r18Allowed} r16=${st.r16Allowed}`);
+      window.localStorage.setItem("rn_guest_r18", "1");
+      window.localStorage.setItem("rn_guest_r16", "0");
+      window.__setMode("guest");
+      await wait(120);
+      const st2 = window.__modeState();
+      check("反过来只隐藏 R16", st2.hidden.length === 1 && st2.hidden[0] === "r16", `hidden=${JSON.stringify(st2.hidden)}`);
+      window.localStorage.removeItem("rn_guest_r18");
+      window.localStorage.removeItem("rn_guest_r16");
+      window.__setMode("admin");
+      await wait(120);
+    }
+  }
   /* v0.50：设置里的「访问密码」「R18 密钥」入口与对应后端接口都已删除 */
   check("设置页不再有修改访问密码入口", !doc.getElementById("authPwdNew") && !doc.getElementById("btnSetPwd"));
   check("设置页不再有 R18 密钥入口", !doc.getElementById("authR18New") && !doc.getElementById("btnSetR18"));
@@ -1369,6 +1394,17 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       `全部 ${all.total} · 成人向 ${adult.length} · safe ${safe.total}`);
     check("列表返回三档分级字段", (all.photos || []).every((p) => ["general", "r16", "r18"].includes(p.rating)),
       [...new Set((all.photos || []).map((p) => p.rating))].join(" / "));
+    // v0.85：hide=r18 / hide=r16 分开隐藏
+    const h18 = await (await fetch(`${BASE}/api/photos?limit=300&hide=r18${TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""}`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} })).json();
+    const h16 = await (await fetch(`${BASE}/api/photos?limit=300&hide=r16${TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""}`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} })).json();
+    const ratings18 = (h18.photos || []).map((p) => p.rating || "general");
+    const ratings16 = (h16.photos || []).map((p) => p.rating || "general");
+    const hasR18 = (all.photos || []).some((p) => p.rating === "r18");
+    const hasR16 = (all.photos || []).some((p) => p.rating === "r16");
+    check("hide=r18 只剔除 R18（R16 还在）", !ratings18.includes("r18") && (!hasR16 || ratings18.includes("r16")),
+      `hide=r18 → ${[...new Set(ratings18)].join("/")}`);
+    check("hide=r16 只剔除 R16（R18 还在）", !ratings16.includes("r16") && (!hasR18 || ratings16.includes("r18")),
+      `hide=r16 → ${[...new Set(ratings16)].join("/")}`);
     check("标签里不再混入 r18 / r16", (all.photos || []).every((p) => !(p.tags || []).some((t) => ["r18", "r16"].includes(String(t).trim().toLowerCase()))));
     // v0.50：管理员读成人向图片不再需要额外密钥
     if (adult.length) {

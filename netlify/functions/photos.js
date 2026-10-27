@@ -511,18 +511,18 @@ async function list(url) {
   const limit = Math.min(parseInt(q.get("limit"), 10) || 60, 500);
   const s = store();
   const healed = await indexHeal(s); // v0.54：老库首次访问自动重建索引
-  const hideAdult = safeMode(q); // 观光模式（safe=1）：分页前剔除成人向
+  const hideSet = hiddenRatings(q); // 观光模式：分页前剔除要隐藏的分级（v0.85 可按 r16 / r18 分开）
   let photos;
   let cursor = null;
   let total;
 
-  if (!hideAdult) {
+  if (!hideSet.size) {
     const page = await indexGetPage(s, { limit, cursor: q.get("cursor") || undefined });
     photos = page.entries.map((e) => ({ ...e, rating: ratingOf(e) }));
     cursor = page.cursor;
     total = healed !== null ? healed : await indexCount(s);
   } else {
-    const arr = (await indexAll(s)).filter((e) => !isAdultPhoto(e));
+    const arr = (await indexAll(s)).filter((e) => !hideSet.has(ratingOf(e)));
     const start = Math.max(parseInt(q.get("cursor"), 10) || 0, 0);
     photos = arr.slice(start, start + limit).map((e) => ({ ...e, rating: ratingOf(e) }));
     const nextStart = start + limit;
@@ -545,16 +545,30 @@ function corsPreflight() {
   });
 }
 
-/* ---------- 观光模式（v0.49） ---------- */
-/* 是否属于「观光访客可读」的请求：只读、且不涉及成人向内容 */
+/* ---------- 观光模式（v0.49；v0.85：R18 / R16 可以分开隐藏） ---------- */
 function safeMode(q) {
   const v = String((q && q.get && q.get("safe")) || "").toLowerCase();
   return v === "1" || v === "true";
 }
+/* 要隐藏的分级集合：`?hide=r18`、`?hide=r16,r18`。
+   为兼容老前端，`safe=1` 等价于 hide=r16,r18（两档都藏）。 */
+function hiddenRatings(q) {
+  const set = new Set();
+  const raw = String((q && q.get && q.get("hide")) || "").toLowerCase();
+  raw.split(/[,，\s]+/).forEach((x) => {
+    if (RATINGS.includes(x) && x !== "general") set.add(x);
+  });
+  if (!set.size && safeMode(q)) {
+    set.add("r16");
+    set.add("r18");
+  }
+  return set;
+}
+/* 是否属于「观光访客可读」的请求：只读、且不涉及成人向内容 */
 function guestReadOK(method, path, url, rest) {
   if (method !== "GET") return false;
-  // 图片列表：必须显式带 safe=1（服务端会剔除 R18 / R16）
-  if (path.endsWith("/api/photos")) return safeMode(url.searchParams);
+  // 图片列表：观光访客必须自己声明要隐藏哪些分级（hide=...，或老式的 safe=1）
+  if (path.endsWith("/api/photos")) return hiddenRatings(url.searchParams).size > 0;
   // 标签配置与相册列表：不含成人向内容，可读
   if (path.endsWith("/api/tags") || path.endsWith("/api/albums")) return true;
   // 图片字节：放行到这里，raw / thumb 内部再按「成人向」判断

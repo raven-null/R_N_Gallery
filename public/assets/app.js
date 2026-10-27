@@ -598,7 +598,8 @@ const timeoutSignal = (ms) =>
 async function fetchPhotosPage(cursor, limit) {
   const qs = new URLSearchParams({ limit: String(limit) });
   if (cursor) qs.set("cursor", String(cursor));
-  if (adultHidden()) qs.set("safe", "1"); // v0.49 观光模式：服务端列表里也剔除成人向图片
+  const hide = [...hiddenRatingSet];
+  if (hide.length) qs.set("hide", hide.join(",")); // v0.85：R18 / R16 分开隐藏（老服务端仍认 safe=1）
   const res = await fetch(`/api/photos?${qs}`, { headers: apiHeaders(), cache: "no-store", signal: timeoutSignal(20000) }); // v0.54：加 20s 超时
   if (!res.ok) throw new Error("api unavailable");
   return res.json();
@@ -614,7 +615,7 @@ async function backgroundLoad(cursor) {
       const page = await fetchPhotosPage(c, NEXT_PAGE);
       const raw = (page.photos || []).map(mapPhoto);
       if (!raw.length) break; // 用原始条数判断是否还有下一页（v0.49：过滤成人向不能让分页提前结束）
-      const items = adultHidden() ? raw.filter((p) => !isAdult(p)) : raw; // v0.49 观光模式双保险
+      const items = raw.filter((p) => !ratingHidden(p)); // v0.49 观光模式双保险（v0.85：按分级分别判断）
       const known = new Set(PHOTOS.map((p) => p.id));
       PHOTOS.push(...items.filter((p) => !known.has(p.id)));
       c = page.cursor || null;
@@ -632,7 +633,7 @@ async function loadData() {
   try {
     const first = await fetchPhotosPage(null, FIRST_PAGE);
     if (seq !== loadSeq) return; // 期间又发起了新的加载 → 丢弃这次结果
-    PHOTOS = (first.photos || []).map(mapPhoto).filter((p) => !adultHidden() || !isAdult(p)); // v0.49 观光模式双保险
+    PHOTOS = (first.photos || []).map(mapPhoto).filter((p) => !ratingHidden(p)); // v0.49 观光模式双保险（v0.85 按分级）
     USE_API = true;
     showGalleryState(null); // 由 render 决定显示图片或空态
     if (first.hasMore) backgroundLoad(first.cursor); // 剩余的后台补齐
@@ -731,17 +732,19 @@ function ratingOf(p) {
 }
 const isR18 = (p) => ratingOf(p) === "r18";
 const isR16 = (p) => ratingOf(p) === "r16";
-/* 成人向 = 非大众级（观光 / 整理模式对 R16 与 R18 一视同仁） */
+/* 成人向 = 非大众级（R16 / R18 都属于「成人向」这一档大类） */
 const isAdult = (p) => ratingOf(p) !== "general";
 /* v0.50：R18 密钥的输入 / 校验流程与锁定占位卡都已删除；
-   R18 / R16 的可见性现在只由观光模式的 adultHidden() 决定 */
-/* ---------- 观光 / 整理 / 管理员 三种模式（v0.49；v0.51 加整理模式） ----------
-   观光模式：只能看图与下载（外加筛选/搜索/排序/布局切换这些纯浏览辅助），R18 / R16 隐藏
-   整理模式：观光模式的能力 + 「标签管理 → 整理」里给图片打标签 / 设主分类，R18 / R16 照样隐藏
+   R18 / R16 的可见性现在由观光模式的「是否放行该分级」决定 */
+/* ---------- 观光 / 管理员 两种模式（v0.49；v0.59 整理模式已移除） ----------
+   观光模式：只能看图与下载（外加筛选/搜索/排序/布局切换这些纯浏览辅助）
    管理员模式：全部功能、全部图片
-   观光 → 整理 / 管理员 需要输入对应密码（服务端登录接口一次判断角色） */
+   v0.85：观光模式的两个放行开关**分开** —— R18 与 R16 各一个，
+   可以只放行 R16、仍然隐藏 R18（以前是一个总开关，要么都看要么都藏）。 */
 const MODE_KEY = "rn_mode";
-const GUEST_ADULT_KEY = "rn_guest_adult";
+const GUEST_R18_KEY = "rn_guest_r18";   // 观光模式允许看 R18
+const GUEST_R16_KEY = "rn_guest_r16";   // 观光模式允许看 R16
+const GUEST_ADULT_KEY = "rn_guest_adult"; // v0.84 及更早的总开关，仅作迁移回退
 const GUEST_VISIT_KEY = "rn_guest_visit"; // 观光访客：没有访问密码也允许只读浏览
 function guestVisiting() {
   try { return localStorage.getItem(GUEST_VISIT_KEY) === "1"; } catch (e) { return false; }
@@ -754,13 +757,40 @@ function modeValue() {
 function isAdmin() { return modeValue() === "admin"; }
 /* v0.59：整理模式已移除 —— 能改东西的只有管理员，观光模式一律只读 */
 function manageAllowed() { return isAdmin(); }
-function guestAdultAllowed() {
-  try { return localStorage.getItem(GUEST_ADULT_KEY) === "1"; } catch (e) { return false; }
+/* 观光模式是否放行某个分级（r16 / r18）。老版本只有一个总开关：它开着就两个都放行 */
+function guestAllows(rating) {
+  const key = rating === "r18" ? GUEST_R18_KEY : GUEST_R16_KEY;
+  try {
+    const v = localStorage.getItem(key);
+    if (v === "1" || v === "0") return v === "1";
+    return localStorage.getItem(GUEST_ADULT_KEY) === "1";
+  } catch (e) { return false; }
 }
-/* 现在是否需要隐藏成人向图片（只有管理员能看到） */
-function adultHidden() { return !isAdmin() && !guestAdultAllowed(); }
+function setGuestAllows(rating, on) {
+  try {
+    localStorage.setItem(rating === "r18" ? GUEST_R18_KEY : GUEST_R16_KEY, on ? "1" : "0");
+    localStorage.removeItem(GUEST_ADULT_KEY); // 一旦分开设置，老总开关就退休
+  } catch (e) { /* ignore */ }
+}
+/* 当前要隐藏的分级集合（管理员 → 空集）。渲染 / 请求前都读这个集合，
+   不要每张图去翻 localStorage */
+let hiddenRatingSet = new Set();
+function refreshHiddenRatings() {
+  const set = new Set();
+  if (!isAdmin()) {
+    if (!guestAllows("r18")) set.add("r18");
+    if (!guestAllows("r16")) set.add("r16");
+  }
+  hiddenRatingSet = set;
+  return set;
+}
+const hiddenRatings = () => hiddenRatingSet;
+const ratingHidden = (p) => hiddenRatingSet.has(ratingOf(p));
+/* 兼容旧调用：是否还有成人向被隐藏 */
+const adultHidden = () => hiddenRatingSet.size > 0;
 
 function applyMode() {
+  refreshHiddenRatings(); // v0.85：模式 / 开关变了，隐藏集合要跟着重建
   const mode = modeValue();
   const guest = mode === "guest";
   document.body.classList.toggle("mode-guest", guest);
@@ -776,8 +806,11 @@ function applyMode() {
   }
   const state = document.getElementById("modeState");
   if (state) state.textContent = guest ? "观光模式" : "管理员模式";
-  const box = document.getElementById("guestAdult");
-  if (box) box.checked = guestAdultAllowed();
+  // v0.85：R18 / R16 两个开关各自回显
+  const r18Box = document.getElementById("guestAdultR18");
+  if (r18Box) r18Box.checked = guestAllows("r18");
+  const r16Box = document.getElementById("guestAdultR16");
+  if (r16Box) r16Box.checked = guestAllows("r16");
   // v0.56：非管理员不显示收藏入口（收藏是照片字段的写操作；卡片上的爱心同理按 manageAllowed 控制）
   const favBtn = document.getElementById("lbToolFav");
   if (favBtn) favBtn.style.display = isAdmin() ? "" : "none";
@@ -805,7 +838,10 @@ function guestBlocked(what) {
 }
 window.__modeState = () => ({
   mode: modeValue(),
-  guestAdultAllowed: guestAdultAllowed(),
+  r18Allowed: guestAllows("r18"),
+  r16Allowed: guestAllows("r16"),
+  guestAdultAllowed: guestAllows("r18") || guestAllows("r16"), // 兼容旧断言
+  hidden: [...hiddenRatingSet],
   photos: PHOTOS.length,
   adultVisible: PHOTOS.filter(isAdult).length,
 });
@@ -876,14 +912,20 @@ function initModeModal() {
   if (fbtn) fbtn.addEventListener("click", (e) => { e.stopPropagation(); openModeModal(); });
   const sbtn = document.getElementById("btnModeSwitch");
   if (sbtn) sbtn.onclick = openModeModal;
-  const adult = document.getElementById("guestAdult");
-  if (adult) {
-    adult.addEventListener("change", () => {
-      if (guestBlocked("修改该开关")) { adult.checked = guestAdultAllowed(); return; }
-      try { localStorage.setItem(GUEST_ADULT_KEY, adult.checked ? "1" : "0"); } catch (e) { /* ignore */ }
+  // v0.85：R18 / R16 两个开关分开绑；改完要重拉一次列表（服务端 hide 参数变了）
+  [["r18", "guestAdultR18"], ["r16", "guestAdultR16"]].forEach(([rating, id]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      if (guestBlocked("修改该开关")) { el.checked = guestAllows(rating); return; }
+      setGuestAllows(rating, el.checked);
       applyMode();
+      refreshHiddenRatings();
+      Promise.resolve(loadData()).then(() => {
+        if (window.__refreshGallery) window.__refreshGallery();
+      });
     });
-  }
+  });
 }
 
 /* 门禁页：登录成功后写入 token 并重载（让所有请求与图片 URL 都带上凭证） */

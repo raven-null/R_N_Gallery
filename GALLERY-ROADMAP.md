@@ -1392,6 +1392,20 @@ async function aiTagSearch(query) {
 - 测试：`test:dom` 新增 1 项（`/api/meta/stats` 的 bytes / byKind 必须 > 0），共 218 项全过；
   `test:api` 24 项、`test:tagrefresh` 29 项同样全过
 
+### 批次 76 · 观光模式的 R18 / R16 放行开关拆成两个（v0.85，2026-10-27）✨
+> 用户反馈：设置里「允许观光模式观看 R18 / R16」是一个总开关，想分开允许。
+
+- **前端（app.js / index.html）**：一个开关拆成两个（`#guestAdultR18` / `#guestAdultR16`），
+  存储键分别是 `rn_guest_r18` / `rn_guest_r16`；老键 `rn_guest_adult` 只在没有新键时作为回退读取，
+  一旦用新开关设置过就删掉（老用户的总开关状态自动继承为「两个都放行」）
+- 可见性判定从布尔 `adultHidden()` 改成集合 `hiddenRatingSet`（由 `refreshHiddenRatings()` 重建，
+  `applyMode()` 里统一刷新）：管理员 = 空集；观光模式按两个开关分别决定隐藏 r16 / r18。
+  列表请求也据此带 `?hide=r18` 或 `?hide=r16,r18`；切换开关后会重新拉一次列表，图库立刻跟着变
+- **服务端（photos.js）**：新增 `hiddenRatings(q)` —— 支持 `?hide=r16,r18` 这种细分，
+  为兼容老前端 `safe=1` 仍等价于「两档都藏」；`list()` 与观光访客通行判定（`guestReadOK`）都改用它
+- 测试：`test:dom` 新增 5 项（两个开关存在且旧单开关已移除 / 只隐藏 R18 / 只隐藏 R16 /
+  `hide=r18` 与 `hide=r16` 的服务端过滤各一项），共 223 项全过；`test:api` 24 项、`test:tagrefresh` 29 项同样全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）
