@@ -1376,6 +1376,22 @@ async function aiTagSearch(query) {
     列表滚到尽头不再把滚动链传给父级
 - 测试：`test:dom` 新增 2 项（弹窗打开 → `body.modal-open`；关闭 → 恢复），共 217 项全过
 
+### 批次 75 · 设置页「已用空间」真的算得出来（v0.84，2026-10-27）🔧
+> 用户反馈：设置页里「已用空间 0 KB（3313 个文件）」，明细永远是「—」，配额条永远是 0%。
+
+- **根因**：`stats()` 拿 `s.list()` 里的 `item.size` 累加 —— 但 `@netlify/blobs` 的 `list()`
+  只返回 `{ key, etag }`，**根本没有 size 字段**，于是每个 blob 都按 0 字节算：
+  合计恒为 0、`byKind` 全 0（明细拼不出内容、只能显示「—」）、配额比例恒为 0%
+- **改法（netlify/functions/photos.js）**：
+  - `saveThumb()` 与缩略图懒生成路径都记下 `meta.thumbSize`，新图缩略图字节数精确可查
+  - `stats()` 重写：`list()` 只负责数文件个数（key 精确），字节数分几路凑 ——
+    原图取索引里的 `size`（精确）、缩略图取 `meta.thumbSize`（老数据按已知平均值估算）、
+    元数据取 `meta` JSON 的实际长度（精确）、索引按索引 JSON 长度、其余按每图一条 hash 反查键估
+  - 结果缓存 60 秒；函数入口处只要不是 GET 就把缓存置空（上传 / 删图 / 改标签后立刻刷新）
+  - 返回里附带 `estimated: { thumb, idx, other }`，前端以后可以据此标注估算项
+- 测试：`test:dom` 新增 1 项（`/api/meta/stats` 的 bytes / byKind 必须 > 0），共 218 项全过；
+  `test:api` 24 项、`test:tagrefresh` 29 项同样全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

@@ -1381,6 +1381,19 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("safe=1 列表里没有 R16 / R18 图片", false, e.message);
   }
 
+  /* v0.84：用量统计要真的算得出字节数（之前一直显示 0 KB） */
+  {
+    try {
+      const r = await fetch(`${BASE}/api/meta/stats`, { headers: TOKEN ? { "X-Auth-Token": TOKEN } : {} });
+      const d = await r.json();
+      const k = (d && d.byKind) || {};
+      check("用量统计返回真实字节数", !!d && d.bytes > 0 && k.img > 0 && k.meta > 0,
+        `共 ${d && d.bytes} B · 原图 ${k.img} · 缩略图 ${k.thumb} · 元数据 ${k.meta} · ${d && d.keys} 个文件`);
+    } catch (e) {
+      check("用量统计返回真实字节数", false, e.message);
+    }
+  }
+
   /* v0.53：所有前端会用到的接口都必须挂载在函数的 config.path 里（漏加会直接 404） */
   {
     const hdr = Object.assign({ "Content-Type": "application/json" }, TOKEN ? { "X-Auth-Token": TOKEN } : {});

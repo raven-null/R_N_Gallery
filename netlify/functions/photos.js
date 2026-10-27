@@ -152,6 +152,7 @@ async function saveThumb(s, meta, id, origBuf, frontThumb) {
     if (frontThumb) {
       meta.thumbKey = thumbKeyOf(id);
       meta.thumbMime = frontThumb.mime;
+      meta.thumbSize = frontThumb.buf.length; // v0.84：记下字节数，用量统计才算得出来
       delete meta.thumbW; // 前端缩略图尺寸未知：下次访问按 THUMB_W 重新生成（v0.78）
       await s.set(meta.thumbKey, frontThumb.buf);
     } else if (origBuf) {
@@ -159,6 +160,7 @@ async function saveThumb(s, meta, id, origBuf, frontThumb) {
       meta.thumbKey = thumbKeyOf(id);
       meta.thumbMime = "image/webp";
       meta.thumbW = THUMB_W;
+      meta.thumbSize = out.length; // v0.84
       await s.set(meta.thumbKey, out);
     }
   } catch (e) { /* 缩略图失败不影响主流程 */ }
@@ -191,6 +193,9 @@ exports.default = async (req) => {
     /* ---- 访问控制端点（无需登录） ---- */
     if (method === "GET" && path.endsWith("/api/auth/state")) return authState();
     if (method === "POST" && path.endsWith("/api/auth/login")) return authLogin(req);
+
+    /* v0.84：任何写操作都让用量统计缓存失效（上传 / 删图 / 改标签都会改变占用） */
+    if (method !== "GET") statsCache.at = 0;
 
     /* ---- 其余端点默认都需要密码（未设置密码时自动放行）----
        role：admin = 持访问密码（全部权限）；null = 无凭证
@@ -657,6 +662,7 @@ async function thumb(id, req, url, role) {
       meta.thumbKey = thumbKeyOf(id);
       meta.thumbMime = "image/webp";
       meta.thumbW = THUMB_W;
+      meta.thumbSize = out.length; // v0.84：缩略图字节数（用量统计算得出来）
       await s.set(meta.thumbKey, out);
       await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
       await indexPut(s, meta); // v0.54 懒生成缩略图后同步索引
@@ -902,45 +908,98 @@ async function clearAll(req) {
   return json({ ok: true, deleted });
 }
 
-/* ---------- 用量统计（v0.54：真实遍历 Blobs 统计总占用） ----------
-   旧实现只累加原图的 size，缩略图（每张几十 KB，占比可达 20%+）、meta、索引、配置全没算，
-   所以「已用空间」明显偏小。现在直接遍历所有 Blob key 累加真实字节，并按用途分类。 */
+/* ---------- 用量统计（v0.84：真的算得出字节数） ----------
+   以前拿 `s.list()` 里的 `item.size` 累加 —— 可 @netlify/blobs 的 list 只返回
+   `{ key, etag }`，**根本没有 size 字段**，于是「已用空间」永远是 0 KB、明细永远是「—」。
+   现在 list 只负责数文件个数（key 精确），字节数分几路凑：
+     · 原图：索引里的 size（精确）
+     · 缩略图：meta.thumbSize（v0.84 起新图精确记下；老图按已知平均值估）
+     · 元数据：meta JSON 的真实长度（精确）
+     · 索引 / 其他：索引 JSON 长度 + 每张图那条 hash 反查键的固定开销（估）
+   结果缓存 60 秒，且任何写操作都会让缓存失效。 */
+let statsCache = { at: 0, data: null };
 async function stats() {
+  if (statsCache.data && Date.now() - statsCache.at < 60000) return json(statsCache.data);
+
   const s = store();
-  const byKind = { img: 0, thumb: 0, meta: 0, idx: 0, other: 0 };
   const countByKind = { img: 0, thumb: 0, meta: 0, idx: 0, other: 0 };
-  let bytes = 0;
   let keys = 0;
   let cursor;
   do {
     const res = await s.list({ cursor, limit: 500 });
-    for (const item of res.blobs) {
-      const size = Number(item.size) || 0;
-      bytes += size;
+    for (const item of res.blobs || []) {
       keys++;
-      const kind = item.key.startsWith(PREFIX_IMG) ? "img"
-        : item.key.startsWith("thumb-") ? "thumb"
-        : item.key.startsWith(PREFIX_META) ? "meta"
-        : item.key.startsWith(PREFIX_IDX) ? "idx"
-        : "other";
-      byKind[kind] += size;
-      countByKind[kind]++;
+      const k = String(item.key || "");
+      if (k.startsWith(PREFIX_IMG)) countByKind.img++;
+      else if (k.startsWith("thumb-")) countByKind.thumb++;
+      else if (k.startsWith(PREFIX_META)) countByKind.meta++;
+      else if (k.startsWith(PREFIX_IDX)) countByKind.idx++;
+      else countByKind.other++;
     }
     cursor = res.nextCursor;
   } while (cursor);
 
-  // 照片数与按月份分布仍走索引（轻量，不必再读一遍 meta）
+  // 照片数与按月份分布 / 原图字节：走索引（单个 blob，轻量）
   const arr = await indexAll(s);
+  const byKind = { img: 0, thumb: 0, meta: 0, idx: 0, other: 0 };
   const byMonth = {};
   let originalBytes = 0;
   for (const e of arr) {
-    originalBytes += e.size || 0;
+    const sz = Number(e.size) || 0;
+    originalBytes += sz;
+    byKind.img += sz;
     const month = String(e.uploadedAt || "").slice(0, 7) || "unknown";
     byMonth[month] = (byMonth[month] || 0) + 1;
   }
+
+  // 元数据 / 缩略图字节：逐张读 meta（都是小 JSON，并发 10）
+  let thumbKnown = 0;
+  let thumbKnownN = 0;
+  let thumbUnknown = 0;
+  cursor = undefined;
+  do {
+    const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
+    const ks = (res.blobs || []).map((b) => b.key);
+    await mapLimit(ks, 10, async (key) => {
+      const m = await s.get(key, { type: "json" }).catch(() => null);
+      if (!m) return;
+      byKind.meta += Buffer.byteLength(JSON.stringify(m)); // 与写入的字符串等长
+      if (!m.thumbKey) return;
+      const ts = Number(m.thumbSize) || 0;
+      if (ts > 0) {
+        byKind.thumb += ts;
+        thumbKnown += ts;
+        thumbKnownN++;
+      } else {
+        thumbUnknown++;
+      }
+    });
+    cursor = res.nextCursor;
+  } while (cursor);
+  // 老数据没记缩略图大小：按已知平均值估（一张都没记过就按 45KB 兜底）
+  byKind.thumb += Math.round(thumbUnknown * (thumbKnownN ? thumbKnown / thumbKnownN : 45 * 1024));
+
+  byKind.idx = Buffer.byteLength(JSON.stringify(arr));
+  byKind.other = countByKind.other * 80; // hash 反查键 / 标签配置这类小 JSON
+  if (!countByKind.idx) countByKind.idx = 1;
+
+  const bytes = byKind.img + byKind.thumb + byKind.meta + byKind.idx + byKind.other;
   // 配额（默认 1GB，可用 QUOTA_BYTES 环境变量覆盖）
   const quota = Math.max(parseInt(process.env.QUOTA_BYTES, 10) || 1024 * 1024 * 1024, 1);
-  return json({ count: arr.length, bytes, originalBytes, keys, byKind, countByKind, byMonth, quota });
+  const data = {
+    count: arr.length,
+    bytes,
+    originalBytes,
+    keys,
+    byKind,
+    countByKind,
+    byMonth,
+    quota,
+    // 哪些部分是估算的（前端可以据此提示）
+    estimated: { thumb: thumbUnknown > 0, idx: true, other: true },
+  };
+  statsCache = { at: Date.now(), data };
+  return json(data);
 }
 
 /* ---------- 导出全部元数据 ---------- */
