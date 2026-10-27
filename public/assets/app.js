@@ -282,7 +282,8 @@ async function setFav(id, on) {
   const next = on === undefined ? !prev : !!on;
   if (next === prev) return true;
   p.fav = next; // 乐观更新：手感优先，失败回滚
-  if (window.__renderGallery) window.__renderGallery();
+  if (window.__patchCardFav) window.__patchCardFav(id, next); // v0.76：只改这张卡片的 ♥，不重绘整个图库
+  else if (window.__renderGallery) window.__renderGallery();
   updateLbFav();
   try {
     const r = await apiFetch(`/api/photos/${id}`, {
@@ -295,7 +296,8 @@ async function setFav(id, on) {
     return true;
   } catch (e) {
     p.fav = prev;
-    if (window.__renderGallery) window.__renderGallery();
+    if (window.__patchCardFav) window.__patchCardFav(id, prev);
+    else if (window.__renderGallery) window.__renderGallery();
     updateLbFav();
     alert((next ? "收藏" : "取消收藏") + "失败：" + e.message);
     return false;
@@ -347,6 +349,12 @@ function catChipsOf(p, max = 2) {
   if (!cats.length) return "";
   return cats.slice(0, max).map(catChip).join("")
     + (cats.length > max ? `<span class="tg cat" style="--tg:#8e8e93" title="${escAttr(cats.join("、"))}">+${cats.length - max}</span>` : "");
+}
+/* 卡片底部的 chips 内容（v0.76：抽成函数 —— 改完标签只重画这一小块，
+   不用重建整张卡片，更不用重建整个图库） */
+function cardTagsHTML(p) {
+  const tags = Array.isArray(p.tags) ? p.tags : [];
+  return catChipsOf(p, 2) + tags.slice(0, catsOf(p).length ? 2 : 3).map(tagChip).join("");
 }
 /* 主分类 chips 渲染（sel 可为字符串或数组）；容器 data-multi="1" 时多选
    v0.28：容器 data-can-edit="1" 时每个分类带「✎」编辑入口（改名 / 改色 / 删除） */
@@ -2411,7 +2419,7 @@ function initGallery() {
       ${manageAllowed() ? `<button class="fv" data-fav="${p.id}" title="${favorite ? "取消收藏" : "收藏"}">${favorite ? "♥" : "♡"}</button>` : ""}
       ${ratingBadge(p)}
       <div class="card__content">
-        <div class="card__tags">${catChipsOf(p, 2)}${p.tags.slice(0, catsOf(p).length ? 2 : 3).map(tagChip).join("")}</div>
+        <div class="card__tags">${cardTagsHTML(p)}</div>
         <p class="card__meta">${fmtDate(p.takenAt)} · ${fmtSize(p.size)}</p>
       </div>
     </div>`;
@@ -2551,6 +2559,78 @@ function initGallery() {
   }
   window.__renderGallery = () => render();
   window.__renderGallerySilent = () => render({ skipReveal: true }); // v0.62：不播入场动画的重渲染
+
+  /* ---------- v0.76：改标签不再「整页重刷」 ----------
+     以前打完标签 / 改完标签名，各处都直接调 __renderGallery()：grid 被清空重建，
+     滚动位置弹回顶部、入场动画又播一遍 —— 看起来就像整页刷新了一次。
+     现在统一走 __refreshAfterTagChange：
+       · 筛选结果没变 → 只重画受影响卡片的 chips，其余卡片一动不动；
+       · 结果集 / 顺序变了（例如正按某个标签筛选而它刚被改名）→ 静默重渲：
+         跳过入场动画 + 重建后把滚动位置放回去。 */
+  function renderedCardIds() {
+    // 循环滚动模式有两份复本，只看第一份
+    const scope = infiniteActive() ? (grid.querySelector(".loop-slab") || grid) : grid;
+    return [...scope.querySelectorAll(".card")].map((c) => c.dataset.id);
+  }
+  function patchCardTags(ids) {
+    const set = new Set(ids);
+    if (!set.size) return 0;
+    const byId = new Map(PHOTOS.map((p) => [p.id, p]));
+    let n = 0;
+    grid.querySelectorAll(".card").forEach((card) => {
+      const id = card.dataset.id;
+      if (!set.has(id)) return;
+      const p = byId.get(id);
+      const box = card.querySelector(".card__tags");
+      if (!p || !box) return;
+      box.innerHTML = cardTagsHTML(p);
+      n++;
+    });
+    return n;
+  }
+  /* 收藏（♥）同理：只改这一张卡片的类名与心形，不重绘整个图库 */
+  window.__patchCardFav = (id, on) => {
+    let n = 0;
+    grid.querySelectorAll(".card").forEach((card) => {
+      if (card.dataset.id !== id) return;
+      card.classList.toggle("fav", !!on);
+      const btn = card.querySelector(".fv");
+      if (btn) {
+        btn.textContent = on ? "♥" : "♡";
+        btn.title = on ? "取消收藏" : "收藏";
+      }
+      n++;
+    });
+    return n;
+  };
+  window.__refreshAfterTagChange = (ids) => {
+    const prev = renderedCardIds();
+    const next = sortPhotos(PHOTOS.filter((p) => basePred(p)));
+    const sameOrder = prev.length > 0 && prev.length <= next.length
+      && prev.every((id, i) => next[i] && next[i].id === id);
+    if (sameOrder && Array.isArray(ids)) {
+      filtered = next;
+      patchCardTags(ids);
+      updateLoadMore();
+      renderTagMenuContent(); // 标签计数变了
+      return "patched";
+    }
+    // 兜底：结果集变了或不知道改到了哪些卡片 → 静默整体重渲，守住滚动位置
+    const y = window.scrollY;
+    filtered = next;
+    shown = Math.max(PAGE, Math.min(shown || PAGE, filtered.length));
+    render({ skipReveal: true });
+    renderTagMenuContent();
+    try { window.scrollTo({ top: y, behavior: "instant" }); } catch (e) { window.scrollTo(0, y); }
+    return "rendered";
+  };
+  /* 标签改动后统一入口：拿不到受影响卡片时退回静默重渲（不整页重建） */
+  function refreshTagChange(ids) {
+    if (window.__refreshAfterTagChange) return window.__refreshAfterTagChange(ids);
+    return null;
+  }
+  window.__refreshTagChange = refreshTagChange;
+
 
   /* v0.65：循环模式的列数是 JS 算出来的，窗口尺寸变化会改变列数 → 重排一次并尽量守住滚动位置 */
   let loopResizeT = null;
@@ -3304,8 +3384,8 @@ async function applyBatchTag() {
       if (catSel.length) pl.p.categories = catSel;
     }
     document.getElementById("batchTagModal").classList.remove("open");
-    if (window.__refreshGallery) window.__refreshGallery();
-    renderTagMenuContent(); // 标签计数变了
+    // v0.76：只重画这批卡片的 chips（原来整页重建 = 一次肉眼可见的刷新）
+    window.__refreshTagChange(plans.map((pl) => pl.id));
     exitSelectMode();
     // 再落库；失败的整批回滚
     const fails = [];
@@ -3325,8 +3405,7 @@ async function applyBatchTag() {
         pl.p.tags = pl.prevTags;
         pl.p.categories = pl.prevCats;
       }
-      if (window.__refreshGallery) window.__refreshGallery();
-      renderTagMenuContent();
+      window.__refreshTagChange(fails.map((pl) => pl.id));
       err.textContent = `${fails.length} 张保存失败，已回滚`;
       err.style.display = "block";
       document.getElementById("batchTagModal").classList.add("open");
@@ -3362,20 +3441,28 @@ async function saveEditModal() {
   const btn = document.getElementById("edSave");
   btn.disabled = true;
   try {
+    const payload = {
+      categories: selCatsOf(document.getElementById("edCats")), // v0.19 主分类（多选数组）
+      tags: tagsOfBox(document.getElementById("edTagBox")),
+      rating: ratingPicksValue(document.getElementById("edRating")), // v0.57 分级（三档）
+    };
     const r = await apiFetch(`/api/photos/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        categories: selCatsOf(document.getElementById("edCats")), // v0.19 主分类（多选数组）
-        tags: tagsOfBox(document.getElementById("edTagBox")),
-        rating: ratingPicksValue(document.getElementById("edRating")), // v0.57 分级（三档）
-      }),
+      body: JSON.stringify(payload),
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || "保存失败");
     document.getElementById("editModal").classList.remove("open");
-    await loadData();
-    if (window.__refreshGallery) window.__refreshGallery();
+    /* v0.76：不再 loadData() 整库重拉（会先闪一下 loading 再重建全部卡片 = 一次整页刷新），
+       只把这一张的本地数据对齐，再原地重画它的 chips */
+    const p = PHOTOS.find((x) => x.id === id);
+    if (p) {
+      p.tags = payload.tags;
+      p.categories = payload.categories;
+      p.rating = payload.rating;
+    }
+    window.__refreshTagChange([id]);
     const lb = document.getElementById("lightbox");
     if (lb.classList.contains("open") && lb.dataset.cur === id) openLightboxById(id);
   } catch (e) {
@@ -4543,7 +4630,7 @@ function initCwView(root) {
         });
         renderCwSlots();
         updateCwSelStatus(`已给 <span class="cnt">${todo.length}</span> 张加上「${esc(tag)}」· 可继续操作`);
-        if (window.__renderGallery) window.__renderGallery();
+        window.__refreshTagChange(todo.map((p) => p.id)); // v0.76：只重画这些卡片的 chips
       } catch (err) { /* 静默 */ }
     });
     // v0.20：点组头折叠 / 点槽给已选图片打标
@@ -4600,7 +4687,7 @@ async function cwApplyCategory(name, mode = "toggle", idsArg) {
     renderCwCats();
     updateCwSelStatus(`已${adding ? "设置" : "取消"}主分类「${esc(name)}」：<span class="cnt">${todo.length}</span> 张 · 可继续操作`);
     renderTagMenuContent();
-    if (window.__renderGallery) window.__renderGallery();
+    window.__refreshTagChange(todo.map((p) => p.id)); // v0.76：只重画这些卡片的 chips
   } catch (e) {
     updateCwSelStatus("设置主分类失败：" + esc(e.message));
   }
@@ -4684,7 +4771,7 @@ async function cwApplyTagToSelection(tag) {
     });
     renderCwSlots(); // 槽上的计数跟着变
     updateCwSelStatus(`已给 <span class="cnt">${todo.length}</span> 张加上「${esc(tag)}」· 可继续点其他标签`);
-    if (window.__renderGallery) window.__renderGallery();
+    window.__refreshTagChange(todo.map((p) => p.id)); // v0.76：只重画这些卡片的 chips
   } catch (e) {
     updateCwSelStatus("打标失败：" + esc(e.message));
   }
@@ -4750,7 +4837,7 @@ function bindTagDrops(scope) {
         pushRecentTags(tag);
         updateCwCardBadge(p);
         renderCwSlots();
-        if (window.__renderGallery) window.__renderGallery();
+        window.__refreshTagChange([p.id]); // v0.76：只重画这张卡片的 chips
       } catch (err) { /* 静默 */ }
     });
   });
@@ -4919,6 +5006,8 @@ function openCatModal(mode, payload) {
   if (mode === "remove-category") {
     const name = payload;
     const n = PHOTOS.filter((p) => catsOf(p).includes(name)).length;
+    // v0.76：只重画带这个主分类的卡片
+    const touched = PHOTOS.filter((p) => catsOf(p).includes(name)).map((p) => p.id);
     body.innerHTML = `
       <h3>删除主分类「${esc(name)}」？</h3>
       <p>将把引用该分类的图片主分类<b>清空（变为未分类）</b>${n ? `（本次列表可见 ${n} 张）` : ""}。此操作不可恢复。</p>
@@ -4937,18 +5026,18 @@ function openCatModal(mode, payload) {
         // v0.39：先本地删（界面立即响应），服务端失败则回滚
         removeCategoryLocally(name);
         refreshTagUI();
-        if (window.__renderGallery) window.__renderGallery();
+        window.__refreshTagChange(touched);
         try {
           await apiRemoveCategory(name);
         } catch (e) {
           await loadTags();
           refreshTagUI();
-          if (window.__renderGallery) window.__renderGallery();
+          window.__refreshTagChange(touched);
           throw e;
         }
         await apiSaveTags();         // v0.33：用本地配置覆盖服务端
         refreshTagUI();
-        if (window.__renderGallery) window.__renderGallery();
+        window.__refreshTagChange(touched);
         closeTagModal();
       } catch (err) {
         b.disabled = false;
@@ -5013,6 +5102,8 @@ function openCatModal(mode, payload) {
     if (name === "未分类") return showErr("「未分类」是系统保留名，不能用作主分类");
     if (isReservedNameUI(name)) return showErr(`「${name}」是图库分级档位（大众级 / R16 / R18），不能用作主分类`);
     busy(fSave, "保存中…");
+    // v0.76：带这个主分类的卡片 —— 改名 / 改色只重画它们的 chips
+    const touchedOf = (nm) => PHOTOS.filter((p) => catsOf(p).includes(nm)).map((p) => p.id);
     try {
       if (target) {
         if (name !== target.name) {
@@ -5023,13 +5114,13 @@ function openCatModal(mode, payload) {
           const nt0 = catByName(name);
           if (nt0) nt0.color = color;
           refreshTagUI();
-          if (window.__renderGallery) window.__renderGallery();
+          window.__refreshTagChange(touchedOf(name));
           try {
             await apiRenameCategory(from, name); // 后端同步照片
           } catch (e) {
             renameCategoryLocally(name, from);
             refreshTagUI();
-            if (window.__renderGallery) window.__renderGallery();
+            window.__refreshTagChange(touchedOf(from));
             throw e;
           }
           const nt = catByName(name);
@@ -5039,7 +5130,7 @@ function openCatModal(mode, payload) {
         }
         await apiSaveTags();
         refreshTagUI();
-        if (window.__renderGallery) window.__renderGallery();
+        window.__refreshTagChange(touchedOf(name));
       } else {
         if (catByName(name)) { busy(fSave, null); return showErr(`主分类「${name}」已存在`); }
         TAGS.categories.push({ id: "", name, color, sort: TAGS.categories.length });
@@ -5166,6 +5257,8 @@ function openTagModal(mode, payload, presetName, presetGroup) {
     const name = payload;
     const n = (tagCounts()[name] || 0);
     const inLib = !!tagByName(name);
+    // v0.76：先记下带这个标签的卡片，删完只重画它们的 chips（不整页重建）
+    const touched = PHOTOS.filter((p) => (p.tags || []).includes(name)).map((p) => p.id);
     body.innerHTML = `
       <h3>删除标签「${esc(name)}」？</h3>
       <p>将同时从 <b style="color:var(--danger)">${n} 张图片</b>中移除${inLib ? "，并从标签库删除" : "（该标签本就不在标签库中）"}。此操作不可恢复。</p>
@@ -5184,18 +5277,18 @@ function openTagModal(mode, payload, presetName, presetGroup) {
         // v0.39：先本地删（界面立即响应），服务端失败则回滚
         removeTagLocally(name);
         refreshTagUI();
-        if (window.__renderGallery) window.__renderGallery();
+        window.__refreshTagChange(touched);
         try {
           await apiRemoveTag(name);
         } catch (e) {
           await loadTags(); // 回滚：拉回服务端真实配置
           refreshTagUI();
-          if (window.__renderGallery) window.__renderGallery();
+          window.__refreshTagChange(touched);
           throw e;
         }
         await apiSaveTags();    // v0.33：用本地（已删）的完整配置覆盖服务端，避免读延迟把标签带回来
         refreshTagUI();
-        if (window.__renderGallery) window.__renderGallery();
+        window.__refreshTagChange(touched);
         closeTagModal();
       } catch (err) {
         b.disabled = false;
@@ -5230,6 +5323,7 @@ function openTagModal(mode, payload, presetName, presetGroup) {
         TAGS.tags.forEach((t) => { if (t.group === g.id) t.group = ""; });
         await apiSaveTags();
         refreshTagUI();
+        window.__refreshTagChange(null); // 组没了 → 组内标签的颜色回退，chips 要重画
         closeTagModal();
       } catch (err) {
         b.disabled = false;
@@ -5320,6 +5414,8 @@ function openTagModal(mode, payload, presetName, presetGroup) {
     }
     busy(fSave, "保存中…");
     let renamed = false;
+    // v0.76：带这个标签的卡片 —— 改名 / 改色 / 改组都只重画它们的 chips
+    const touchedOf = (nm) => PHOTOS.filter((p) => (p.tags || []).includes(nm)).map((p) => p.id);
     try {
       if (isGroup) {
         if (target) { target.name = name; target.color = color; }
@@ -5336,13 +5432,13 @@ function openTagModal(mode, payload, presetName, presetGroup) {
             const nt0 = tagByName(name);
             if (nt0) { nt0.color = color; nt0.group = gid; nt0.aliases = aliases; }
             refreshTagUI();
-            if (window.__renderGallery) window.__renderGallery();
+            window.__refreshTagChange(touchedOf(name));
             try {
               await apiRenameTag(from, name); // 后端同步照片引用（名称即引用键）
             } catch (e) {
               renameTagLocally(name, from); // 回滚本地改名
               refreshTagUI();
-              if (window.__renderGallery) window.__renderGallery();
+              window.__refreshTagChange(touchedOf(from));
               throw e;
             }
             const nt = tagByName(name);
@@ -5357,7 +5453,7 @@ function openTagModal(mode, payload, presetName, presetGroup) {
       await apiSaveTags();
       // v0.31：改名 / 删除一律本地即时刷新，不再 loadData 重读（避开 Blobs 写后读延迟）
       refreshTagUI();
-      if (window.__renderGallery) window.__renderGallery();
+      window.__refreshTagChange(isGroup ? null : touchedOf(name));
       closeTagModal();
     } catch (err) {
       busy(fSave, null);

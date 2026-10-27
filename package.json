@@ -15,6 +15,7 @@
     "bump": "node scripts/bump-assets.js",
     "build": "echo '静态站点，无需构建'",
     "test:dom": "node scripts/dom-smoke-test.js",
+    "test:tagrefresh": "node scripts/tag-refresh-test.js",
     "test:api": "node scripts/api-guard-test.js",
     "seed": "node scripts/seed-local.js",
     "import:chars": "node scripts/import-chars.js",

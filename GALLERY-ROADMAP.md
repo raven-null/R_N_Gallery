@@ -1253,6 +1253,25 @@ async function aiTagSearch(query) {
   `right: 28px; bottom: 88px`（主按钮 fabMain 正上方）；移动端同步 `right: 16px; bottom: 76px`
 - 测试：新增 2 项 —— CSS 断言 `right: 28px`、菜单内点击（target 脱离 DOM）后菜单仍 open
 
+### 批次 67 · 改标签不再整页刷新（v0.76，2026-10-27）🔧
+> 用户反馈：每次改完标签，整个图库都会刷新一次（滚动位置弹回顶部、卡片重新播入场动画）。不需要这样的刷新。
+
+- **根因**：所有改标签的收尾都是 `window.__renderGallery()` → `grid.innerHTML = ""` 整块重建：
+  ① 内容被清空的瞬间文档高度归零，滚动位置被浏览器夹回顶部；② `initReveal()` 让所有卡片重播一遍浮现动画。
+  另外「单张编辑」保存还额外 `await loadData()` 整库重拉（先闪 loading 再重建全部卡片）
+- **改法（app.js）**：新增统一入口 `__refreshAfterTagChange(ids)`
+  - 受影响卡片已知（改名 / 改色 / 删除标签或主分类、批量打标、拖拽打标、单张编辑）且**筛选结果顺序没变**
+    → 只把这几张卡片的 `.card__tags` 原地重画（`cardTagsHTML()` + `patchCardTags()`），其余卡片一动不动
+  - 结果集 / 顺序真的变了（例如正按某标签筛选，而它刚被改名 / 删除）
+    → 静默重渲：`render({ skipReveal: true })` + 重建后 `scrollTo` 回原位置
+  - `saveEditModal` 去掉 `loadData()`，改为把这一张的 tags / categories / rating 直接写回本地 PHOTOS
+- **顺手一起修**：卡片右上角 ♥ 收藏（`setFav`）原来也是「每点一次整页重绘」——批量收藏时更是逐张重绘 N 次。
+  现在走 `__patchCardFav(id, on)`：只切这张卡片的 `.fav` 类名与 ♡ / ♥ 字形，失败回滚同样原地切换
+- 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
+  改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
+- 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）
+
+
 
 
 
