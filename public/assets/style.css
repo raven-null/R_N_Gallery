@@ -2460,6 +2460,87 @@ input.settings-value:focus {
   box-shadow: 0 0 0 3px rgba(255,159,10,0.08);
 }
 .tag-form .hint { font-size: 11.5px; color: var(--text-faint); margin-top: 5px; line-height: 1.55; }
+
+/* ---------- v0.78：所属组下拉（自定义组件，毛玻璃 + 可滚动） ----------
+   原生 select 的弹出层是系统画的，做不了毛玻璃，也没法限高 / 滚动；
+   这里用按钮 + 绝对定位的菜单自己画，组再多也只是菜单内部滚动。 */
+.gs { position: relative; }
+.gs-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.gs-btn:hover { border-color: rgba(255,255,255,0.18); }
+.gs.open .gs-btn {
+  border-color: rgba(255,159,10,0.45);
+  box-shadow: 0 0 0 3px rgba(255,159,10,0.08);
+}
+.gs-btn .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tg, var(--w030)); flex: none; }
+.gs-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs-caret { width: 14px; height: 14px; flex: none; color: var(--text-faint); transition: transform 0.2s; }
+.gs.open .gs-caret { transform: rotate(180deg); }
+
+.gs-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: none;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--w012);
+  background: var(--s26);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 18px 44px rgba(0,0,0,0.55), inset 0 1px 0 var(--w008);
+}
+.gs-menu.open { display: block; animation: gs-in 0.16s var(--ease-out) both; }
+.gs.up .gs-menu { top: auto; bottom: calc(100% + 6px); }
+@keyframes gs-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.gs-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-radius: 9px;
+  color: var(--text-dim);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.gs-item:hover { background: var(--w006); color: var(--text); }
+.gs-item.on { color: var(--text); background: rgba(255,159,10,0.12); }
+.gs-item .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tg, var(--w030)); flex: none; }
+[data-theme="light"] .gs-menu { background: rgba(255,255,255,0.66); border-color: rgba(0,0,0,0.08); box-shadow: 0 18px 44px rgba(0,0,0,0.18); }
+[data-theme="light"] .gs-item { color: rgba(0,0,0,0.7); }
+[data-theme="light"] .gs-item:hover { background: rgba(0,0,0,0.05); color: #000; }
+[data-theme="light"] .gs-item.on { background: rgba(255,159,10,0.16); color: #000; }
+body.perf-lite .gs-menu {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: rgba(20,20,24,0.94);
+}
 .tag-swatches { display: flex; flex-wrap: wrap; gap: 9px; }
 .tag-swatch {
   width: 26px;

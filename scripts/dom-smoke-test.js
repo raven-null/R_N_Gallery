@@ -158,6 +158,9 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   // v0.47：灯箱图片铺满可用区域且不变形
   check("CSS：灯箱图片按比例铺满（max-height 100% + object-fit contain）",
     /\.lightbox img\s*\{[^}]*max-height:\s*100%/.test(cssText) && /\.lightbox img\s*\{[^}]*object-fit:\s*contain/.test(cssText));
+  // v0.78：新建标签的「所属组」下拉 = 毛玻璃 + 限高可滚动
+  check("CSS：所属组下拉是毛玻璃且可滚动",
+    /\.gs-menu\s*\{[^}]*backdrop-filter:\s*blur\(24px\)/.test(cssText) && /\.gs-menu\s*\{[^}]*overflow-y:\s*auto/.test(cssText) && /\.gs-menu\s*\{[^}]*max-height:\s*220px/.test(cssText));
 
   /* 分类工作台：选中一张卡片 → 点主分类 chips → 真能写进图库 */
   const cwCard = doc.querySelector("#cwCards .cw-card");
@@ -1007,6 +1010,23 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     const t = modalTitle();
     check("「＋」打开新建标签弹窗", doc.getElementById("tagModal").classList.contains("open") && t.includes("新建标签"), t);
     check("所属组已预选", !!sel && sel.value === gid, sel ? `选中=${sel.value || "(未分组)"}` : "无组选择框");
+    /* v0.78：所属组改成自定义下拉（原生 select 做不了毛玻璃 / 滚动） */
+    const gsBtn = doc.querySelector("#tagModalBody .gs-btn");
+    const gsMenu = doc.querySelector("#tagModalBody .gs-menu");
+    check("所属组是自定义下拉组件", !!gsBtn && !!gsMenu);
+    if (gsBtn && gsMenu) {
+      gsBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await wait(150);
+      const items = [...gsMenu.querySelectorAll(".gs-item")];
+      check("点开所属组下拉", gsMenu.classList.contains("open"), `${items.length} 个选项`);
+      const pick = items[1] || items[0];
+      if (pick) {
+        pick.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+        await wait(150);
+        check("选择后写回 #fGroup 并收起", sel.value === (pick.dataset.gid || "") && !gsMenu.classList.contains("open"),
+          `${sel.value || "(未分组)"}`);
+      }
+    }
     closeModal();
     await wait(200);
   }

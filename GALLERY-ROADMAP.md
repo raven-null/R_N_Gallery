@@ -1289,6 +1289,21 @@ async function aiTagSearch(query) {
 - 测试：`npm run test:api` 新增 2 项（重复改名幂等、改名为已存在名 = 合并），并在用例末尾把分类列表写回，
   可重复运行 —— 共 24 项全过
 
+### 批次 69 · 新建标签的「所属组」下拉：毛玻璃 + 可滚动（v0.78，2026-10-27）🎨
+> 用户反馈：新建标签的下拉框要毛玻璃样式，并且要能滚动。
+
+- **根因**：那是原生 `<select>` —— 弹出层由系统绘制，`backdrop-filter` 管不到，也限不了高度；
+  组一多就把屏幕铺满，还不能滚
+- **改法（app.js）**：`groupSelectHTML()` 换成自定义组件（按钮 + 绝对定位菜单）：
+  - 隐藏 `<input id="fGroup">` 承接取值，`openTagModal` / `openBulkTagModal` 里读 `.value` 的地方一行没改
+  - `bindGroupSelect()` 负责展开 / 收起、选中回填（名称 + 色点）、`scrollIntoView` 定位当前项；
+    点击组件外面或 Esc 自动收起（document 上只注册一次监听）
+  - 下方空间不够时自动**向上弹**（`.gs.up`）
+- **样式（style.css）**：`.gs-menu` 用 `backdrop-filter: blur(24px) saturate(180%)` 做毛玻璃 +
+  `max-height: 220px; overflow-y: auto; overscroll-behavior: contain` 可滚动；浅色主题与性能模式各有回退
+- 测试：`npm run test:dom` 新增 4 项（毛玻璃 / 可滚动的 CSS 断言、自定义下拉存在、点开、选择后写回 `#fGroup` 并收起），
+  共 209 项全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

@@ -5221,6 +5221,7 @@ function openBulkTagModal() {
     </form>
     <div class="hint" id="fErr" style="color:var(--danger);display:none;margin-top:12px"></div>`;
   modal.classList.add("open");
+  bindGroupSelect(body); // v0.78：自定义「导入到哪个组」下拉
   body.querySelector("#fCancel").onclick = closeTagModal;
   const err = body.querySelector("#fErr");
   body.querySelector("#fSave").onclick = async () => {
@@ -5268,11 +5269,78 @@ function openBulkTagModal() {
   };
 }
 
+/* v0.78：所属组下拉改成自定义组件 —— 原生 <select> 的弹出层由系统绘制，
+   既做不了毛玻璃，也没法控制高度 / 滚动（组一多就一屏铺满）。
+   取值处仍读 #fGroup（隐藏 input），调用方不用改。 */
 function groupSelectHTML(sel) {
-  return `<select id="fGroup">
-    <option value=""${!sel ? " selected" : ""}>未分组</option>
-    ${TAGS.groups.map((g) => `<option value="${escAttr(g.id)}"${g.id === sel ? " selected" : ""}>${esc(g.name)}</option>`).join("")}
-  </select>`;
+  const cur = TAGS.groups.find((g) => g.id === sel) || null;
+  const dotOf = (c) => `<i class="dot"${c ? ` style="--tg:${c}"` : ""}></i>`;
+  const item = (id, name, color) => `<button type="button" class="gs-item${id === (sel || "") ? " on" : ""}" data-gid="${escAttr(id)}" role="option">${dotOf(color)}${esc(name)}</button>`;
+  return `<div class="gs" id="fGroupWrap">
+    <button type="button" class="gs-btn" id="fGroupBtn" aria-haspopup="listbox" aria-expanded="false">
+      ${dotOf(cur && cur.color)}
+      <span class="gs-label">${esc(cur ? cur.name : "未分组")}</span>
+      <svg class="gs-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="gs-menu" id="fGroupMenu" role="listbox">
+      ${item("", "未分组", null)}
+      ${TAGS.groups.map((g) => item(g.id, g.name, g.color)).join("")}
+    </div>
+    <input type="hidden" id="fGroup" value="${escAttr(sel || "")}">
+  </div>`;
+}
+function closeGroupSelect(root) {
+  if (!root) return;
+  root.classList.remove("open", "up");
+  const menu = root.querySelector(".gs-menu");
+  if (menu) menu.classList.remove("open");
+  const btn = root.querySelector(".gs-btn");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+/* 点组件外面 / 按 Esc 收起任意已展开的组下拉（只注册一次） */
+document.addEventListener("click", (e) => {
+  document.querySelectorAll(".gs.open").forEach((root) => {
+    if (!root.contains(e.target)) closeGroupSelect(root);
+  });
+});
+function bindGroupSelect(scope) {
+  const root = (scope || document).querySelector("#fGroupWrap");
+  if (!root || root.classList.contains("bound")) return;
+  root.classList.add("bound");
+  const btn = root.querySelector("#fGroupBtn");
+  const menu = root.querySelector("#fGroupMenu");
+  const hidden = root.querySelector("#fGroup");
+  const label = root.querySelector(".gs-label");
+  const dot = btn && btn.querySelector(".dot");
+  if (!btn || !menu || !hidden) return;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (root.classList.contains("open")) return closeGroupSelect(root);
+    // 下面放不下就往上弹（弹窗可能贴在屏幕下缘）
+    const r = btn.getBoundingClientRect();
+    const need = Math.min(menu.scrollHeight || 220, 220);
+    root.classList.toggle("up", r.bottom + need + 16 > window.innerHeight && r.top - need - 16 > 0);
+    root.classList.add("open");
+    menu.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    const on = menu.querySelector(".gs-item.on") || menu.querySelector(".gs-item");
+    if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest" });
+  });
+  menu.addEventListener("click", (e) => {
+    const it = e.target.closest(".gs-item");
+    if (!it) return;
+    e.stopPropagation();
+    hidden.value = it.dataset.gid || "";
+    if (label) label.textContent = (it.textContent || "").trim();
+    const src = it.querySelector(".dot");
+    const tg = src && src.style.getPropertyValue("--tg");
+    if (dot) {
+      if (tg) dot.style.setProperty("--tg", tg);
+      else dot.style.removeProperty("--tg");
+    }
+    menu.querySelectorAll(".gs-item").forEach((x) => x.classList.toggle("on", x === it));
+    closeGroupSelect(root);
+  });
 }
 
 /* 标签 / 标签组编辑弹窗。payload：标签名或组 id
@@ -5409,6 +5477,7 @@ function openTagModal(mode, payload, presetName, presetGroup) {
     </div>` : ""}
     <div class="hint" id="fErr" style="color:var(--danger);display:none;margin-top:12px"></div>`;
   modal.classList.add("open");
+  bindGroupSelect(body); // v0.78：自定义「所属组」下拉
 
   // 色板选择
   let color = selColor;
