@@ -1267,6 +1267,7 @@ async function aiTagSearch(query) {
   - `saveEditModal` 去掉 `loadData()`，改为把这一张的 tags / categories / rating 直接写回本地 PHOTOS
 - **顺手一起修**：卡片右上角 ♥ 收藏（`setFav`）原来也是「每点一次整页重绘」——批量收藏时更是逐张重绘 N 次。
   现在走 `__patchCardFav(id, on)`：只切这张卡片的 `.fav` 类名与 ♡ / ♥ 字形，失败回滚同样原地切换
+- 样式（style.css）：卡片爱心去掉圆形底板 —— 就是一枚 ♥ / ♡（白色 + 文字投影，已收藏为粉色），仍是 hover 才出现
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）
