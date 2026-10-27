@@ -554,6 +554,17 @@ function guestReadOK(method, path, url, rest) {
   return false;
 }
 
+/* ---------- 图片字节缓存头（v0.77） ----------
+   大众级图片允许 CDN 长缓存：Netlify 会在 CDN 层缓存函数响应，第二次访问起直接出图；
+   成人向图片一律 private, no-store —— 否则观光访客能顺着 CDN 绕过管理员校验拿到 R16/R18。 */
+function imageCacheHeaders(meta) {
+  if (isAdultPhoto(meta)) return { "Cache-Control": "private, no-store" };
+  return {
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Netlify-CDN-Cache-Control": "public, max-age=31536000, immutable",
+  };
+}
+
 /* ---------- 单张元数据 ---------- */
 async function getMeta(id) {
   const m = await store().get(`${PREFIX_META}${id}.json`, { type: "json" });
@@ -574,7 +585,7 @@ async function raw(id, req, url, role) {
     status: 200,
     headers: {
       "Content-Type": m.mime || "application/octet-stream",
-      "Cache-Control": "public, max-age=31536000, immutable",
+      ...imageCacheHeaders(m),
       "X-Content-Type-Options": "nosniff",
       "Access-Control-Allow-Origin": "*",
     },
@@ -653,7 +664,7 @@ async function thumb(id, req, url, role) {
     status: 200,
     headers: {
       "Content-Type": meta.thumbMime || "image/webp",
-      "Cache-Control": "public, max-age=31536000, immutable",
+      ...imageCacheHeaders(meta),
       "Access-Control-Allow-Origin": "*",
       "X-Content-Type-Options": "nosniff",
     },
@@ -1076,21 +1087,38 @@ async function loadConfig(s) {
 }
 
 /* 遍历全部照片元数据，fn(tags) 返回新数组则写回（去重 + 上限 10） */
+/* v0.79：并发跑批量读写。Blobs 每读 / 写一次都是一趟网络往返，
+   串行改写 77 张图的元数据能跑 20s+，前端 20s 超时直接报「signal timed out」。
+   并发上限 10：既能把耗时压到 1/5 左右，也不会把 Blobs 打爆。 */
+async function mapLimit(list, limit, fn) {
+  const arr = Array.isArray(list) ? list : [...list];
+  const n = Math.max(1, Math.min(limit || 10, arr.length || 1));
+  let i = 0;
+  const workers = Array.from({ length: n }, async () => {
+    while (i < arr.length) {
+      const idx = i++;
+      await fn(arr[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+}
+
+/* 遍历全部照片元数据，fn(tags) 返回新数组则写回（去重 + 上限 10） */
 async function rewritePhotos(s, fn) {
   let cursor;
   let changed = 0;
   do {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
-    for (const item of res.blobs) {
-      const m = await s.get(item.key, { type: "json" });
-      if (!m || !Array.isArray(m.tags)) continue;
+    const keys = (res.blobs || []).map((b) => b.key);
+    await mapLimit(keys, 10, async (key) => {
+      const m = await s.get(key, { type: "json" });
+      if (!m || !Array.isArray(m.tags)) return;
       const next = fn(m.tags);
-      if (next) {
-        m.tags = sanitizeTags(next); // v0.55：批量改写也走同一套清洗（去重 / 限长 / 上限 10）
-        await s.set(item.key, JSON.stringify(m));
-        changed++;
-      }
-    }
+      if (!next) return;
+      m.tags = sanitizeTags(next); // v0.55：批量改写也走同一套清洗（去重 / 限长 / 上限 10）
+      await s.set(key, JSON.stringify(m));
+      changed++;
+    });
     cursor = res.nextCursor;
   } while (cursor);
   if (changed) await indexRebuild(s); // v0.24：批量改写后重建列表索引
@@ -1110,30 +1138,31 @@ async function rewriteByCategory(s, fn) {
   let changed = 0;
   do {
     const res = await s.list({ prefix: PREFIX_META, cursor, limit: 200 });
-    for (const item of res.blobs) {
-      const m = await s.get(item.key, { type: "json" });
-      if (!m) continue;
+    const keys = (res.blobs || []).map((b) => b.key);
+    await mapLimit(keys, 10, async (key) => {
+      const m = await s.get(key, { type: "json" });
+      if (!m) return;
       const cur = catsOfMeta(m);
       const hasOldField = m.category !== undefined;
-      if (!cur.length && !hasOldField) continue;
+      if (!cur.length && !hasOldField) return;
       const next = fn(cur);
       if (next === null || next === undefined) {
         if (hasOldField) { // 只迁移字段：把 category 归一为 categories
           m.categories = cur;
           delete m.category;
-          await s.set(item.key, JSON.stringify(m));
+          await s.set(key, JSON.stringify(m));
           changed++;
         }
-        continue;
+        return;
       }
       const norm = sanitizeCats(next);
       const same = norm.length === cur.length && norm.every((x, i) => x === cur[i]);
-      if (same && !hasOldField) continue;
+      if (same && !hasOldField) return;
       m.categories = norm;
       delete m.category;
-      await s.set(item.key, JSON.stringify(m));
+      await s.set(key, JSON.stringify(m));
       changed++;
-    }
+    });
     cursor = res.nextCursor;
   } while (cursor);
   if (changed) await indexRebuild(s); // v0.24：批量改写后重建列表索引
