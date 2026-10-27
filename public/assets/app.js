@@ -3494,11 +3494,8 @@ function initEditModal() {
   if (!m) return;
   document.getElementById("edCancel").addEventListener("click", () => m.classList.remove("open"));
   document.getElementById("edSave").addEventListener("click", saveEditModal);
-  const delBtn = document.createElement("div");
-  delBtn.className = "ed-del";
-  delBtn.innerHTML = `<button class="btn danger sm" type="button" id="edDelete">删除这张图片</button>`;
-  m.querySelector("form").appendChild(delBtn);
-  m.querySelector("#edDelete").addEventListener("click", delFromEditModal);
+  const delBtn = document.getElementById("edDelete");
+  if (delBtn) delBtn.addEventListener("click", delFromEditModal);
   bindTagSuggest(document.getElementById("edTagInput"), document.getElementById("edTagSuggest"), document.getElementById("edTagBox"), refreshQuickPickAll);
   bindCatPicks(document.getElementById("edCats")); // v0.15 主分类单选
   bindRatingPicks(document.getElementById("edRating")); // v0.57 分级三档

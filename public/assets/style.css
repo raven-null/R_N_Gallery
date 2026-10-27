@@ -2763,8 +2763,10 @@ body.select-mode .card .pick { display: grid; }
 }
 [data-theme="light"] .tag-form textarea { background: rgba(255,255,255,0.75); }
 
-/* 灯箱编辑弹窗按钮（危险删除） */
-.ed-del { display: flex; justify-content: flex-end; margin-top: 6px; }
+/* 编辑弹窗按钮行（v0.76）：删除 / 取消 / 保存 放在同一行，
+   删除靠左单独一格（离「保存」远一点，避免手滑），窄屏自动换行 */
+.modal .m-actions.ed-actions { flex-wrap: wrap; }
+.modal .m-actions.ed-actions #edDelete { margin-right: auto; }
 
 /* 触屏设备：工具条常显（无 hover） */
 @media (hover: none) {

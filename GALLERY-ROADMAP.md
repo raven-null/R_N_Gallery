@@ -1268,6 +1268,8 @@ async function aiTagSearch(query) {
 - **顺手一起修**：卡片右上角 ♥ 收藏（`setFav`）原来也是「每点一次整页重绘」——批量收藏时更是逐张重绘 N 次。
   现在走 `__patchCardFav(id, on)`：只切这张卡片的 `.fav` 类名与 ♡ / ♥ 字形，失败回滚同样原地切换
 - 样式（style.css）：卡片爱心去掉圆形底板 —— 就是一枚 ♥ / ♡（白色 + 文字投影，已收藏为粉色），仍是 hover 才出现
+- 样式：图片编辑弹窗的「删除这张图片」从原来单独一行移进按钮行 —— 删除靠左、取消 / 保存靠右，合成一行
+  （`.m-actions.ed-actions`，窄屏 `flex-wrap` 自动换行；按钮改成写死在 index.html，`initEditModal` 只负责绑事件）
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）
