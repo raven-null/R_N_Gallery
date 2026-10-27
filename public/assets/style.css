@@ -2339,41 +2339,154 @@ input.settings-value:focus {
   line-height: 1.6;
   padding: 0 2px;
 }
+/* ============================================================
+   v0.86 分组视图重设计
+   一眼看清「有哪些组、每组多少标签、哪些是空标签」：
+   顶部概览 + 过滤 → 每组一张卡片（组头 + 胶囊区）
+   ============================================================ */
+.tmgr-overview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 2px 2px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.tmgr-overview .ov { white-space: nowrap; }
+.tmgr-overview .ov b {
+  color: var(--text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.tmgr-overview .ov.on b { color: var(--accent); }
+.tmgr-overview .ov.dim b { color: var(--text-faint); }
+.tmgr-filters { margin-left: auto; }
+
+/* 一张卡片 = 一个组 */
+.tmgr-group {
+  margin-top: 10px;
+  border: 1px solid var(--w008);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.015);
+  overflow: hidden;
+  transition: border-color 0.2s, background 0.2s;
+}
+.tmgr-group:hover { border-color: var(--w012); background: var(--w003); }
+.tmgr-group.folded { background: transparent; }
+
+/* 组头：▾ 色点 组名 …… 统计 …… ＋ ✎ */
 .tmgr-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 10px;
+  padding: 11px 14px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--text);
-  padding: 4px 2px 8px;
 }
-.tmgr-head .dot {
+.tmgr-head.foldable { cursor: pointer; user-select: none; transition: background 0.15s; }
+.tmgr-head.foldable:hover { background: var(--w004); }
+.tmgr-head .caret {
+  flex: none;
+  width: 10px;
+  font-size: 9px;
+  color: var(--text-faint);
+  transition: transform 0.2s var(--ease-out);
+}
+.tmgr-head.folded .caret { transform: rotate(-90deg); }
+.tmgr-head .gname {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.tmgr-head .gname .dot {
+  flex: none;
   width: 9px;
   height: 9px;
   border-radius: 50%;
   background: var(--tg, #ff9f0a);
-  flex: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tg, #ff9f0a) 16%, transparent);
 }
-.tmgr-head .cnt {
+.tmgr-head .gname .t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46vw;
+}
+.tmgr-head .stat {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
-.tmgr-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.tmgr-head .stat b { color: var(--text-dim); font-weight: 700; }
+.tmgr-head .stat b:nth-of-type(2) { color: var(--accent); }
+/* 主分类块的「N 个 · M 张已归类」 */
+.tmgr-head .cnt {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tmgr-head .gactions { display: flex; align-items: center; gap: 4px; flex: none; }
+.tmgr-head .act {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--w010);
+  border-radius: 8px;
+  background: var(--w006);
+  color: var(--text-faint);
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tmgr-head .act:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* 胶囊区 */
+.tmgr-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 14px 14px;
+}
 .tmgr-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
+  gap: 7px;
+  max-width: 100%;
+  padding: 6px 9px;
+  border-radius: 10px;
   font-size: 12.5px;
   font-weight: 500;
   border: 1px solid var(--w008);
-  background: var(--w003);
+  background: var(--w004);
   color: var(--text);
-  animation: pop 0.25s var(--ease-spring);
+  transition: background 0.16s, border-color 0.16s, transform 0.16s, opacity 0.16s;
+}
+.tmgr-pill:hover {
+  background: var(--w008);
+  border-color: var(--w020);
+  transform: translateY(-1px);
+}
+.tmgr-pill .nm {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tmgr-pill .dot {
   width: 6px;
@@ -2382,20 +2495,59 @@ input.settings-value:focus {
   background: var(--tg, var(--w030));
   flex: none;
 }
-.tmgr-pill .cnt { font-size: 11px; color: var(--text-faint); }
+.tmgr-pill .cnt {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--w008);
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.tmgr-pill .cnt.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
 .tmgr-pill .act {
-  background: none;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
   border: none;
-  cursor: pointer;
+  border-radius: 6px;
+  background: none;
   color: var(--text-faint);
   font-size: 12px;
   line-height: 1;
-  padding: 2px;
-  opacity: 0.6;
-  transition: opacity 0.15s;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
 }
-.tmgr-pill .act:hover { opacity: 1; color: var(--accent); }
+.tmgr-pill:hover .act { opacity: 1; }
+.tmgr-pill .act:hover { color: var(--accent); background: var(--w010); }
 .tmgr-pill .act.danger:hover { color: var(--danger); }
+/* 0 素材：虚线 + 淡化，一眼能看出是空标签 */
+.tmgr-pill.empty { opacity: 0.5; border-style: dashed; }
+.tmgr-pill.empty:hover { opacity: 0.92; }
+/* 触摸设备没有 hover，按钮常显 */
+@media (hover: none) {
+  .tmgr-pill .act { opacity: 0.6; }
+  .tmgr-tagcard .act { opacity: 0.85; }
+}
+
+/* 空态 / 无匹配 */
+.tmgr-nomatch {
+  margin-top: 10px;
+  padding: 26px 16px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  border: 1px dashed var(--w012);
+  border-radius: 14px;
+}
+.tmgr-empty { font-size: 12px; color: var(--text-faint); padding: 4px 2px; }
 
 /* ============================================================
    分组视图重设计（v0.69）
@@ -2426,40 +2578,7 @@ input.settings-value:focus {
 }
 .tmgr-search input::placeholder { color: var(--text-faint); }
 
-/* 组头右侧统计：N 个有素材 · M 个空 */
-.tmgr-head .stat {
-  margin-left: 10px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-.tmgr-head .stat b { color: var(--accent); font-weight: 700; }
-
-/* 数量角标（原来是「3 张」文本，改成纯数字更紧凑） */
-.tmgr-pill .cnt {
-  min-width: 16px;
-  padding: 0 5px;
-  border-radius: 7px;
-  background: var(--w008);
-  color: var(--text-faint);
-  font-size: 10px;
-  font-weight: 600;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.tmgr-pill .cnt.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
-
-/* 降噪：0 素材淡化 */
-.tmgr-pill.empty, .tmgr-tagcard.empty { opacity: 0.45; }
-.tmgr-pill.empty:hover, .tmgr-tagcard.empty:hover { opacity: 0.85; }
-/* 操作按钮只在能 hover 的设备上藏起来 —— 触摸屏没有 hover，必须常显 */
-@media (hover: hover) {
-  .tmgr-pill .act { opacity: 0; }
-  .tmgr-pill:hover .act { opacity: 0.7; }
-  .tmgr-tagcard .act { opacity: 0; }
-  .tmgr-tagcard:hover .act { opacity: 1; }
-}
+/* 组头右侧统计与数量角标已在 v0.86 的重设计里统一处理（见上方） */
 
 /* 卡片网格视图 */
 .tmgr-tagcards {
@@ -2522,7 +2641,7 @@ input.settings-value:focus {
 .tmgr-tagcard .act[data-tact="edit"] { right: 28px; }
 
 /* 可折叠的主分类块 */
-.tmgr-catbody { padding: 2px 2px 8px; }
+.tmgr-catbody { padding: 0 0 4px; }
 .tag-mgr-actions {
   display: flex;
   gap: 8px;
@@ -3785,8 +3904,15 @@ body.mode-guest .page-menu-item[data-page="tags"] { display: none !important; }
   padding: 1px 7px;
   letter-spacing: 0.04em;
 }
-.tmgr-block { margin-bottom: 4px; }
-.tmgr-block .tmgr-head { margin-top: 8px; }
+/* v0.86：主分类块也用同一张卡片的形态（折叠时只剩组头） */
+.tmgr-block {
+  margin-top: 10px;
+  border: 1px solid var(--w008);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.015);
+  overflow: hidden;
+}
+.tmgr-block .tmgr-head { margin-top: 0; }
 
 /* 上传队列行内的主分类 chip（带色描边与圆点） */
 .uq-tags span.cls.cat {
@@ -4032,46 +4158,9 @@ body.perf-lite .card__content {
 .uq-panel-title .mini-link:hover { opacity: 1; text-decoration: underline; }
 
 /* ============================================================
-   分组视图：标签组折叠（v0.29）
+   分组视图：标签组折叠（v0.29；v0.86 的形态见上方 .tmgr-group / .tmgr-head）
    ============================================================ */
-.tmgr-head.foldable {
-  cursor: pointer;
-  user-select: none;
-  border-radius: 8px;
-  transition: background 0.15s;
-}
-.tmgr-head.foldable:hover { background: var(--w006); }
-.tmgr-head .caret {
-  flex: none;
-  width: 10px;
-  font-size: 9px;
-  color: var(--text-faint);
-  transition: transform 0.2s var(--ease-out);
-}
-.tmgr-head.folded .caret { transform: rotate(-90deg); }
-.tmgr-head.folded .cnt { color: var(--accent); }
 /* v0.68：.tmgr-fold-actions（全部折叠 / 全部展开）已随按钮移除 */
-
-/* 组头旁的按钮（＋ 在该组新建标签 / ✎ 编辑组）—— v0.30 */
-.tmgr-head .act {
-  flex: none;
-  background: var(--w006);
-  border: 1px solid var(--w010);
-  border-radius: 7px;
-  color: var(--text-faint);
-  font-size: 12px;
-  line-height: 1;
-  padding: 3px 7px;
-  cursor: pointer;
-  transition: all 0.15s var(--ease-out);
-}
-.tmgr-head .act:hover {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.tmgr-head.foldable .act { margin-left: 0; }
-.tmgr-head .cnt + .act { margin-left: 8px; }
 
 /* ============================================================
    相册整页（v0.34）：iOS 相册风格 —— 顶部导航栏 + 大标题 +

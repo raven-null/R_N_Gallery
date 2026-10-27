@@ -312,6 +312,34 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         await wait(450);
       }
     }
+
+    /* v0.86：概览条 + 过滤（全部 / 有素材 / 空） */
+    const ov = doc.querySelector("#tagMgrRoot .tmgr-overview");
+    check("分组视图有概览条（组数 / 标签数 / 有素材 / 空）",
+      !!ov && /有素材/.test(ov.textContent) && /个标签/.test(ov.textContent),
+      ov ? ov.textContent.replace(/\s+/g, " ").trim() : "无");
+    const fBtns = [...doc.querySelectorAll("#tagMgrRoot [data-tfilter]")];
+    check("概览条有三个过滤开关", fBtns.length === 3, fBtns.map((b) => b.dataset.tfilter).join(","));
+    if (fBtns.length === 3) {
+      const usedBtn = fBtns.find((b) => b.dataset.tfilter === "used");
+      const emptyBtn = fBtns.find((b) => b.dataset.tfilter === "empty");
+      if (usedBtn) {
+        tap(usedBtn);
+        await wait(420);
+        // 只看标签胶囊（主分类块的 .tmgr-pill.cat 不属于标签）
+        const empties = doc.querySelectorAll("#tagMgrRoot .tmgr-pill[data-tag].empty").length;
+        check("过滤「有素材」后不显示空标签", empties === 0, `${empties} 个空标签`);
+      }
+      if (emptyBtn) {
+        tap(emptyBtn);
+        await wait(420);
+        const pills = [...doc.querySelectorAll("#tagMgrRoot .tmgr-pill[data-tag]")];
+        check("过滤「空」只剩空标签", pills.length > 0 && pills.every((p) => p.classList.contains("empty")), `${pills.length} 个`);
+      }
+      const allBtn = [...doc.querySelectorAll("#tagMgrRoot [data-tfilter]")].find((b) => b.dataset.tfilter === "all");
+      if (allBtn) { tap(allBtn); await wait(420); }
+      check("恢复「全部」后空标签回来了", doc.querySelectorAll("#tagMgrRoot .tmgr-pill[data-tag].empty").length > 0);
+    }
   } else {
     check("存在标签数 >20 的组（折叠验证用）", false, "本地先跑：node scripts/import-chars.js");
   }
@@ -1477,6 +1505,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     if (probeInput.blur) probeInput.blur();
   }
   window.localStorage.setItem("rn_tmgr_view", "group"); // 复位，别影响后续断言
+  window.localStorage.removeItem("rn_tmgr_tfilter");   // v0.86：过滤状态也复位
 
   const failed = results.filter((x) => !x).length;
   console.log(`\n${failed ? `✗ ${failed} 项未通过` : "✓ 全部通过"}（共 ${results.length} 项）\n`);
