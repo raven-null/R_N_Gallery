@@ -163,6 +163,10 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     /\.gs-menu\s*\{[^}]*backdrop-filter:\s*blur\(24px\)/.test(cssText) && /\.gs-menu\s*\{[^}]*overflow-y:\s*auto/.test(cssText) && /\.gs-menu\s*\{[^}]*max-height:\s*220px/.test(cssText));
   // v0.79：通用确认框要压在所有弹窗上面（它常从别的弹窗里弹出）
   check("CSS：确认弹窗 z-index 高于其他弹窗", /#confirmModal\s*\{[^}]*z-index:\s*240/.test(cssText));
+  // v0.81：卡片悬停只露标签，一行不换行、超出裁掉；日期与大小不再显示
+  check("CSS：标签条不换行且超出裁剪",
+    /\.card__tags\s*\{[^}]*flex-wrap:\s*nowrap/.test(cssText) && /\.card__tags\s*\{[^}]*overflow:\s*hidden/.test(cssText));
+  check("卡片悬浮层不再渲染日期 / 大小", !doc.querySelector("#grid .card .card__meta"));
 
   /* 分类工作台：选中一张卡片 → 点主分类 chips → 真能写进图库 */
   const cwCard = doc.querySelector("#cwCards .cw-card");
@@ -805,13 +809,15 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       doc.getElementById("fabGroup").classList.remove("active");
     }
   }
-  /* 灯箱右下角悬浮工具条（v0.38）：信息面板不恢复；工具条默认隐藏，鼠标在灯箱内移动才浮现 */
-  check("灯箱不再有信息面板", !doc.getElementById("lbInfo") && !doc.querySelector(".lightbox .lb-info"));
+  /* 灯箱右下角悬浮工具条（v0.38）：工具条默认隐藏，鼠标在灯箱内移动才浮现；
+     v0.81：新增 ⓘ 图片信息按钮，点开从底部上拉信息面板 */
+  const lbInfoEl = doc.getElementById("lbInfo");
+  check("灯箱有信息面板（默认收起）", !!lbInfoEl && !lbInfoEl.classList.contains("open"));
   check("灯箱工具条有收藏按钮（v0.56 归来）", !!doc.getElementById("lbToolFav"));
   const lbBox = doc.getElementById("lightbox");
   const lbBar = doc.getElementById("lbToolsFloat");
-  const toolIds = ["lbToolPlay", "lbToolEdit", "lbToolRot", "lbToolDl", "lbToolFav"];
-  check("灯箱右下角悬浮工具条含 5 个按钮", !!lbBar && toolIds.every((i) => doc.getElementById(i)));
+  const toolIds = ["lbToolPlay", "lbToolEdit", "lbToolRot", "lbToolDl", "lbToolFav", "lbToolInfo"];
+  check("灯箱右下角悬浮工具条含 6 个按钮", !!lbBar && toolIds.every((i) => doc.getElementById(i)));
   check("工具条默认隐藏（无 tools-visible 类）", !!(lbBox && !lbBox.classList.contains("tools-visible")));
   check("筛选菜单不再有收藏行", !doc.querySelector('#tagMenuList [data-tag="__fav"]'));
   const firstCard = doc.querySelector("#grid .card");
@@ -825,6 +831,19 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     lbBox.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 400, clientY: 300 }));
     await wait(100);
     check("鼠标移动后工具条浮现", lbBox.classList.contains("tools-visible"));
+    /* v0.81：ⓘ → 底部上拉信息面板；Esc 只收面板，不关灯箱 */
+    const infoBtn = doc.getElementById("lbToolInfo");
+    if (infoBtn && lbInfoEl) {
+      clickEl(infoBtn);
+      await wait(200);
+      const rowsN = lbInfoEl.querySelectorAll(".lb-info-row").length;
+      check("点 ⓘ 展开信息面板且有内容", lbInfoEl.classList.contains("open") && rowsN >= 6, `${rowsN} 行`);
+      const state = window.__lbInfoState ? window.__lbInfoState() : null;
+      check("信息面板内容与当前图片对应", !!state && state.open === true && state.rows === rowsN, JSON.stringify(state));
+      doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await wait(150);
+      check("Esc 先收信息面板（灯箱还开着）", !lbInfoEl.classList.contains("open") && lbBox.classList.contains("open"));
+    }
     // v0.43/0.44：切图 = 点图片左右半边 / 左右滑动；关闭 = 点图片外的空白（按钮全删了）
     check("灯箱不再有上一张 / 下一张 / 关闭按钮",
       !doc.querySelector(".lightbox .lb-prev") && !doc.querySelector(".lightbox .lb-next") && !doc.querySelector(".lightbox .lb-close"));

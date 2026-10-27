@@ -1319,6 +1319,8 @@ document.addEventListener("keydown", (e) => {
     setTimeout(() => document.getElementById("searchInput")?.focus(), 250);
   }
   if (e.key === "Escape") {
+    // v0.81：信息面板开着就先收面板，灯箱留着
+    if (lbInfoOpen()) { closeLbInfo(); return; }
     // v0.38：关灯箱时一并停掉幻灯片、收起悬浮工具条
     if (document.querySelector(".lightbox.open")) closeLightbox();
     document.querySelectorAll(".modal-mask.open").forEach((el) => el.classList.remove("open"));
@@ -1445,6 +1447,7 @@ function openLightboxById(id, bustCache) {
   resetLbView(); // v0.45/0.47：换图即复位预览旋转与缩放
   syncSlideBtn();
   updateLbFav(); // v0.56：同步收藏按钮状态
+  if (lbInfoOpen()) renderLbInfo(); // v0.81：面板开着切图 → 内容跟着换
 }
 
 /* ---------- 灯箱右下角悬浮工具条 + 幻灯片（v0.38） ----------
@@ -1490,12 +1493,73 @@ function closeLightbox() {
   stopSlide();
   clearTimeout(lbHideTimer);
   lbToolsHover = false;
+  closeLbInfo(); // v0.81：顺手收起信息面板
   const lb = lbEl();
   if (lb) {
     lb.classList.remove("open");
     lb.classList.remove("tools-visible");
   }
 }
+
+/* ---------- v0.81：灯箱「图片信息」底部上拉面板 ----------
+   点工具条上的 ⓘ 展开，展示标题 / 尺寸 / 大小 / 时间 / 分类 / 标签 / 分级等；
+   再点一次、点面板的 ✕、按 Esc 或点面板外都能收起。 */
+function lbInfoOpen() {
+  const el = document.getElementById("lbInfo");
+  return !!(el && el.classList.contains("open"));
+}
+function closeLbInfo() {
+  const el = document.getElementById("lbInfo");
+  if (!el) return;
+  el.classList.remove("open");
+  el.setAttribute("aria-hidden", "true");
+  const btn = document.getElementById("lbToolInfo");
+  if (btn) btn.classList.remove("on");
+}
+function lbInfoRows(p) {
+  const rows = [
+    ["标题", p.title || "未命名"],
+    ["尺寸", p.width && p.height ? `${p.width} × ${p.height}` : "—"],
+    ["大小", p.size ? fmtSize(p.size) : "—"],
+    ["格式", String(p.mime || "").replace(/^image\//, "").toUpperCase() || "—"],
+    ["拍摄时间", p.takenAt ? fmtDate(p.takenAt) : "—"],
+    ["上传时间", p.uploadedAt ? fmtDate(p.uploadedAt) : "—"],
+    ["分级", RATING_LABEL[ratingOf(p)] || "大众级"],
+    ["主分类", catsOf(p).join("、") || "未分类"],
+  ];
+  return rows;
+}
+function renderLbInfo() {
+  const body = document.getElementById("lbInfoBody");
+  if (!body) return;
+  const p = lbCurrentPhoto();
+  if (!p) { body.innerHTML = ""; return; }
+  const rows = lbInfoRows(p).map(([k, v]) =>
+    `<div class="lb-info-row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
+  const tags = (p.tags || []);
+  const tagHtml = tags.length
+    ? `<div class="lb-info-chips">${tags.map(tagChip).join("")}</div>`
+    : `<span class="v">无</span>`;
+  body.innerHTML = rows
+    + `<div class="lb-info-row"><span class="k">标签</span><div class="v">${tagHtml}</div></div>`
+    + `<div class="lb-info-row id"><span class="k">ID</span><span class="v">${esc(p.id)}</span></div>`;
+}
+function openLbInfo() {
+  renderLbInfo();
+  const el = document.getElementById("lbInfo");
+  if (!el) return;
+  el.classList.add("open");
+  el.setAttribute("aria-hidden", "false");
+  const btn = document.getElementById("lbToolInfo");
+  if (btn) btn.classList.add("on");
+  lbToolsVisible(true); // 面板展开时工具条别自动淡出
+  clearTimeout(lbHideTimer);
+}
+function toggleLbInfo() {
+  if (lbInfoOpen()) closeLbInfo();
+  else openLbInfo();
+}
+window.__lbInfoState = () => ({ open: lbInfoOpen(), rows: (document.querySelectorAll("#lbInfoBody .lb-info-row") || []).length });
 
 /* 切换上一张 / 下一张：默认按 PHOTOS 顺序，图库页会注册当前筛选后的顺序 */
 function lbStepList() {
@@ -1676,6 +1740,9 @@ function initLightboxTools() {
     const p = lbCurrentPhoto();
     if (p) setFav(p.id).then(updateLbFav);
   });
+  bind("lbToolInfo", toggleLbInfo); // v0.81：图片信息面板
+  const infoClose = document.getElementById("lbInfoClose");
+  if (infoClose) infoClose.onclick = (e) => { e.stopPropagation(); closeLbInfo(); };
 
   // 空格：开始 / 暂停幻灯片（仅在可见输入框内不触发，避免在弹窗里打不出空格）
   document.addEventListener("keydown", (e) => {
@@ -1698,6 +1765,7 @@ function initLightboxNav() {
   lb.addEventListener("click", (e) => {
     if (e.target.closest("button")) return;          // 右下角悬浮工具条按钮
     if (e.target.closest(".lb-tools-float")) return;
+    if (e.target.closest(".lb-info")) return;        // v0.81：信息面板里的点击不算「点空白」
     if (Date.now() < suppressClick) return;          // 刚滑动过 → 忽略尾随的 click
     // v0.44：点图片 → 左右半边切换；点图片以外的空白 → 关闭灯箱（✕ 按钮已删除）
     if (!e.target.closest("#lbImg")) {
@@ -2468,7 +2536,6 @@ function initGallery() {
       ${ratingBadge(p)}
       <div class="card__content">
         <div class="card__tags">${cardTagsHTML(p)}</div>
-        <p class="card__meta">${fmtDate(p.takenAt)} · ${fmtSize(p.size)}</p>
       </div>
     </div>`;
   }
