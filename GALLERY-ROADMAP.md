@@ -1270,6 +1270,10 @@ async function aiTagSearch(query) {
 - 样式（style.css）：卡片爱心去掉圆形底板 —— 就是一枚 ♥ / ♡（白色 + 文字投影，已收藏为粉色），仍是 hover 才出现
 - 样式：图片编辑弹窗的「删除这张图片」从原来单独一行移进按钮行 —— 删除靠左、取消 / 保存靠右，合成一行
   （`.m-actions.ed-actions`，窄屏 `flex-wrap` 自动换行；按钮改成写死在 index.html，`initEditModal` 只负责绑事件）
+- 交互：点弹窗外的空白处 = 关闭该弹窗（app.js 全局 `.modal-mask` 监听）。**等价于点它的「取消」按钮**
+  而不是直接摘 `.open` —— `askConfirmAsync` / `askChoice` 这类 Promise 版确认只有点取消才 resolve，
+  直接摘 `.open` 会让 await 永远挂着（上传查重就卡在那一步）。mousedown 与 click 都落在遮罩上才算，
+  从弹窗里拖选文字松手在空白处不会误关
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

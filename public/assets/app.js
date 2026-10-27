@@ -1301,6 +1301,29 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- v0.76：点弹窗外的空白处 = 关掉这个弹窗 ----------
+   等价于点该弹窗的「取消」按钮，而不是直接把 .open 摘掉 ——
+   askConfirmAsync / askChoice 这类 Promise 版确认只有点取消才 resolve，
+   直接摘 open 会让 await 永远挂着（上传查重就卡在那一步）。 */
+const isBareMask = (el) => !!(el && el.classList && el.classList.contains("modal-mask"));
+let maskDownOn = null;
+const maskDown = (e) => { maskDownOn = isBareMask(e.target) ? e.target : null; };
+document.addEventListener("mousedown", maskDown);
+document.addEventListener("touchstart", maskDown, { passive: true });
+document.addEventListener("click", (e) => {
+  if (!isBareMask(e.target) || e.target !== maskDownOn) { maskDownOn = null; return; } // 从弹窗里拖选到空白处不算
+  const mask = e.target;
+  maskDownOn = null;
+  if (!mask.classList.contains("open")) return;
+  const box = mask.querySelector(".modal") || mask;
+  const btns = [...box.querySelectorAll(".m-actions .btn, .btn")];
+  const cancel = btns.find((b) => /取消|关闭|Cancel|Close/i.test((b.textContent || "").trim()));
+  if (cancel) { cancel.click(); return; }
+  const ghost = btns.find((b) => b.classList.contains("ghost"));
+  if (ghost) { ghost.click(); return; }
+  mask.classList.remove("open");
+});
+
 /* ---------- 通用：悬浮弹出菜单（悬停弹出 + 点击固定 + 延迟收起，v0.8.4） ---------- */
 const fabGroupEl = document.getElementById("fabGroup");
 let flyoutOpenCount = 0; // 任一菜单打开时保持按钮组展开（v0.8.9）

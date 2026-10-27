@@ -194,6 +194,22 @@ function mockFetch(url, opts) {
   check("单张编辑保存后卡片没有被重建（不再 loadData 整库重拉）",
     cards()[2] === editTarget && cards().every((c) => c.__probe !== undefined));
 
+  /* ---- 6. 点弹窗外的空白处 = 关闭 ---- */
+  const editMask = doc.getElementById("editModal");
+  cards()[3].dispatchEvent(new window.MouseEvent("click", { detail: 2, bubbles: true, cancelable: true }));
+  await wait(80);
+  check("再次打开编辑弹窗", editMask.classList.contains("open"));
+  // 先从弹窗内部按住、再松在空白处 —— 不该关（防止拖选文字时误关）
+  doc.getElementById("edTagInput").dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true }));
+  editMask.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  await wait(40);
+  check("从弹窗内拖到空白处不会误关", editMask.classList.contains("open"));
+  // 空白处按下 + 松开 = 关闭
+  editMask.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true }));
+  editMask.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  await wait(60);
+  check("点空白处关闭编辑弹窗", !editMask.classList.contains("open"));
+
   const okAll = results.every(Boolean);
   console.log(`\n${okAll ? "全部通过" : "有失败项"}：${results.filter(Boolean).length}/${results.length}`);
   process.exit(okAll ? 0 : 1);
