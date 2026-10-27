@@ -277,18 +277,9 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       if (head2) { tap(head2); await wait(350); }
     }
 
-    // 标签流 ⇄ 卡片网格
-    const viewBtn = doc.getElementById("tmgrTagViewBtn");
-    check("分组视图有标签流 / 网格切换", !!viewBtn, viewBtn ? viewBtn.textContent.trim() : "无");
-    if (viewBtn) {
-      tap(viewBtn);
-      await wait(450);
-      const cardsN = doc.querySelectorAll("#tagMgrRoot .tmgr-tagcard").length;
-      check("切到网格视图（卡片化）", cardsN > 0, `${cardsN} 张卡片`);
-      const backBtn = doc.getElementById("tmgrTagViewBtn");
-      if (backBtn) { tap(backBtn); await wait(450); }
-      check("再点切回标签流", doc.querySelectorAll("#tagMgrRoot .tmgr-tagcard").length === 0);
-    }
+    // v0.87：「标签流 ⇄ 卡片网格」的切换按钮连同网格模式一起删除
+    check("分组视图不再有标签流 / 网格切换按钮",
+      !doc.getElementById("tmgrTagViewBtn") && !doc.querySelector("#tagMgrRoot .tmgr-tagcard"));
 
     // 标签搜索
     const searchInp = doc.getElementById("tmgrTagSearch");

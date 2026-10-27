@@ -1424,6 +1424,16 @@ async function aiTagSearch(query) {
 - 测试：`test:dom` 新增 5 项（概览条存在 / 三个过滤开关 / 过滤「有素材」后无空标签 /
   过滤「空」只剩空标签 / 恢复「全部」后空标签回来），共 228 项全过；`test:tagrefresh` 29 项同样全过
 
+### 批次 78 · 删掉「标签流 ⇄ 卡片网格」切换（v0.87，2026-10-27）🧹
+> 用户要求：把标签管理里那个 `☰ 标签流` 切换按钮删掉。
+
+- **删除内容**：`#tmgrTagViewBtn` 按钮与它的点击绑定、`tmgrTagView()` / `setTmgrTagView()` / `TMGR_TAGVIEW_KEY`、
+  `mgrPills()` 的 grid 分支（含 `.tmgr-tagcards` / `.tmgr-tagcard` 全部样式）；
+  分组视图只保留标签流这一种呈现，`mgrPills(tagObjs, counts)` 少一个参数
+- **保留**：标签搜索、概览条与「全部 / 有素材 / 空」过滤、组折叠、拖拽打标一切照旧
+- 测试：`test:dom` 把原来的 4 项网格切换断言换成 1 项「按钮与网格卡片都不存在」，共 226 项全过；
+  `test:tagrefresh` 29 项同样全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

@@ -4401,23 +4401,9 @@ function tagCounts() {
    · 顶部概览条：组数 / 标签数 / 有素材 / 空，右侧三个过滤开关（全部 / 有素材 / 空）
    · 每组一张卡片：组头（色点 + 组名 + 统计 + ＋ / ✎ + 折叠箭头）+ 标签胶囊区
    · 胶囊：名称 + 数量角标；空标签虚线淡化；hover 才露 ✎ / ×
-   · 卡片网格（grid）模式保留，供一眼扫角色 */
-function mgrPills(tagObjs, counts, viewMode) {
-  const mode = viewMode === "grid" ? "grid" : "flow";
+   v0.87：卡片网格模式与它的切换按钮已删掉 —— 只保留标签流这一种呈现 */
+function mgrPills(tagObjs, counts) {
   if (!tagObjs.length) return `<div class="tmgr-pills"><div class="tmgr-empty">这个组还没有标签</div></div>`;
-  if (mode === "grid") {
-    return `<div class="tmgr-pills tmgr-tagcards">` + tagObjs.map((t) => {
-      const n = counts[t.name] || 0;
-      const c = t.color || tagGroupColor(t.group) || "var(--w030)";
-      return `<div class="tmgr-tagcard${n ? "" : " empty"}" data-tag="${escAttr(t.name)}" title="${escAttr(t.name)} · ${n} 张">
-        <span class="cv" style="--tg:${c}">${esc(String(t.name || "?").slice(0, 1))}</span>
-        <span class="nm">${esc(t.name)}</span>
-        <span class="n">${n}</span>
-        <button class="act" data-tact="edit" data-tname="${escAttr(t.name)}" title="编辑 / 改名">✎</button>
-        <button class="act danger" data-tact="remove" data-tname="${escAttr(t.name)}" title="删除">×</button>
-      </div>`;
-    }).join("") + `</div>`;
-  }
   return `<div class="tmgr-pills">` + tagObjs.map((t) => {
     const n = counts[t.name] || 0;
     const c = t.color || tagGroupColor(t.group) || null;
@@ -4465,18 +4451,10 @@ function catMgrBlockHTML() {
 }
 
 const TMGR_VIEW_KEY = "rn_tmgr_view";
-/* v0.69：分组视图的两个新状态（重设计）
-   · 标签搜索词：跨组过滤标签名 / 别名 / 拼音，命中时强制展开该组
-   · 标签呈现方式：flow（标签流，紧凑）/ grid（卡片网格，一眼扫角色） */
+/* v0.69：分组视图的标签搜索词（跨组过滤标签名 / 别名 / 拼音，命中时强制展开该组）
+   v0.87：「标签流 ⇄ 卡片网格」的呈现方式切换连同按钮一起删除，只保留标签流 */
 let tmgrTagQuery = "";
-const TMGR_TAGVIEW_KEY = "rn_tmgr_tagview";
 const TMGR_CATOPEN_KEY = "rn_tmgr_catopen";
-function tmgrTagView() {
-  try { return localStorage.getItem(TMGR_TAGVIEW_KEY) === "grid" ? "grid" : "flow"; } catch (e) { return "flow"; }
-}
-function setTmgrTagView(v) {
-  try { localStorage.setItem(TMGR_TAGVIEW_KEY, v === "grid" ? "grid" : "flow"); } catch (e) { /* ignore */ }
-}
 function tmgrCatOpen() {
   try { return localStorage.getItem(TMGR_CATOPEN_KEY) === "1"; } catch (e) { return false; }
 }
@@ -4544,7 +4522,6 @@ function refreshTagManager() {
   const savedView = localStorage.getItem(TMGR_VIEW_KEY);
   let view = savedView === "group" ? "group" : "classify"; // v0.59：「整理」视图已移除，只剩分组 / 分类
 
-  const tagView = tmgrTagView();
   let html = `<div class="tmgr-seg">
       <div class="seg" id="tmgrViewSeg" role="group" aria-label="视图">
         <button class="seg-btn${view === "group" ? " on" : ""}" data-view="group">分组</button>
@@ -4555,7 +4532,6 @@ function refreshTagManager() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
           <input type="text" id="tmgrTagSearch" placeholder="搜索标签 / 别名 / 拼音…" value="${escAttr(tmgrTagQuery)}" autocomplete="off">
         </span>
-        <button class="mini-link" id="tmgrTagViewBtn" type="button" title="${tagView === "grid" ? "切换为紧凑标签流" : "切换为卡片网格"}">${tagView === "grid" ? "☰ 标签流" : "▦ 网格"}</button>
       </span>` : ""}
     </div>`;
 
@@ -4599,7 +4575,7 @@ function refreshTagManager() {
               ${canEdit ? `<button class="act" data-gact="edit" data-gid="${escAttr(gid)}" title="编辑组（改名 / 颜色）">✎</button>` : ""}
             </span>
           </div>
-          ${folded ? "" : mgrPills(hits, counts, tagView)}
+          ${folded ? "" : mgrPills(hits, counts)}
         </section>`;
       };
       for (const g of groups) {
@@ -4706,13 +4682,6 @@ function refreshTagManager() {
       refreshTagManager();
       const again = document.getElementById("tmgrTagSearch");
       if (again) { again.focus(); try { again.setSelectionRange(caret, caret); } catch (e) { /* ignore */ } }
-    });
-  }
-  const tagViewBtn = q("#tmgrTagViewBtn");
-  if (tagViewBtn) {
-    tagViewBtn.addEventListener("click", () => {
-      setTmgrTagView(tmgrTagView() === "grid" ? "flow" : "grid");
-      refreshTagManager();
     });
   }
   // v0.86：过滤（全部 / 有素材 / 空）
