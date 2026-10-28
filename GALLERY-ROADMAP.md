@@ -1513,6 +1513,21 @@ async function aiTagSearch(query) {
 - 测试：`test:dom` 新增 4 项（列宽统一 / 高度按比例各不相同 / 点开后变两列宽 / 周围照片被顺移），
   外加预热接口 1 项，共 244 项全过；`test:tagrefresh` 29 项同样全过
 
+### 批次 84 · 修「加载一次页面要等很久」（v0.94，2026-10-28）🔧
+> 用户反馈：现在打开页面要等很久。
+
+- **根因**：v0.84 把 `stats()` 改成「真实遍历所有 meta」来算用量，而它**在页面加载时**就被
+  `initSettings()` 调了一次 —— 700 张图 = 700 次 Blobs 读取，跟首屏的列表 / 缩略图请求抢带宽和函数并发，
+  于是首屏被拖慢（本地内存 Blobs 看不出来，线上是实打实的秒级）
+- **改法**：
+  - `initSettings()` 不再在启动时调 `refreshStats()`，只在**打开设置页**时算（`openWindow("settings")` 本来就会调）
+  - `stats()` 自身减负：照片数 / 原图字节 / 按月分布全从 meta 里取，**不再额外 `indexAll()` 扫一遍索引**
+    （读取次数砍半）；缓存从 60s 延到 120s；前端统计加载期间显示「统计中…」
+  - v0.93 的缩略图预取挪到**空闲时段**（`requestIdleCallback`，兜底 900ms），不再和首屏那十几张抢带宽
+  - 启动时的 `refreshTagManager()`（标签多时是几百个节点）也改成空闲时再建，打开标签管理时会重新渲染
+- 首屏现在只发三个请求：`/api/auth/state`、`/api/photos?limit=120`、`/api/tags`
+- 测试：`test:dom` 244 项、`test:tagrefresh` 29 项全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

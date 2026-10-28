@@ -2745,7 +2745,9 @@ function initGallery() {
     }
     initImgRelease(); // v0.25：性能模式下回收屏外卡片图片
     scheduleFill(); // v0.26：渲染后补足视口（首屏一次没填满就继续追加）
-    prefetchThumbs(filtered, shown, 24); // v0.93：把「下一屏」的缩略图先悄悄下好
+    // v0.94：预取放到空闲时段，别跟首屏那十几张抢带宽
+    if (typeof requestIdleCallback === "function") requestIdleCallback(() => prefetchThumbs(filtered, shown, 24), { timeout: 2500 });
+    else setTimeout(() => prefetchThumbs(filtered, shown, 24), 900);
     if (loopRefine) requestAnimationFrame(loopRefine); // v0.66：布局出来后按实测高度再分一次列
   }
   /* v0.93：预取接下来的缩略图 —— 滚下去时图已经在缓存里，看着就是秒出。
@@ -5967,10 +5969,12 @@ function initSettings() {
     txt.textContent = `${fmtBytes(bytes)} / ${(quota / 1e9).toFixed(2)} GB · ${pct.toFixed(2)}%`;
   }
   async function refreshStats() {
-    // v0.54：直接请求 API（不再看 USE_API —— 那个标志在首屏数据到位前是 false，
-    // 会让「先打开设置页」的人一直看到 0 张 / 0 KB）；只有 API 不可用才回退本地统计
+    /* v0.94：不再在页面加载时就算统计 —— 服务端要遍历每张图的 meta 才能算出真实占用，
+       700 张就是 700 次 Blobs 读取，和首屏抢带宽与函数并发，看起来就像「加载很久」。
+       现在只在**打开设置页**时才算（openWindow("settings") 会调 __refreshStats）。 */
     try {
-      const res = await apiFetch("/api/meta/stats");
+      stUsed.textContent = "统计中…";
+      const res = await apiFetch("/api/meta/stats", { timeout: API_TIMEOUT_HEAVY });
       const d = await res.json();
       renderStats(d);
       return;
@@ -5979,10 +5983,12 @@ function initSettings() {
     renderStats({ count: PHOTOS.length, bytes: total, keys: PHOTOS.length, byKind: { img: total }, quota: 0 });
   }
   window.__refreshStats = refreshStats; // 打开设置页时刷新用
-  refreshStats();
 
   /* ---------- 标签管理（v0.11：分组 / 别名 / 颜色） ---------- */
-  refreshTagManager();
+  /* v0.94：启动时不再同步渲染整个标签管理面板（标签多时是几百个节点）——
+     打开标签管理时 openWindow("tags") 会再刷一次，这里只是「有空先把首屏那段建好」 */
+  if (typeof requestIdleCallback === "function") requestIdleCallback(() => refreshTagManager(), { timeout: 2000 });
+  else setTimeout(refreshTagManager, 600);
   window.__refreshTagManager = refreshTagManager;
 
   /* ---------- 清空图库 ---------- */
