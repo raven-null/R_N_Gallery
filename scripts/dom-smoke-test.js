@@ -94,6 +94,13 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
 
   const cards0 = doc.querySelectorAll("#grid .card").length;
   check("首屏渲染出卡片", cards0 > 0, `${cards0} 张${gotCards ? "" : "（等待超时）"}`);
+  /* v0.89：网格卡片一律走缩略图 —— 不再因为「高清档」或「缺 thumbKey」去拉原图 */
+  {
+    const imgs = [...doc.querySelectorAll("#grid .card img")];
+    const srcOf = (i) => i.dataset.cardSrc || i.getAttribute("src") || "";
+    check("网格卡片加载的是缩略图而不是原图", imgs.length > 0 && imgs.every((i) => /\/thumb(\?|$)/.test(srcOf(i))),
+      imgs.length ? srcOf(imgs[0]).slice(0, 70) : "无");
+  }
 
   const sentinel = doc.getElementById("gridSentinel");
   check("滚动加载哨兵已创建", !!sentinel);

@@ -591,7 +591,10 @@ const NEXT_PAGE = 200;  // 其余后台分批静默补齐
 const mapPhoto = (p) => ({
   ...p,
   url: mediaUrl(p.id, "raw"),
-  thumbUrl: p.thumbKey ? mediaUrl(p.id, "thumb") : null,
+  /* v0.89：缩略图地址一律给出来（不再看有没有 thumbKey）——
+     服务端 /thumb 会按需懒生成，缺 thumbKey 的老图也能拿到缩略图，
+     不会因为「没缩略图 → 回退原图」而让首屏去拉几 MB 的原片 */
+  thumbUrl: mediaUrl(p.id, "thumb"),
 });
 /* v0.54：统一超时信号（旧浏览器没有 AbortSignal.timeout，退化为不设超时，不影响功能） */
 const timeoutSignal = (ms) =>
@@ -998,8 +1001,10 @@ function qualityMode() {
   return q === "high" || q === "low" ? q : "normal";
 }
 function cardImgSrc(p) {
-  // high=原图；normal/low=缩略图（无缩略图回退原图）
-  return qualityMode() === "high" ? p.url : (p.thumbUrl || p.url);
+  /* v0.89：网格卡片**永远**用缩略图。
+     以前「高清」档直接塞原图（几 MB/张），首屏十几张卡同时拉原片就是卡顿的主因；
+     原图只在灯箱里看（openLightboxById 先缩略图后原图渐进替换）。 */
+  return p.thumbUrl || p.url;
 }
 function makeThumbDataUrl(dataUrl) {
   return new Promise((resolve, reject) => {

@@ -112,12 +112,15 @@ function normCategories(list) {
   return out;
 }
 
-/* 服务端生成缩略图（v0.13.8 / v0.78）：最长边 THUMB_W、webp q80、自动旋转、不放大 */
+/* 服务端生成缩略图（v0.13.8 / v0.78；v0.89 降 effort / quality 让生成更快、体积更小）
+   effort 4 → 3：编码耗时约少三成，肉眼几乎看不出差别；
+   quality 80 → 76：同一张图体积再小 ~10-15%（首屏十几张缩略图，省的是实打实的带宽） */
+const THUMB_QUALITY = 76;
 async function genThumbBuf(buf) {
   const out = await sharp(buf, { failOn: "none", animated: false })
     .rotate()
     .resize(THUMB_W, THUMB_W, { fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 80, effort: 4 })
+    .webp({ quality: THUMB_QUALITY, effort: 3 })
     .toBuffer();
   return out;
 }
@@ -409,8 +412,15 @@ const idxKeyOf = (id, uploadedAt) => `${PREFIX_IDX}${idxStampOf(uploadedAt)}-${i
 /* 读一页索引（管理员列表路径）：list 只给 key，条目内容要逐条取，一页几十次并发读可接受 */
 async function indexGetPage(s, { limit = 60, cursor } = {}) {
   const res = await s.list({ prefix: PREFIX_IDX, cursor, limit });
-  const entries = await Promise.all(res.blobs.map((b) => s.get(b.key, { type: "json" }).catch(() => null)));
-  return { entries: entries.filter((e) => e && e.id), cursor: res.nextCursor || null, hasMore: !!res.nextCursor };
+  const keys = (res.blobs || []).map((b) => b.key);
+  const entries = new Array(keys.length);
+  /* v0.89：原来一次性 Promise.all 打 120 个 get —— Netlify Blobs 会限流，反而更慢；
+     改成并发 20 分批读（按下标回填，保住「最新在前」的顺序） */
+  await mapLimit(keys, 20, async (key, i) => {
+    const e = await s.get(key, { type: "json" }).catch(() => null);
+    entries[i] = e && e.id ? e : null;
+  });
+  return { entries: entries.filter(Boolean), cursor: res.nextCursor || null, hasMore: !!res.nextCursor };
 }
 /* 全量读取（观光模式过滤、用量统计、重建用）*/
 async function indexAll(s) {
@@ -576,11 +586,17 @@ function guestReadOK(method, path, url, rest) {
   return false;
 }
 
-/* ---------- 图片字节缓存头（v0.77） ----------
+/* ---------- 图片字节缓存头（v0.77；v0.89 给管理员放开浏览器私有缓存） ----------
    大众级图片允许 CDN 长缓存：Netlify 会在 CDN 层缓存函数响应，第二次访问起直接出图；
-   成人向图片一律 private, no-store —— 否则观光访客能顺着 CDN 绕过管理员校验拿到 R16/R18。 */
-function imageCacheHeaders(meta) {
-  if (isAdultPhoto(meta)) return { "Cache-Control": "private, no-store" };
+   成人向图片**不能**进 CDN 缓存 —— 否则观光访客能顺着 CDN 绕过管理员校验拿到 R16/R18。
+   v0.89：管理员自己看 R16/R18 时给 `private, max-age=…` —— 只落在**他自己的浏览器**，
+   CDN 不缓存（private），但翻来翻去看同一批图不用每次都打函数（原来是 no-store，每张都重下）。 */
+function imageCacheHeaders(meta, authed) {
+  if (isAdultPhoto(meta)) {
+    return {
+      "Cache-Control": authed ? "private, max-age=86400" : "private, no-store",
+    };
+  }
   return {
     "Cache-Control": "public, max-age=31536000, immutable",
     "Netlify-CDN-Cache-Control": "public, max-age=31536000, immutable",
@@ -607,7 +623,7 @@ async function raw(id, req, url, role) {
     status: 200,
     headers: {
       "Content-Type": m.mime || "application/octet-stream",
-      ...imageCacheHeaders(m),
+      ...imageCacheHeaders(m, role === "admin"),
       "X-Content-Type-Options": "nosniff",
       "Access-Control-Allow-Origin": "*",
     },
@@ -657,28 +673,40 @@ async function replaceImage(req, id) {
   return json({ ok: true, photo: meta });
 }
 
-/* ---------- 缩略图输出（v0.12/0.13.8：无缩略图时服务端即时生成并缓存，旧图自动补齐） ---------- */
+/* ---------- 缩略图输出（v0.12/0.13.8：无缩略图时服务端即时生成并缓存，旧图自动补齐） ----------
+   v0.89：meta 与缩略图 blob **并行读**（省一趟往返），并补上「老数据没有 origKey」时的兜底：
+   按 `img-<id>.` 前缀列一次，找到真实扩展名的原图再生成缩略图。 */
 async function thumb(id, req, url, role) {
   const s = store();
-  const meta = await s.get(`${PREFIX_META}${id}.json`, { type: "json" });
+  const metaKey = `${PREFIX_META}${id}.json`;
+  const thumbKey = thumbKeyOf(id);
+  const [meta, cached] = await Promise.all([
+    s.get(metaKey, { type: "json" }).catch(() => null),
+    s.get(thumbKey, { type: "arrayBuffer" }).catch(() => null), // 先乐观取一份，尺寸不对再丢掉
+  ]);
   if (!meta) return notFound("Photo not found");
   // 成人向内容：只有管理员能看（观光访客与整理模式都拒绝）
   if (isAdultPhoto(meta) && role !== "admin") return unauthorized("当前模式不可查看该内容");
-  let buf = null;
   // 只有「当前尺寸」的缩略图才算有效缓存；旧尺寸（480）或前端上传的未知尺寸会在下面自动升级为 THUMB_W
-  if (meta.thumbKey && meta.thumbW === THUMB_W) buf = await s.get(meta.thumbKey, { type: "arrayBuffer" });
+  let buf = (meta.thumbKey && meta.thumbW === THUMB_W) ? cached : null;
   if (!buf) {
     // 懒生成：读原图 → sharp THUMB_W → 存入 Blobs（下次直接命中，immutable 缓存）
-    const orig = await s.get(meta.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" });
+    let orig = await s.get(meta.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" }).catch(() => null);
+    if (!orig) {
+      // 老数据可能没记 origKey（原图 key 带扩展名）：按前缀找一次
+      const found = await s.list({ prefix: `${PREFIX_IMG}${id}.`, limit: 1 }).catch(() => null);
+      const k = found && found.blobs && found.blobs[0] && found.blobs[0].key;
+      if (k) orig = await s.get(k, { type: "arrayBuffer" }).catch(() => null);
+    }
     if (!orig) return notFound("Image data not found");
     try {
       const out = await genThumbBuf(Buffer.from(orig));
-      meta.thumbKey = thumbKeyOf(id);
+      meta.thumbKey = thumbKey;
       meta.thumbMime = "image/webp";
       meta.thumbW = THUMB_W;
       meta.thumbSize = out.length; // v0.84：缩略图字节数（用量统计算得出来）
       await s.set(meta.thumbKey, out);
-      await s.set(`${PREFIX_META}${id}.json`, JSON.stringify(meta));
+      await s.set(metaKey, JSON.stringify(meta));
       await indexPut(s, meta); // v0.54 懒生成缩略图后同步索引
       buf = out;
     } catch (e) {
@@ -689,7 +717,7 @@ async function thumb(id, req, url, role) {
     status: 200,
     headers: {
       "Content-Type": meta.thumbMime || "image/webp",
-      ...imageCacheHeaders(meta),
+      ...imageCacheHeaders(meta, role === "admin"),
       "Access-Control-Allow-Origin": "*",
       "X-Content-Type-Options": "nosniff",
     },
