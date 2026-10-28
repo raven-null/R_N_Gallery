@@ -56,8 +56,8 @@ const collapsedGroups = new Set(); // 筛选菜单中折叠的组 id
 
 /* ---------- 排序 / 批量选择（v0.11.2；v0.74 重做：三种模式 + 方向切换） ---------- */
 const SORT_KEY = "rn_sort";
-let SORT_MODE = "time"; // time | size | tag
-let SORT_DESC = true;   // time/size: true=降序；tag: true=主分类在前, false=标签在前
+let SORT_MODE = "time"; // time | size（v0.90：主分类在前 / 标签在前两种排序已删除）
+let SORT_DESC = true;   // time/size: true=降序（最新/最大在前）
 let selectMode = false;
 /* v0.60：长按卡片激活多选（移动端手势）—— 状态
    · 按住 LP_MS 且没挪动超过 LP_SLOP → 进入多选并选中这张
@@ -79,10 +79,6 @@ function sortPhotos(list) {
   const out = [...list];
   if (SORT_MODE === "size") {
     out.sort((a, b) => SORT_DESC ? (b.size || 0) - (a.size || 0) : (a.size || 0) - (b.size || 0));
-  } else if (SORT_MODE === "tag") {
-    // v0.74：SORT_DESC=true → 有主分类的在前；false → 有标签的在前
-    const rank = (p) => (SORT_DESC ? (catsOf(p).length ? 1 : 0) : ((p.tags && p.tags.length) ? 1 : 0));
-    out.sort((a, b) => rank(b) - rank(a));
   } else {
     out.sort((a, b) => SORT_DESC
       ? photoTimeOf(b).localeCompare(photoTimeOf(a))
@@ -3757,19 +3753,20 @@ function initSortMenu() {
   const items = menu.querySelectorAll(".page-menu-item");
   const saved = localStorage.getItem(SORT_KEY);
   // 迁移旧值：newest→time|desc，oldest→time|asc，size→size|desc
+  // v0.90：旧的 tag|*（主分类在前 / 标签在前）已删除 → 回落到「最新在前」
   if (saved === "newest") { SORT_MODE = "time"; SORT_DESC = true; }
   else if (saved === "oldest") { SORT_MODE = "time"; SORT_DESC = false; }
   else if (saved === "size") { SORT_MODE = "size"; SORT_DESC = true; }
   else if (saved === "title") { localStorage.removeItem(SORT_KEY); }
   else if (saved && saved.includes("|")) {
     const [m, d] = saved.split("|");
-    if (["time", "size", "tag"].includes(m)) { SORT_MODE = m; SORT_DESC = d !== "asc"; }
+    if (["time", "size"].includes(m)) { SORT_MODE = m; SORT_DESC = d !== "asc"; }
+    else { SORT_MODE = "time"; SORT_DESC = true; localStorage.removeItem(SORT_KEY); }
   }
 
   const LABELS = {
     time: () => [t("最新在前", "Newest first"), t("最早在前", "Oldest first")],
     size: () => [t("大文件在前", "Largest first"), t("小文件在前", "Smallest first")],
-    tag: () => [t("主分类在前", "Categorized first"), t("标签在前", "Tagged first")],
   };
 
   function refreshUI() {
@@ -4210,7 +4207,6 @@ const I18N_DICT = {
   "加标签": "Add Tags", "入相册": "Add to Album", "全部": "All",
   "最新在前": "Newest first", "最早在前": "Oldest first",
   "大文件在前": "Largest first", "小文件在前": "Smallest first",
-  "主分类在前": "Categorized first", "标签在前": "Tagged first",
   "标题": "Title", "标签": "Tags",
   "加入相册": "Add to Album", "新建相册名称…": "New album name…", "＋ 新建并加入": "Create & add",
   "编辑待上传项": "Edit upload item", "编辑图片信息": "Edit photo",

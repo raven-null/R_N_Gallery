@@ -1464,6 +1464,16 @@ async function aiTagSearch(query) {
 - 测试：`test:dom` 新增 1 项（网格卡片的 img 必须是 `/thumb` 而不是原图），共 231 项全过；
   `test:tagrefresh` 29 项同样全过
 
+### 批次 81 · 排序菜单删掉「主分类在前 / 标签在前」（v0.90，2026-10-28）🧹
+> 用户要求：排序里把「主分类在前」和「标签在前」两项删掉。
+
+- **删除内容**：`#sortMenu` 里的 `data-sort="tag"` 那一项、`initSortMenu()` 的 `LABELS.tag`、
+  `sortPhotos()` 的 `tag` 排序分支、i18n 表里对应的两条译文
+- **存档兼容**：`rn_sort` 里如果是老的 `tag|desc / tag|asc`，启动时清掉并回落到「最新在前」，
+  不会因为找不到排序项而卡在空菜单状态
+- 排序只剩「时间」「大小」两项，点击 / 滚轮切换方向的交互不变
+- 测试：`test:dom` 的排序段改成 2 项断言（菜单只有 time/size + 不再有那两条文案），共 230 项全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

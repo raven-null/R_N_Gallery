@@ -769,17 +769,17 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
-  /* v0.74：排序菜单重做 —— 三种模式（time/size/tag）+ 点击切换方向 */
+  /* v0.74：排序菜单 —— 点击 / 滚轮切换方向；v0.90 删掉「主分类在前 / 标签在前」只剩两项 */
   {
     const sortBtn = doc.getElementById("fabSortBtn");
     const sortMenu = doc.getElementById("sortMenu");
     if (sortBtn && sortMenu) {
       const items = [...sortMenu.querySelectorAll(".page-menu-item")];
-      check("排序菜单有 3 项（time/size/tag）", items.length === 3 && items.every((i) => ["time", "size", "tag"].includes(i.dataset.sort)),
+      check("排序菜单有 2 项（time/size）", items.length === 2 && items.every((i) => ["time", "size"].includes(i.dataset.sort)),
         items.map((i) => i.dataset.sort).join(","));
+      check("排序菜单不再有「主分类在前 / 标签在前」", !items.some((i) => i.dataset.sort === "tag") && !/主分类在前|标签在前/.test(sortMenu.textContent));
       const timeItem = items.find((i) => i.dataset.sort === "time");
       const sizeItem = items.find((i) => i.dataset.sort === "size");
-      const tagItem = items.find((i) => i.dataset.sort === "tag");
       // 初始：time 选中、降序
       check("默认选中时间排序（降序）", timeItem.classList.contains("on"));
       // 再点 time → 切换为升序
@@ -794,14 +794,6 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       sizeItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
       await wait(80);
       check("再点大小切换为升序（size|asc）", window.localStorage.getItem("rn_sort") === "size|asc", window.localStorage.getItem("rn_sort") || "(空)");
-      // 点 tag → 选中且默认主分类在前
-      tagItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-      await wait(80);
-      check("点标签选中且默认主分类在前（tag|desc）", tagItem.classList.contains("on") && window.localStorage.getItem("rn_sort") === "tag|desc", window.localStorage.getItem("rn_sort") || "(空)");
-      // 再点 tag → 标签在前
-      tagItem.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-      await wait(80);
-      check("再点标签切换为标签在前（tag|asc）", window.localStorage.getItem("rn_sort") === "tag|asc", window.localStorage.getItem("rn_sort") || "(空)");
       // 滚轮在 time 项上 → 选中并回到降序（未选中项滚轮 = 选中默认方向）
       timeItem.dispatchEvent(new window.WheelEvent("wheel", { bubbles: true, deltaY: 120 }));
       await wait(80);
