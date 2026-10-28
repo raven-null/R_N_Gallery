@@ -6187,6 +6187,7 @@ let wallRAF = 0;
 let wallExpandedId = null;              // 当前被点开放大的照片 id（布局据此重新打包）
 let wallHintTimer = null;
 let wallGridSeed = 1;                   // v0.97：方格模式下「随机放大哪些」的种子（换一次洗一次）
+const wallShrunk = new Set();           // v1.01：被用户点小掉的「随机放大」照片（它们回到 1×1）
 const WALL_VIEW_KEY = "rn_wall_view";   // grid（默认）| masonry
 function wallView() {
   try { return localStorage.getItem(WALL_VIEW_KEY) === "masonry" ? "masonry" : "grid"; } catch (e) { return "grid"; }
@@ -6270,7 +6271,9 @@ function wallComputeGrid() {
       if (pi >= n) continue;            // 只剩 pending，继续往后找位置
       const p = wallPhotos[pi++];
       wallPhotoById.set(p.id, p);
-      const wantBig = p.id === wallExpandedId || ((pi - 1 + bigOffset) % bigEvery === 0);
+      // v1.01：被点小过的照片不再参与「随机放大」
+      const randBig = ((pi - 1 + bigOffset) % bigEvery === 0) && !wallShrunk.has(p.id);
+      const wantBig = p.id === wallExpandedId || randBig;
       if (wantBig && canBigAt(r, c)) {
         markCells(r, c, 2);
         items.push({
@@ -6562,12 +6565,23 @@ function wallKeepInView(tile) {
   if (dx || dy) { wallX += dx; wallY += dy; wallSchedule(); }
 }
 
-/* 点开 / 收起：被点的那张在布局里变成两列宽，其余照片顺着挤开（CSS 过渡负责动画） */
+/* 点开 / 收起：
+   · 普通小图 → 变成大图（方格 2×2 / 瀑布两列宽），后面的照片被挤开
+   · 已经是「我被点开的」或者「随机放大」的大图 → 缩回 1×1
+     （v1.01：随机放大那几张以前点了没反应，因为它们不是 wallExpandedId） */
 function wallToggleBig(tile) {
   if (!tile) return;
   const id = tile.dataset.id;
   if (!id) return;
-  if (wallExpandedId === id) { wallCollapse(); return; }
+  const isBigNow = tile.classList.contains("big");
+  if (wallExpandedId === id || isBigNow) {
+    wallExpandedId = null;
+    wallShrunk.add(id);      // 记住：这张不要再随机放大
+    wallComputeLayout();
+    wallRender();
+    return;
+  }
+  wallShrunk.delete(id);     // 之前被点小过，现在又要放大 → 放回正常
   wallExpandedId = id;
   wallComputeLayout(); // 重新打包：大图占两列，后面的照片整片下移
   wallRender();
@@ -6602,6 +6616,7 @@ function wallShuffleList() {
 function wallReload(photos) {
   wallPhotos = photos || wallShuffleList();
   wallExpandedId = null;
+  wallShrunk.clear();                       // 换一批照片，之前「点小掉」的记录作废
   wallGridSeed = (Math.random() * 1e9) | 0; // v0.97：重新决定「随机放大」是哪几张
   wallTiles.forEach((el) => el.remove());
   wallTiles.clear();

@@ -826,6 +826,16 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         const bigTiles = tiles.filter((t) => t.classList.contains("big"));
         check("方格模式下有一些照片被随机放大（2×2）", bigTiles.length > 0 && bigTiles.every((t) => parseFloat(t.style.width) > 180),
           `${bigTiles.length} 张大图`);
+        // v1.01：随机放大的那几张也必须能点小（以前点了没反应）
+        const decorBig = bigTiles.find((t) => !t.classList.contains("expanded"));
+        if (decorBig) {
+          decorBig.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+          await wait(500);
+          const after = [...doc.querySelectorAll("#wallPlane .wall-tile")].find((x) => x.dataset.id === decorBig.dataset.id);
+          check("随机放大的照片点一下能缩回 1×1",
+            !!after && after.style.width === "180px" && !after.classList.contains("big"),
+            after ? `宽 ${after.style.width}` : "找不到该照片");
+        }
         // v0.98：每块的最后一行也要补齐，否则块交界处会出现一条横贯全宽的黑带
         const gs = window.__wallGridStats ? window.__wallGridStats() : null;
         check("方格块的最后一行被补齐（交界处没有黑带）", !!gs && gs.filled === gs.cells,
@@ -855,8 +865,9 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         }
       }
       // v0.96：块的下沿要齐 —— 每列尾部都补满（在瀑布流分支里已断言，这里不再重复）
-      // 注意：上面切换过排布，旧的 tile 元素已经被重建 → 这里重新取一张
-      const tile2 = doc.querySelector("#wallPlane .wall-tile[data-id]");
+      // 注意：上面切换过排布，旧的 tile 元素已经被重建 → 这里重新取一张（要挑普通小图，
+      // 随机放大的那几张点下去是「缩小」，见前面的用例）
+      const tile2 = doc.querySelector("#wallPlane .wall-tile[data-id]:not(.big)");
       if (tile2) {
         const tile = tile2;
         // v0.92：点开 = 布局重排（这张变两列宽，后面的照片被挤开），不是简单放大浮层
@@ -876,7 +887,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         /* v0.99：即使这张照片所在格子右边/下边被别的大图占了，点下去也必须能放大
            （以前会「点了没反应」——布局放不下 2×2 就直接跳过） */
         {
-          const all = [...doc.querySelectorAll("#wallPlane .wall-tile[data-id]")];
+          const all = [...doc.querySelectorAll("#wallPlane .wall-tile[data-id]")].filter((t) => !t.classList.contains("big"));
           let ok = 0, tried = 0;
           for (const t of all.slice(0, 8)) {
             tried++;
