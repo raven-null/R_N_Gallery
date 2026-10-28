@@ -1491,6 +1491,28 @@ async function aiTagSearch(query) {
   双击开灯箱 / Esc 只关灯箱 / 拖动平移 / 滚轮缩放 / 返回关闭），共 240 项全过；
   `test:tagrefresh` 29 项同样全过
 
+### 批次 83 · 画布墙改瀑布流 + 秒出图 + 长按不再选中（v0.92 / v0.93，2026-10-28）⚡
+> 用户反馈：① 画布墙上不要方格，要瀑布流、完整展示图片；② 点击时希望「图片放大并挤动其它图片」的动画；
+> ③ 图片加载还是要更快，要秒出；④ 长按鼠标会出现蓝色选中遮罩，不要。
+
+- **瀑布流（v0.92）**：`wallComputeLayout()` 按原图宽高比把照片塞进「当前最矮的那一列」，
+  列宽固定 180px、间距 12px；布局整块平铺到无限画布（`blockW/blockH` 周期重复），虚拟化改为
+  「可见块 × 可见照片」两重裁剪，DOM 里始终只有视野内那几十张
+- **点开 = 挤动其它照片**：被点的那张在布局里变成**两列宽**（372px，高度按同一比例），
+  它后面所有照片整片下移；`wallMakeTile` / `wallRender` 对已有元素只改 left/top/width/height，
+  配 CSS `transition` 0.42s，于是放大与挤开都是平滑动画；双击进灯箱时先还原布局
+- **秒出图（v0.93）**：
+  - `prefetchThumbs()`：每次渲染 / 追加后，用低优先级 `new Image()` 悄悄把「下一屏 24 张」的缩略图下好，
+    滚下去时已在缓存里（省流模式 `saveData` 下不预取）
+  - 新增 `POST /api/meta/thumbs`（管理员）**缩略图预热**：按 offset/batch 分批把「尺寸过期 / 还没生成」的
+    缩略图提前算好（并发 4，一次 12 张，避免撞函数时限），返回 `{total,next,done,skipped,remaining}`；
+    设置页「数据维护 → 刷新缩略图」按钮循环调用并显示进度，跑完以后每次看图都命中缓存 + CDN
+- **长按不再选中（v0.93）**：`.wall-page/.wall-tile/.lightbox/.cw-card/.dup-thumb/.album-body/img` 统一
+  `user-select: none`；画布墙 `mousedown` 里 `preventDefault()`，按住拖动就是拉画布，
+  不会出现浏览器原生的蓝色选区 / 拖图片
+- 测试：`test:dom` 新增 4 项（列宽统一 / 高度按比例各不相同 / 点开后变两列宽 / 周围照片被顺移），
+  外加预热接口 1 项，共 244 项全过；`test:tagrefresh` 29 项同样全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

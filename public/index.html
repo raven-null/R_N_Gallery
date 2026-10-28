@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>渡·影·集</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='2' width='20' height='20' rx='5' fill='%2314171f'/%3E%3Crect x='4.5' y='4.5' width='15' height='15' rx='3' fill='none' stroke='%23ff9f0a' stroke-width='1.6'/%3E%3Ccircle cx='9' cy='9' r='1.3' fill='%23ff9f0a'/%3E%3Cpath d='M19.5 14.5l-3.6-3.6a.8.8 0 0 0-1.1 0L7 18.5' stroke='%23ff9f0a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="assets/style.css?v=202610282254">
+<link rel="stylesheet" href="assets/style.css?v=202610282307">
 </head>
 <body data-page="gallery">
 
@@ -261,6 +261,14 @@
             </span>
             <svg class="settings-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
+          <!-- v0.93：缩略图预热 —— 把老图缺的 / 尺寸过期的缩略图提前算好，之后翻图秒出 -->
+          <div class="settings-row">
+            <span class="settings-label">刷新缩略图<span class="settings-sub">提前把缺的 / 尺寸过期的缩略图生成好，之后看图秒开</span></span>
+            <span class="settings-value">
+              <b id="thumbWarmText" style="font-size:12px;color:var(--text-faint)">未运行</b>
+              <button class="btn ghost sm" id="btnWarmThumbs" type="button" style="margin-left:10px">开始</button>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -765,6 +773,6 @@
 
 <!-- v0.54：拼音库改为按需加载（原来写死在这里，首屏要多下 316KB / gzip 142KB）：
      首次真正要做拼音匹配时由 app.js 动态注入，见 app.js 的 loadPinyinLib -->
-<script src="assets/app.js?v=202610282254" defer></script>
+<script src="assets/app.js?v=202610282307" defer></script>
 </body>
 </html>

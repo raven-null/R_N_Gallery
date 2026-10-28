@@ -2745,7 +2745,26 @@ function initGallery() {
     }
     initImgRelease(); // v0.25：性能模式下回收屏外卡片图片
     scheduleFill(); // v0.26：渲染后补足视口（首屏一次没填满就继续追加）
+    prefetchThumbs(filtered, shown, 24); // v0.93：把「下一屏」的缩略图先悄悄下好
     if (loopRefine) requestAnimationFrame(loopRefine); // v0.66：布局出来后按实测高度再分一次列
+  }
+  /* v0.93：预取接下来的缩略图 —— 滚下去时图已经在缓存里，看着就是秒出。
+     用低优先级 Image 预加载，省流模式（saveData）下不预取。 */
+  const prefetchedThumbs = new Set();
+  function prefetchThumbs(list, from, count) {
+    try {
+      if (navigator.connection && navigator.connection.saveData) return;
+    } catch (e) { /* ignore */ }
+    const end = Math.min(list.length, (from || 0) + (count || 24));
+    for (let i = Math.max(0, from || 0); i < end; i++) {
+      const p = list[i];
+      if (!p || !p.thumbUrl || prefetchedThumbs.has(p.thumbUrl)) continue;
+      prefetchedThumbs.add(p.thumbUrl);
+      const im = new Image();
+      im.decoding = "async";
+      if ("fetchPriority" in im) im.fetchPriority = "low";
+      im.src = p.thumbUrl;
+    }
   }
   window.__renderGallery = () => render();
   window.__renderGallerySilent = () => render({ skipReveal: true }); // v0.62：不播入场动画的重渲染
@@ -2901,6 +2920,7 @@ function initGallery() {
     }
     updateLoadMore();
     scrollBusy = false;
+    prefetchThumbs(filtered, shown, 24); // v0.93：继续预取下一屏缩略图
     scheduleFill(); // 追加后继续补足视口（可能一次追加还不够填满）
   }
   window.__appendMore = appendMore; // 调试/测试钩子：手动触发追加
@@ -6120,6 +6140,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initAlbumPage(); // v0.34：相册整页（FAB 相册按钮 / 右边缘左滑进入）
   initWall(); // v0.91：画布墙（无限画布 · 拖拽平移 · 单击放大 · 双击灯箱）
   initLogsUI();
+  initWarmThumbs(); // v0.93：缩略图预热按钮
   initLang();
   initFabHold();
 
@@ -6141,45 +6162,90 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 /* ============================================================
-   画布墙（v0.91）：一堆小方格铺在无限画布上，可上下左右平移
-   · 平面只做 translate + scale；方格按 (列, 行) 绝对定位
-   · 只渲染视野内的方格（虚拟化）—— 几千张图也不卡
-   · (列,行) 用「整块平铺」映射到照片：一个 ceil(sqrt(N))² 的块就恰好覆盖全部照片，
-     块与块首尾相接 → 往任意方向推都是这张墙，看起来无限延展
-   · 单击 = 就地放大（其它方格淡出）；再点一次 / 点空白收起；双击 = 开灯箱
+   画布墙（v0.91 → v0.92 瀑布流）：照片按原始比例铺在无限画布上
+   · 平面只做 translate + scale；每张照片按瀑布流摆进固定列宽的位置
+   · 一张「块」= 全部照片按列宽摆好的一份；块与块首尾相接 → 往任意方向推都是这张墙
+   · 只渲染视野内的照片（虚拟化）—— 几千张图也不卡
+   · 单击 = 就地放大成两列宽（后面的照片被顺移挤开，带过渡动画）；
+     再点一次 / 点空白收起；双击 = 开灯箱
    ============================================================ */
-const WALL_CELL = 132;                  // 一格的步长（含间距）
-const WALL_GAP = 10;
+const WALL_COL = 180;                   // 列宽（照片宽度）
+const WALL_GAP = 12;                    // 照片间距
 const WALL_MIN_S = 0.45;
 const WALL_MAX_S = 2.2;
 let wallPhotos = [];
+let wallLayout = null;                  // { items:[{id,x,y,w,h,big}], cols, blockW, blockH }
 let wallX = 0, wallY = 0, wallScale = 1;
 let wallOpen = false;
 let wallRAF = 0;
-let wallBigEl = null;
+let wallExpandedId = null;              // 当前被点开放大的照片 id（布局据此重新打包）
 let wallHintTimer = null;
-const wallTiles = new Map();            // "列,行" → 方格元素
+const wallTiles = new Map();            // "块列,块行,序号" → 照片元素
+const wallPhotoById = new Map();
 
 function wallViewport() { return document.getElementById("wallViewport"); }
 function wallPlaneEl() { return document.getElementById("wallPlane"); }
 
-/* (列,行) → 照片下标：按 ceil(sqrt(N)) 的方阵平铺，保证一个块里不重复、且覆盖全部照片 */
-function wallIndexAt(c, r) {
+/* 瀑布流布局：按顺序把照片塞进当前最矮的那一列（高度按原始宽高比算）。
+   v0.92：被点开的照片占两列宽 —— 它一变大，后面的照片整片往下顺移，
+   于是「点开放大」会把周围的照片挤开、并带过渡动画。 */
+function wallComputeLayout() {
   const n = wallPhotos.length;
-  if (!n) return -1;
-  const K = Math.ceil(Math.sqrt(n));
-  const cc = ((c % K) + K) % K;
-  const rr = ((r % K) + K) % K;
-  return (rr * K + cc) % n;
+  if (!n) { wallLayout = null; return; }
+  const cols = Math.max(4, Math.min(20, Math.round(Math.sqrt(n * 1.4))));
+  const colH = new Array(cols).fill(0);
+  const items = [];
+  wallPhotoById.clear();
+  const bigId = wallExpandedId;
+  for (const p of wallPhotos) {
+    const w = Number(p.width) > 0 ? Number(p.width) : 3;
+    const h = Number(p.height) > 0 ? Number(p.height) : 4;
+    // 限定宽高比范围，免得超长条把整列拉爆
+    const ratio = Math.min(2.6, Math.max(0.42, h / w));
+    const isBig = !!bigId && p.id === bigId;
+    const span = isBig ? Math.min(2, cols) : 1;
+    const colW = span === 2 ? WALL_COL * 2 + WALL_GAP : WALL_COL;
+    const ph = Math.round(colW * ratio);
+    if (span === 2) {
+      /* 让大图尽量留在它原本那一列：先算它作为普通照片会落到哪一列，
+         再往右扩一列（右边没列就向左扩），下沿取两列里较高的那个 —— 这样点下去是
+         「原地变大、把旁边的照片挤开」，而不是整张跳到别处 */
+      let c = 0;
+      for (let i = 1; i < cols; i++) if (colH[i] < colH[c]) c = i;
+      const left = c + 1 < cols ? c : Math.max(0, c - 1);
+      const y = Math.max(colH[left], colH[left + 1]);
+      items.push({ id: p.id, x: left * (WALL_COL + WALL_GAP), y, w: colW, h: ph, big: true });
+      colH[left] = y + ph + WALL_GAP;
+      colH[left + 1] = y + ph + WALL_GAP;
+    } else {
+      let c = 0;
+      for (let i = 1; i < cols; i++) if (colH[i] < colH[c]) c = i;
+      items.push({ id: p.id, x: c * (WALL_COL + WALL_GAP), y: colH[c], w: WALL_COL, h: ph, big: false });
+      colH[c] += ph + WALL_GAP;
+    }
+    wallPhotoById.set(p.id, p);
+  }
+  wallLayout = {
+    items,
+    cols,
+    blockW: cols * (WALL_COL + WALL_GAP),
+    blockH: Math.max.apply(null, colH.concat([1])) + WALL_GAP,
+  };
 }
 
-function wallMakeTile(c, r) {
+function wallApplyGeom(el, item, wx, wy) {
+  el.style.left = wx + "px";
+  el.style.top = wy + "px";
+  el.style.width = item.w + "px";
+  el.style.height = item.h + "px";
+  el.classList.toggle("expanded", !!item.big);
+}
+
+function wallMakeTile(item, wx, wy) {
   const el = document.createElement("div");
   el.className = "wall-tile";
-  el.style.left = (c * WALL_CELL) + "px";
-  el.style.top = (r * WALL_CELL) + "px";
-  el.style.width = el.style.height = (WALL_CELL - WALL_GAP) + "px";
-  const p = wallPhotos[wallIndexAt(c, r)];
+  wallApplyGeom(el, item, wx, wy);
+  const p = wallPhotoById.get(item.id);
   if (p) {
     el.dataset.id = p.id;
     const img = document.createElement("img");
@@ -6195,29 +6261,44 @@ function wallMakeTile(c, r) {
 function wallRender() {
   const vp = wallViewport();
   const plane = wallPlaneEl();
-  if (!vp || !plane) return;
+  if (!vp || !plane || !wallLayout) return;
   const vw = vp.clientWidth || window.innerWidth || 1200;
   const vh = vp.clientHeight || window.innerHeight || 800;
-  const C = WALL_CELL * wallScale;
-  const c0 = Math.floor(-wallX / C) - 1;
-  const c1 = Math.ceil((vw - wallX) / C) + 1;
-  const r0 = Math.floor(-wallY / C) - 1;
-  const r1 = Math.ceil((vh - wallY) / C) + 1;
+  const s = wallScale;
+  // 视野在「画布坐标」里的矩形
+  const x0 = -wallX / s, x1 = (vw - wallX) / s;
+  const y0 = -wallY / s, y1 = (vh - wallY) / s;
+  const L = wallLayout;
   const alive = new Set();
-  for (let c = c0; c <= c1; c++) {
-    for (let r = r0; r <= r1; r++) {
-      const key = c + "," + r;
-      alive.add(key);
-      if (!wallTiles.has(key)) {
-        const el = wallMakeTile(c, r);
-        plane.appendChild(el);
-        wallTiles.set(key, el);
+  const k0 = Math.floor(x0 / L.blockW), k1 = Math.floor(x1 / L.blockW);
+  const m0 = Math.floor(y0 / L.blockH), m1 = Math.floor(y1 / L.blockH);
+  for (let k = k0; k <= k1; k++) {
+    for (let m = m0; m <= m1; m++) {
+      const bx = k * L.blockW, by = m * L.blockH;
+      // 整块都在视野外的纵带里 → 这一块里的照片一个都不用看
+      if (by > y1 || by + L.blockH < y0) continue;
+      for (let i = 0; i < L.items.length; i++) {
+        const it = L.items[i];
+        const wy = by + it.y;
+        if (wy > y1 || wy + it.h < y0) continue;      // 上下不相交
+        const wx = bx + it.x;
+        if (wx > x1 || wx + it.w < x0) continue;      // 左右不相交
+        const key = k + "," + m + "," + i;
+        alive.add(key);
+        const el = wallTiles.get(key);
+        if (!el) {
+          const fresh = wallMakeTile(it, wx, wy);
+          plane.appendChild(fresh);
+          wallTiles.set(key, fresh);
+        } else {
+          // 布局变了（点开放大 / 收起）→ 把已有元素挪到新位置，CSS 过渡负责动画
+          wallApplyGeom(el, it, wx, wy);
+        }
       }
     }
   }
   wallTiles.forEach((el, key) => {
     if (alive.has(key)) return;
-    if (el === wallBigEl) wallBigEl = null;
     el.remove();
     wallTiles.delete(key);
   });
@@ -6231,11 +6312,19 @@ function wallSchedule() {
   else wallRAF = setTimeout(run, 16);
 }
 
-function wallClearBig() {
-  if (wallBigEl) wallBigEl.classList.remove("big");
-  wallBigEl = null;
-  const plane = wallPlaneEl();
-  if (plane) plane.classList.remove("has-big");
+/* 收起放大：布局按「没有大图」重排 → 其它照片顺着挪回去 */
+function wallCollapse() {
+  if (!wallExpandedId) return;
+  wallExpandedId = null;
+  wallComputeLayout();
+  wallRender();
+}
+
+/* 在视野里找当前这张照片的元素（可能有多份复本，取第一份在视野内的） */
+function wallFindTileEl(id) {
+  let hit = null;
+  wallTiles.forEach((el) => { if (!hit && el.dataset.id === id) hit = el; });
+  return hit;
 }
 
 function wallKeepInView(tile) {
@@ -6243,9 +6332,11 @@ function wallKeepInView(tile) {
   if (!vp || !tile) return;
   const vw = vp.clientWidth || window.innerWidth || 1200;
   const vh = vp.clientHeight || window.innerHeight || 800;
-  const size = WALL_CELL * wallScale;
-  const cx = (parseFloat(tile.style.left) || 0) * wallScale + wallX + size / 2;
-  const cy = (parseFloat(tile.style.top) || 0) * wallScale + wallY + size / 2;
+  // 按照片自己的尺寸算中心（瀑布流里每张高度都不一样）
+  const w = (parseFloat(tile.style.width) || WALL_COL) * wallScale;
+  const h = (parseFloat(tile.style.height) || WALL_COL) * wallScale;
+  const cx = (parseFloat(tile.style.left) || 0) * wallScale + wallX + w / 2;
+  const cy = (parseFloat(tile.style.top) || 0) * wallScale + wallY + h / 2;
   const padX = 110, padTop = 110, padBottom = 70;
   let dx = 0, dy = 0;
   if (cx < padX) dx = padX - cx;
@@ -6255,15 +6346,17 @@ function wallKeepInView(tile) {
   if (dx || dy) { wallX += dx; wallY += dy; wallSchedule(); }
 }
 
+/* 点开 / 收起：被点的那张在布局里变成两列宽，其余照片顺着挤开（CSS 过渡负责动画） */
 function wallToggleBig(tile) {
   if (!tile) return;
-  if (tile === wallBigEl) { wallClearBig(); return; }
-  wallClearBig();
-  wallBigEl = tile;
-  tile.classList.add("big");
-  const plane = wallPlaneEl();
-  if (plane) plane.classList.add("has-big");
-  wallKeepInView(tile); // 放大后要是跑出视野，把它挪回来
+  const id = tile.dataset.id;
+  if (!id) return;
+  if (wallExpandedId === id) { wallCollapse(); return; }
+  wallExpandedId = id;
+  wallComputeLayout(); // 重新打包：大图占两列，后面的照片整片下移
+  wallRender();
+  const el = wallFindTileEl(id);
+  if (el) wallKeepInView(el); // 放大后要是跑出视野，把它挪回来
 }
 
 function wallZoomAt(px, py, factor) {
@@ -6291,11 +6384,12 @@ function wallShuffleList() {
 }
 function wallReload(photos) {
   wallPhotos = photos || sortPhotos(PHOTOS).slice();
-  wallClearBig();
+  wallExpandedId = null;
   wallTiles.forEach((el) => el.remove());
   wallTiles.clear();
   const plane = wallPlaneEl();
   if (plane) plane.innerHTML = "";
+  wallComputeLayout(); // v0.92：按原始宽高比做瀑布流布局
   const count = document.getElementById("wallCount");
   if (count) count.textContent = wallPhotos.length + " 张";
   wallRender();
@@ -6326,7 +6420,7 @@ function closeWall() {
   const page = document.getElementById("wallPage");
   if (!page) return;
   wallOpen = false;
-  wallClearBig();
+  wallCollapse();
   clearTimeout(wallHintTimer);
   page.classList.remove("open");
   page.setAttribute("aria-hidden", "true");
@@ -6358,7 +6452,11 @@ function initWall() {
   };
   const up = () => { dragging = false; vp.classList.remove("dragging"); };
 
-  vp.addEventListener("mousedown", (e) => { if (e.button === 0) down(e.clientX, e.clientY); });
+  vp.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // v0.93：按住拖动 = 拉动画布，别让浏览器开始「选中文字 / 拖图片」
+    down(e.clientX, e.clientY);
+  });
   window.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
   window.addEventListener("mouseup", up);
   vp.addEventListener("touchstart", (e) => { if (e.touches.length === 1) down(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
@@ -6378,13 +6476,13 @@ function initWall() {
   vp.addEventListener("click", (e) => {
     if (moved > 6) return;                 // 刚拖过，不算点击
     const tile = e.target.closest(".wall-tile");
-    if (!tile) { wallClearBig(); return; }
+    if (!tile) { wallCollapse(); return; }
     if (e.detail >= 2) return;             // 双击的第二下交给 dblclick
     wallToggleBig(tile);
   });
   vp.addEventListener("dblclick", (e) => {
     const tile = e.target.closest(".wall-tile");
-    wallClearBig();
+    wallCollapse(); // 双击进灯箱时把画布墙还原成正常排布
     if (tile && tile.dataset.id) openLightboxById(tile.dataset.id);
   });
 
@@ -6403,10 +6501,49 @@ function initWall() {
   // 测试 / 调试钩子
   window.__wallState = () => ({
     open: wallOpen, photos: wallPhotos.length, tiles: wallTiles.size,
-    big: !!wallBigEl, x: Math.round(wallX), y: Math.round(wallY), scale: Number(wallScale.toFixed(3)),
+    expanded: wallExpandedId, x: Math.round(wallX), y: Math.round(wallY), scale: Number(wallScale.toFixed(3)),
   });
   window.__openWall = openWall;
   window.__closeWall = closeWall;
+}
+
+/* v0.93：缩略图预热 —— 一次只处理 12 张，前端带 offset 循环调，避免撞函数执行时限 */
+function initWarmThumbs() {
+  const btn = document.getElementById("btnWarmThumbs");
+  const label = document.getElementById("thumbWarmText");
+  if (!btn) return;
+  let running = false;
+  btn.addEventListener("click", async () => {
+    if (running) return;
+    running = true;
+    btn.disabled = true;
+    if (label) label.textContent = "预热中…";
+    let offset = 0;
+    let total = 0;
+    try {
+      for (;;) {
+        const r = await apiFetch("/api/meta/thumbs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          timeout: API_TIMEOUT_HEAVY,
+          body: JSON.stringify({ offset, batch: 12 }),
+        });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || "预热失败");
+        total = d.total || 0;
+        offset = d.next || offset;
+        if (label) label.textContent = `${Math.min(offset, total)} / ${total}`;
+        if (offset >= total) {
+          if (label) label.textContent = `完成 ${total} 张`;
+          break;
+        }
+      }
+    } catch (e) {
+      if (label) label.textContent = "失败：" + e.message;
+    }
+    running = false;
+    btn.disabled = false;
+  });
 }
 
 /* ---------- 页面窗口（v0.8）· 上传/设置以独立窗口层叠悬浮于图库上方 ---------- */

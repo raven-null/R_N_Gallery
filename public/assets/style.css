@@ -4142,6 +4142,10 @@ body.wall-open { overflow: hidden; }
   overflow: hidden;
   cursor: grab;
   touch-action: none;
+  /* v0.93：长按 / 拖动时不要出现浏览器原生的蓝色选中遮罩 */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
   background:
     radial-gradient(circle at 30% 20%, rgba(255,159,10,0.06), transparent 55%),
     radial-gradient(circle at 75% 75%, rgba(100,210,255,0.05), transparent 55%);
@@ -4162,7 +4166,15 @@ body.wall-open { overflow: hidden; }
   background: var(--w006);
   border: 1px solid var(--w008);
   box-shadow: 0 6px 18px rgba(0,0,0,0.22);
-  transition: transform 0.22s var(--ease-out), box-shadow 0.22s, border-color 0.22s, opacity 0.22s;
+  /* v0.92：点开放大是「改布局」—— left/top/width/height 一起过渡，
+     于是被点的那张变大、后面的照片被顺移挤开，都带动画 */
+  transition:
+    left 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 0.25s var(--ease-out),
+    border-color 0.25s var(--ease-out);
 }
 .wall-tile img {
   width: 100%;
@@ -4173,14 +4185,12 @@ body.wall-open { overflow: hidden; }
   -webkit-user-drag: none;
 }
 .wall-tile:hover { border-color: var(--w020); box-shadow: 0 10px 26px rgba(0,0,0,0.32); }
-/* 单击就地放大（画布坐标系里放大，其它方格淡出一点） */
-.wall-tile.big {
-  transform: scale(2.35);
-  z-index: 30;
+/* 点开的那张：占两列宽（尺寸由布局给），加个高亮描边 */
+.wall-tile.expanded {
+  z-index: 20;
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  box-shadow: 0 26px 60px rgba(0,0,0,0.55);
+  box-shadow: 0 22px 54px rgba(0,0,0,0.5);
 }
-.wall-plane.has-big .wall-tile:not(.big) { opacity: 0.45; }
 
 /* 顶栏与提示 */
 .wall-bar {
@@ -4240,6 +4250,19 @@ body.wall-open { overflow: hidden; }
 }
 .wall-hint.gone { opacity: 0; }
 body.perf-lite .wall-btn, body.perf-lite .wall-hint { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--s05); }
+
+/* v0.93：图片区域一律不吃文字选择 —— 长按 / 拖动时不会蒙上一层蓝色选区 */
+.wall-page,
+.wall-tile,
+.lightbox,
+.cw-card,
+.dup-thumb,
+.album-body,
+img {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
 
 /* 顶部导航栏（页面切换时保持在顶部） */
 .album-nav {

@@ -236,6 +236,7 @@ exports.default = async (req) => {
     if (method === "DELETE" && path.startsWith("/api/photos/") && rest.length === 1) return remove(req, rest[0]);
     if (method === "POST" && path.startsWith("/api/photos/") && rest.length === 2 && rest[1] === "image") return replaceImage(req, rest[0]);
     if (method === "GET" && path.endsWith("/api/meta/stats")) return stats();
+    if (method === "POST" && path.endsWith("/api/meta/thumbs")) return prewarmThumbs(req, role); // v0.93 缩略图预热
     if (method === "GET" && path.endsWith("/api/export")) return exportAll();
     if (method === "POST" && path.endsWith("/api/import")) return importStatic(req);
 
@@ -256,6 +257,7 @@ exports.config = {
     "/api/photos/reindex",
     "/api/photos/:id/image",
     "/api/meta/stats",
+    "/api/meta/thumbs",
     "/api/export",
     "/api/import",
     "/api/tags",
@@ -1042,6 +1044,67 @@ async function stats() {
   };
   statsCache = { at: Date.now(), data };
   return json(data);
+}
+
+/* ---------- POST /api/meta/thumbs：缩略图预热（v0.93） ----------
+   为什么要它：老照片的缩略图是 480px 或前端给的未知尺寸，第一次被看到时才在服务端现算
+   （sharp 解一张几 MB 的原图，200~400ms），所以「第一次翻到的图都很慢」。
+   这里按批把「尺寸不对 / 还没生成」的缩略图提前算好，算完以后每次都是命中缓存 + CDN，秒出。
+   一次只做 batch 张（默认 12），前端带 offset 循环调用，避免撞上函数执行时限。 */
+async function prewarmThumbs(req, role) {
+  if (role !== "admin") return unauthorized("需要访问密码");
+  let body = {};
+  try { body = await req.json(); } catch { /* 允许空 body */ }
+  const offset = Math.max(0, parseInt(body && body.offset, 10) || 0);
+  const batch = Math.min(30, Math.max(1, parseInt(body && body.batch, 10) || 12));
+
+  const s = store();
+  const keys = [];
+  let cursor;
+  do {
+    const res = await s.list({ prefix: PREFIX_META, cursor, limit: 500 });
+    (res.blobs || []).forEach((b) => keys.push(b.key));
+    cursor = res.nextCursor;
+  } while (cursor);
+  const slice = keys.slice(offset, offset + batch);
+
+  let done = 0, skipped = 0, failed = 0;
+  await mapLimit(slice, 4, async (key) => {
+    const m = await s.get(key, { type: "json" }).catch(() => null);
+    if (!m) { failed++; return; }
+    if (m.thumbKey && m.thumbW === THUMB_W) { skipped++; done++; return; }
+    let orig = await s.get(m.origKey || `${PREFIX_IMG}${m.id}`, { type: "arrayBuffer" }).catch(() => null);
+    if (!orig) {
+      const found = await s.list({ prefix: `${PREFIX_IMG}${m.id}.`, limit: 1 }).catch(() => null);
+      const k = found && found.blobs && found.blobs[0] && found.blobs[0].key;
+      if (k) orig = await s.get(k, { type: "arrayBuffer" }).catch(() => null);
+    }
+    if (!orig) { failed++; return; }
+    try {
+      const out = await genThumbBuf(Buffer.from(orig));
+      m.thumbKey = thumbKeyOf(m.id);
+      m.thumbMime = "image/webp";
+      m.thumbW = THUMB_W;
+      m.thumbSize = out.length;
+      await s.set(m.thumbKey, out);
+      await s.set(key, JSON.stringify(m));
+      await indexPut(s, m);
+      done++;
+    } catch (e) {
+      failed++;
+    }
+  });
+
+  const next = offset + slice.length;
+  return json({
+    ok: true,
+    total: keys.length,
+    next,
+    done,
+    skipped,
+    failed,
+    remaining: Math.max(0, keys.length - next),
+  });
 }
 
 /* ---------- 导出全部元数据 ---------- */
