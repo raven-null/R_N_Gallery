@@ -6186,6 +6186,21 @@ let wallOpen = false;
 let wallRAF = 0;
 let wallExpandedId = null;              // 当前被点开放大的照片 id（布局据此重新打包）
 let wallHintTimer = null;
+let wallGridSeed = 1;                   // v0.97：方格模式下「随机放大哪些」的种子（换一次洗一次）
+const WALL_VIEW_KEY = "rn_wall_view";   // grid（默认）| masonry
+function wallView() {
+  try { return localStorage.getItem(WALL_VIEW_KEY) === "masonry" ? "masonry" : "grid"; } catch (e) { return "grid"; }
+}
+function setWallView(v) {
+  try { localStorage.setItem(WALL_VIEW_KEY, v === "masonry" ? "masonry" : "grid"); } catch (e) { /* ignore */ }
+}
+function wallSyncViewBtn() {
+  const b = document.getElementById("wallViewBtn");
+  if (!b) return;
+  const grid = wallView() === "grid";
+  b.textContent = grid ? "▤ 瀑布" : "▦ 方格";
+  b.title = grid ? "切换为瀑布流（按原比例）" : "切换为方格";
+}
 const wallTiles = new Map();            // "块列,块行,序号" → 照片元素
 const wallPhotoById = new Map();
 
@@ -6200,6 +6215,78 @@ function wallPlaneEl() { return document.getElementById("wallPlane"); }
 function wallComputeLayout() {
   const n = wallPhotos.length;
   if (!n) { wallLayout = null; return; }
+  if (wallView() === "grid") return wallComputeGrid();
+  return wallComputeMasonry();
+}
+
+/* v0.97：方格模式 —— 单元格大小统一，(行,列) 顺序铺；随机挑一些照片放大成 2×2。
+   随机会用 wallGridSeed 做种（每次进墙 / 点 ⤨ 换一个），所以「点开某张」重新布局时
+   其它位置的放大不会乱跳。 */
+function wallComputeGrid() {
+  const n = wallPhotos.length;
+  const cols = Math.max(4, Math.min(20, Math.round(Math.sqrt(n * 1.6))));
+  const cell = WALL_COL;
+  const step = cell + WALL_GAP;
+  const bigChance = 0.085;              // 大约每 12 张里挑 1 张放大成 2×2
+  let seed = wallGridSeed | 0;
+  const rnd = () => {                   // mulberry32：确定性的小随机
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), 1 | t);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  /* 随机放大：每 8 张里挑 1 张变 2×2，起点按 seed 随机偏移 ——
+     这样「随机」是随机的，但一定会有大图（纯概率在照片少时可能一张都不出） */
+  const bigEvery = 8;
+  const bigOffset = Math.floor(rnd() * bigEvery);
+  const rows = Math.ceil(n / cols) + 2;
+  const occupied = new Set();           // "r,c" 已被别的格子占掉（被大图盖住）
+  const items = [];
+  wallPhotoById.clear();
+  let pi = 0;
+  let maxRow = 0;
+  outer:
+  for (let r = 0; r < rows + Math.ceil(n / cols) + 2; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (pi >= n) break outer;
+      if (occupied.has(r + "," + c)) continue;
+      const p = wallPhotos[pi++];
+      wallPhotoById.set(p.id, p);
+      const wantBig = p.id === wallExpandedId || ((pi - 1 + bigOffset) % bigEvery === 0);
+      const canBig = c + 1 < cols && !occupied.has(r + "," + (c + 1))
+        && !occupied.has((r + 1) + "," + c) && !occupied.has((r + 1) + "," + (c + 1));
+      if (wantBig && canBig) {
+        occupied.add(r + "," + (c + 1));
+        occupied.add((r + 1) + "," + c);
+        occupied.add((r + 1) + "," + (c + 1));
+        items.push({
+          id: p.id, x: c * step, y: r * step,
+          w: cell * 2 + WALL_GAP, h: cell * 2 + WALL_GAP,
+          big: true, expanded: p.id === wallExpandedId,
+        });
+        maxRow = Math.max(maxRow, r + 2);
+      } else {
+        items.push({ id: p.id, x: c * step, y: r * step, w: cell, h: cell, big: false, expanded: false });
+        maxRow = Math.max(maxRow, r + 1);
+      }
+    }
+  }
+  wallLayout = {
+    items,
+    cols,
+    blockW: cols * step,
+    blockH: maxRow * step,
+  };
+}
+
+/* 瀑布流布局：按顺序把照片塞进当前最矮的那一列（高度按原始宽高比算）。
+   v0.92：被点开的照片占两列宽 —— 它一变大，后面的照片整片往下顺移，
+   于是「点开放大」会把周围的照片挤开、并带过渡动画。
+   v0.95：跨两列的大图会在另一列上方留出一块空档（两列高度本来就对不齐）——
+   这里把空档记进 gaps，紧接着的几张照片优先塞进去，于是「放大后原地不再留空洞」。 */
+function wallComputeMasonry() {
+  const n = wallPhotos.length;
   const cols = Math.max(4, Math.min(20, Math.round(Math.sqrt(n * 1.4))));
   const colH = new Array(cols).fill(0);
   const items = [];
@@ -6243,7 +6330,7 @@ function wallComputeLayout() {
       const shortCol = colH[left] < colH[left + 1] ? left : left + 1;
       const gapH = Math.abs(colH[left] - colH[left + 1]) - WALL_GAP;
       if (gapH > 24) gaps.push({ col: shortCol, y: Math.min(colH[left], colH[left + 1]), h: gapH });
-      items.push({ id: p.id, x: left * (WALL_COL + WALL_GAP), y, w: colW, h: ph, big: true });
+      items.push({ id: p.id, x: left * (WALL_COL + WALL_GAP), y, w: colW, h: ph, big: true, expanded: true });
       colH[left] = y + ph + WALL_GAP;
       colH[left + 1] = y + ph + WALL_GAP;
     } else {
@@ -6297,24 +6384,36 @@ function wallApplyGeom(el, item, wx, wy) {
   el.style.top = wy + "px";
   el.style.width = item.w + "px";
   el.style.height = item.h + "px";
-  el.classList.toggle("expanded", !!item.big);
+  // 方格模式下「随机放大」的只是尺寸大一圈，不给高亮描边；只有被点开的才有
+  el.classList.toggle("big", !!item.big);
+  el.classList.toggle("expanded", !!item.expanded);
 }
 
 function wallMakeTile(item, wx, wy) {
   const el = document.createElement("div");
   el.className = "wall-tile";
   wallApplyGeom(el, item, wx, wy);
+  el.dataset.id = item.id;
   const p = wallPhotoById.get(item.id);
-  if (p) {
-    el.dataset.id = p.id;
-    const img = document.createElement("img");
-    img.loading = "lazy";
-    img.decoding = "async";
-    img.alt = "";
-    img.src = cardImgSrc(p); // v0.89 起这里一定是缩略图
-    el.appendChild(img);
-  }
+  const img = document.createElement("img");
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.alt = "";
+  if (p) img.src = cardImgSrc(p); // v0.89 起这里一定是缩略图
+  el.appendChild(img);
   return el;
+}
+
+/* 布局变了（放大 / 收起 / 换排布）时，既有元素既要挪位置，也要换照片 ——
+   方格模式下 2×2 会把后面几张往后挤，同一个位置的「第 i 张」可能已经是另一张照片了 */
+function wallUpdateTile(el, item, wx, wy) {
+  wallApplyGeom(el, item, wx, wy);
+  if (el.dataset.id === item.id) return;
+  el.dataset.id = item.id;
+  const img = el.querySelector("img");
+  if (!img) return;
+  const p = wallPhotoById.get(item.id);
+  if (p) img.src = cardImgSrc(p);
 }
 
 function wallRender() {
@@ -6350,8 +6449,8 @@ function wallRender() {
           plane.appendChild(fresh);
           wallTiles.set(key, fresh);
         } else {
-          // 布局变了（点开放大 / 收起）→ 把已有元素挪到新位置，CSS 过渡负责动画
-          wallApplyGeom(el, it, wx, wy);
+          // 布局变了（点开放大 / 收起 / 换排布）→ 挪位置 + 必要时换照片，CSS 过渡负责动画
+          wallUpdateTile(el, it, wx, wy);
         }
       }
     }
@@ -6445,11 +6544,13 @@ function wallShuffleList() {
 function wallReload(photos) {
   wallPhotos = photos || wallShuffleList();
   wallExpandedId = null;
+  wallGridSeed = (Math.random() * 1e9) | 0; // v0.97：重新决定「随机放大」是哪几张
   wallTiles.forEach((el) => el.remove());
   wallTiles.clear();
   const plane = wallPlaneEl();
   if (plane) plane.innerHTML = "";
-  wallComputeLayout(); // v0.92：按原始宽高比做瀑布流布局
+  wallComputeLayout(); // 方格 / 瀑布流两种排布
+  wallSyncViewBtn();
   const count = document.getElementById("wallCount");
   if (count) count.textContent = wallPhotos.length + " 张";
   wallRender();
@@ -6590,12 +6691,20 @@ function initWall() {
   if (zout) zout.onclick = () => wallZoomCenter(0.8);
   const shuf = document.getElementById("wallShuffle");
   if (shuf) shuf.onclick = () => wallReload(wallShuffleList());
+  // v0.97：方格 ⇄ 瀑布流切换（默认方格）
+  const viewBtn = document.getElementById("wallViewBtn");
+  if (viewBtn) viewBtn.onclick = () => {
+    setWallView(wallView() === "grid" ? "masonry" : "grid");
+    wallReload(wallPhotos.slice()); // 保持当前照片顺序，只换排布方式
+  };
+  wallSyncViewBtn();
 
   window.addEventListener("resize", () => { if (wallOpen) wallRender(); });
 
   // 测试 / 调试钩子
   window.__wallState = () => ({
-    open: wallOpen, photos: wallPhotos.length, tiles: wallTiles.size,
+    open: wallOpen, view: wallView(), photos: wallPhotos.length, tiles: wallTiles.size,
+    big: [...wallTiles.values()].filter((el) => el.classList.contains("big")).length,
     expanded: wallExpandedId, x: Math.round(wallX), y: Math.round(wallY), scale: Number(wallScale.toFixed(3)),
   });
   window.__openWall = openWall;
@@ -6603,7 +6712,7 @@ function initWall() {
   /* v0.96：布局健康度 —— 每列「最后一张照片的底边」离块底有多远。
      这个差值就是「块交界处那条横贯全宽的空带」的高度，越小越好。 */
   window.__wallCoverage = () => {
-    if (!wallLayout) return null;
+    if (!wallLayout || wallView() !== "masonry") return null; // 只对瀑布流有意义
     const cols = wallLayout.cols;
     const bottom = new Array(cols).fill(0);
     for (const it of wallLayout.items) {

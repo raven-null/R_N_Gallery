@@ -816,22 +816,45 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       const tile = doc.querySelector("#wallPlane .wall-tile[data-id]");
       const tileImg = tile && tile.querySelector("img");
       check("画布墙用的是缩略图", !!tileImg && /\/thumb(\?|$)/.test(tileImg.src || ""), tileImg ? tileImg.src.slice(0, 60) : "无");
-      // v0.92：瀑布流而不是方格 —— 列宽固定、高度按原始比例，且不是一律相等
+      // v0.97：默认方格（正方形、部分随机放大）；切一下才是瀑布流
       {
+        const st = window.__wallState();
+        check("画布墙默认是方格模式", st.view === "grid", `view=${st.view}`);
         const tiles = [...doc.querySelectorAll("#wallPlane .wall-tile")];
-        const widths = new Set(tiles.map((t) => t.style.width));
-        const heights = new Set(tiles.map((t) => t.style.height));
-        check("画布墙按瀑布流排布（列宽统一）", widths.size === 1 && [...widths][0] === "180px", [...widths].join("/"));
-        check("照片高度按原始比例各不相同（不再是方格）", heights.size > 1, [...heights].slice(0, 4).join(" / "));
+        const square = tiles.filter((t) => t.style.width === t.style.height).length;
+        check("方格模式下照片是正方形", tiles.length > 0 && square === tiles.length, `${square}/${tiles.length}`);
+        const bigTiles = tiles.filter((t) => t.classList.contains("big"));
+        check("方格模式下有一些照片被随机放大（2×2）", bigTiles.length > 0 && bigTiles.every((t) => parseFloat(t.style.width) > 180),
+          `${bigTiles.length} 张大图`);
       }
-      // v0.96：块的下沿要齐 —— 每列尾部都补满，交界处不会出现横贯全宽的空带
+      // 切到瀑布流：列宽统一、高度按原始比例
       {
-        const cov = window.__wallCoverage ? window.__wallCoverage() : null;
-        const worst = cov && cov.shortfalls.length ? Math.max(...cov.shortfalls) : 9999;
-        check("画布墙各列尾部补齐（块交界处没有大空档）", !!cov && worst < 130,
-          cov ? `块高 ${cov.blockH}，各列尾部余量 ${cov.shortfalls.join("/")}` : "无布局信息");
+        const vb = doc.getElementById("wallViewBtn");
+        check("画布墙有方格 / 瀑布流切换按钮", !!vb, vb ? vb.textContent.trim() : "无");
+        if (vb) {
+          clickEl(vb);
+          await wait(600);
+          const st = window.__wallState();
+          const tiles = [...doc.querySelectorAll("#wallPlane .wall-tile")];
+          const widths = new Set(tiles.map((t) => t.style.width));
+          const heights = new Set(tiles.map((t) => t.style.height));
+          check("切到瀑布流（view=masonry）", st.view === "masonry", `view=${st.view}`);
+          check("瀑布流列宽统一 180px", widths.size === 1 && [...widths][0] === "180px", [...widths].join("/"));
+          check("瀑布流高度按原始比例各不相同", heights.size > 1, [...heights].slice(0, 4).join(" / "));
+          // v0.96：块的下沿要齐 —— 每列尾部都补满，交界处不会出现横贯全宽的空带
+          const cov = window.__wallCoverage ? window.__wallCoverage() : null;
+          const worst = cov && cov.shortfalls.length ? Math.max(...cov.shortfalls) : 9999;
+          check("瀑布流各列尾部补齐（块交界处没有大空档）", !!cov && worst < 130,
+            cov ? `块高 ${cov.blockH}，各列尾部余量 ${cov.shortfalls.join("/")}` : "无布局信息");
+          clickEl(vb); // 切回方格，后面按方格继续测
+          await wait(600);
+        }
       }
-      if (tile) {
+      // v0.96：块的下沿要齐 —— 每列尾部都补满（在瀑布流分支里已断言，这里不再重复）
+      // 注意：上面切换过排布，旧的 tile 元素已经被重建 → 这里重新取一张
+      const tile2 = doc.querySelector("#wallPlane .wall-tile[data-id]");
+      if (tile2) {
+        const tile = tile2;
         // v0.92：点开 = 布局重排（这张变两列宽，后面的照片被挤开），不是简单放大浮层
         const w0 = tile.style.width;
         const othersBefore = new Map([...doc.querySelectorAll("#wallPlane .wall-tile")]
@@ -840,7 +863,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         await wait(600);
         const stBig = window.__wallState();
         check("点一下就地放大（占两列宽）", tile.classList.contains("expanded") && stBig.expanded === tile.dataset.id && parseFloat(tile.style.width) > parseFloat(w0),
-          `${w0} → ${tile.style.width}`);
+          `${w0} → ${tile.style.width}（expanded=${stBig.expanded} tileId=${tile.dataset.id} cls=${tile.className}）`);
         const moved = [...othersBefore].filter(([el, pos]) => el.isConnected && (el.style.left + "|" + el.style.top) !== pos).length;
         check("放大会把周围照片挤开（位置跟着变）", moved > 0, `${moved} 张被顺移`);
         tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
