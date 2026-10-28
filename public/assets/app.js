@@ -6194,13 +6194,16 @@ function wallPlaneEl() { return document.getElementById("wallPlane"); }
 
 /* 瀑布流布局：按顺序把照片塞进当前最矮的那一列（高度按原始宽高比算）。
    v0.92：被点开的照片占两列宽 —— 它一变大，后面的照片整片往下顺移，
-   于是「点开放大」会把周围的照片挤开、并带过渡动画。 */
+   于是「点开放大」会把周围的照片挤开、并带过渡动画。
+   v0.95：跨两列的大图会在另一列上方留出一块空档（两列高度本来就对不齐）——
+   这里把空档记进 gaps，紧接着的几张照片优先塞进去，于是「放大后原地不再留空洞」。 */
 function wallComputeLayout() {
   const n = wallPhotos.length;
   if (!n) { wallLayout = null; return; }
   const cols = Math.max(4, Math.min(20, Math.round(Math.sqrt(n * 1.4))));
   const colH = new Array(cols).fill(0);
   const items = [];
+  const gaps = [];                        // { col, y, h }：大图跨列留下的空档，等后面的照片来填
   wallPhotoById.clear();
   const bigId = wallExpandedId;
   for (const p of wallPhotos) {
@@ -6212,6 +6215,22 @@ function wallComputeLayout() {
     const span = isBig ? Math.min(2, cols) : 1;
     const colW = span === 2 ? WALL_COL * 2 + WALL_GAP : WALL_COL;
     const ph = Math.round(colW * ratio);
+
+    // ① 先看能不能填进之前留下的空档（这样大图旁边不会空一大块）
+    if (!isBig) {
+      let filled = false;
+      for (const g of gaps) {
+        if (ph + WALL_GAP <= g.h) {
+          items.push({ id: p.id, x: g.col * (WALL_COL + WALL_GAP), y: g.y, w: WALL_COL, h: ph, big: false });
+          g.y += ph + WALL_GAP;
+          g.h -= ph + WALL_GAP;
+          filled = true;
+          break;
+        }
+      }
+      if (filled) { wallPhotoById.set(p.id, p); continue; }
+    }
+
     if (span === 2) {
       /* 让大图尽量留在它原本那一列：先算它作为普通照片会落到哪一列，
          再往右扩一列（右边没列就向左扩），下沿取两列里较高的那个 —— 这样点下去是
@@ -6220,6 +6239,10 @@ function wallComputeLayout() {
       for (let i = 1; i < cols; i++) if (colH[i] < colH[c]) c = i;
       const left = c + 1 < cols ? c : Math.max(0, c - 1);
       const y = Math.max(colH[left], colH[left + 1]);
+      // 两列高度差出来的那块，记成空档让后面的照片补上
+      const shortCol = colH[left] < colH[left + 1] ? left : left + 1;
+      const gapH = Math.abs(colH[left] - colH[left + 1]) - WALL_GAP;
+      if (gapH > 24) gaps.push({ col: shortCol, y: Math.min(colH[left], colH[left + 1]), h: gapH });
       items.push({ id: p.id, x: left * (WALL_COL + WALL_GAP), y, w: colW, h: ph, big: true });
       colH[left] = y + ph + WALL_GAP;
       colH[left + 1] = y + ph + WALL_GAP;
@@ -6231,11 +6254,41 @@ function wallComputeLayout() {
     }
     wallPhotoById.set(p.id, p);
   }
+
+  /* v0.96：把每列剩下的「尾巴」补齐 —— 各列长度天然不齐，直接按最高列收尾的话，
+     每块交界处会出现一条横贯全宽的空带（图上那种大缝）。
+     这里用照片循环补填（同一块里可能重复出现几张，反正是无限墙，看不出接缝）。 */
+  let blockH = Math.max.apply(null, colH.concat([1]));
+  const filler = wallPhotos.filter(Boolean);
+  if (filler.length) {
+    let cursor = 0;
+    for (let c = 0; c < cols; c++) {
+      let guard = 0;
+      while (blockH - colH[c] > 24 && guard++ < 200) {
+        const remain = blockH - colH[c];
+        // 找一张高度刚好放得下的（找不到就收工，别硬塞）
+        let pick = null, pickH = 0;
+        for (let t = 0; t < filler.length; t++) {
+          const p = filler[(cursor + t) % filler.length];
+          const pw = Number(p.width) > 0 ? Number(p.width) : 3;
+          const ph0 = Number(p.height) > 0 ? Number(p.height) : 4;
+          const ratio = Math.min(2.6, Math.max(0.42, ph0 / pw));
+          const hh = Math.round(WALL_COL * ratio);
+          if (hh + WALL_GAP <= remain) { pick = p; pickH = hh; cursor = (cursor + t + 1) % filler.length; break; }
+        }
+        if (!pick) break;
+        items.push({ id: pick.id, x: c * (WALL_COL + WALL_GAP), y: colH[c], w: WALL_COL, h: pickH, big: false });
+        colH[c] += pickH + WALL_GAP;
+      }
+    }
+    blockH = Math.max.apply(null, colH.concat([blockH]));
+  }
+
   wallLayout = {
     items,
     cols,
     blockW: cols * (WALL_COL + WALL_GAP),
-    blockH: Math.max.apply(null, colH.concat([1])) + WALL_GAP,
+    blockH: blockH + WALL_GAP,
   };
 }
 
@@ -6380,8 +6433,9 @@ function wallZoomCenter(factor) {
   wallZoomAt((vp.clientWidth || window.innerWidth || 1200) / 2, (vp.clientHeight || window.innerHeight || 800) / 2, factor);
 }
 
+/* v0.95：画布墙是「全部照片铺在一起」，不按日期排 —— 默认打乱顺序（⤨ 可以再洗一次） */
 function wallShuffleList() {
-  const arr = sortPhotos(PHOTOS).slice();
+  const arr = PHOTOS.slice();
   for (let i = arr.length - 1; i > 0; i--) { // Fisher-Yates
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -6389,7 +6443,7 @@ function wallShuffleList() {
   return arr;
 }
 function wallReload(photos) {
-  wallPhotos = photos || sortPhotos(PHOTOS).slice();
+  wallPhotos = photos || wallShuffleList();
   wallExpandedId = null;
   wallTiles.forEach((el) => el.remove());
   wallTiles.clear();
@@ -6439,13 +6493,19 @@ function initWall() {
   if (!vp || vp.dataset.bound === "1") return;
   vp.dataset.bound = "1";
 
-  /* ---- 拖拽平移（鼠标 + 单指触摸） ---- */
+  /* ---- 拖拽平移（鼠标 + 单指触摸）+ v0.95 松手后的惯性滑动 ---- */
   let dragging = false, moved = 0, sx = 0, sy = 0, ox = 0, oy = 0;
+  let lastX = 0, lastY = 0, lastT = 0, velX = 0, velY = 0, inertiaRAF = 0;
+  const stopInertia = () => {
+    if (inertiaRAF) { cancelAnimationFrame(inertiaRAF); inertiaRAF = 0; }
+  };
   const down = (x, y) => {
+    stopInertia(); // 手一按就停住惯性
     dragging = true;
     moved = 0;
     sx = x; sy = y;
     ox = wallX; oy = wallY;
+    lastX = x; lastY = y; lastT = Date.now(); velX = 0; velY = 0;
     vp.classList.add("dragging");
   };
   const move = (x, y) => {
@@ -6454,9 +6514,38 @@ function initWall() {
     moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
     wallX = ox + dx;
     wallY = oy + dy;
+    // 记录瞬时速度（px / ms），松手时用它做惯性
+    const now = Date.now();
+    const dt = Math.max(1, now - lastT);
+    velX = (x - lastX) / dt;
+    velY = (y - lastY) / dt;
+    lastX = x; lastY = y; lastT = now;
     wallSchedule();
   };
-  const up = () => { dragging = false; vp.classList.remove("dragging"); };
+  const glide = () => {
+    inertiaRAF = 0;
+    if (!wallOpen || dragging) return;
+    // 每帧按 16ms 换算，摩擦系数 0.94 —— 和触屏惯性滑动的感觉接近
+    velX *= 0.94;
+    velY *= 0.94;
+    if (Math.abs(velX) < 0.02 && Math.abs(velY) < 0.02) return;
+    wallX += velX * 16;
+    wallY += velY * 16;
+    wallRender();
+    inertiaRAF = requestAnimationFrame(glide);
+  };
+  const up = () => {
+    if (!dragging) return;
+    dragging = false;
+    vp.classList.remove("dragging");
+    // 只在「刚才真的在动」时滑一下，避免原地松手也漂一下
+    const speed = Math.hypot(velX, velY);
+    if (speed > 0.15) {
+      velX = Math.max(-3, Math.min(3, velX));
+      velY = Math.max(-3, Math.min(3, velY));
+      if (typeof requestAnimationFrame === "function") inertiaRAF = requestAnimationFrame(glide);
+    }
+  };
 
   vp.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
@@ -6511,6 +6600,21 @@ function initWall() {
   });
   window.__openWall = openWall;
   window.__closeWall = closeWall;
+  /* v0.96：布局健康度 —— 每列「最后一张照片的底边」离块底有多远。
+     这个差值就是「块交界处那条横贯全宽的空带」的高度，越小越好。 */
+  window.__wallCoverage = () => {
+    if (!wallLayout) return null;
+    const cols = wallLayout.cols;
+    const bottom = new Array(cols).fill(0);
+    for (const it of wallLayout.items) {
+      if (it.w > WALL_COL) continue;   // 跳过大图（跨两列）
+      const c = Math.round(it.x / (WALL_COL + WALL_GAP));
+      if (c >= 0 && c < cols) bottom[c] = Math.max(bottom[c], it.y + it.h);
+    }
+    const blockH = Math.max(1, wallLayout.blockH);
+    const shortfalls = bottom.map((b) => Math.max(0, blockH - b));
+    return { cols, blockH, items: wallLayout.items.length, bottom, shortfalls };
+  };
 }
 
 /* v0.93：缩略图预热 —— 一次只处理 12 张，前端带 offset 循环调，避免撞函数执行时限 */

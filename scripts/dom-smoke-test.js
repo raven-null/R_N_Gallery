@@ -824,6 +824,13 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         check("画布墙按瀑布流排布（列宽统一）", widths.size === 1 && [...widths][0] === "180px", [...widths].join("/"));
         check("照片高度按原始比例各不相同（不再是方格）", heights.size > 1, [...heights].slice(0, 4).join(" / "));
       }
+      // v0.96：块的下沿要齐 —— 每列尾部都补满，交界处不会出现横贯全宽的空带
+      {
+        const cov = window.__wallCoverage ? window.__wallCoverage() : null;
+        const worst = cov && cov.shortfalls.length ? Math.max(...cov.shortfalls) : 9999;
+        check("画布墙各列尾部补齐（块交界处没有大空档）", !!cov && worst < 130,
+          cov ? `块高 ${cov.blockH}，各列尾部余量 ${cov.shortfalls.join("/")}` : "无布局信息");
+      }
       if (tile) {
         // v0.92：点开 = 布局重排（这张变两列宽，后面的照片被挤开），不是简单放大浮层
         const w0 = tile.style.width;
