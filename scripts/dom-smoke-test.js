@@ -802,6 +802,58 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
+  /* v0.91：画布墙 —— 方格铺满无限画布，单击就地放大，双击开灯箱 */
+  {
+    const wallItem = doc.querySelector('#pageMenu [data-page="wall"]');
+    check("页面菜单有「画布墙」入口", !!wallItem);
+    if (wallItem) {
+      clickEl(wallItem);
+      await wait(700);
+      const wallPage = doc.getElementById("wallPage");
+      const st0 = window.__wallState ? window.__wallState() : null;
+      check("打开画布墙并铺出方格", !!wallPage && wallPage.classList.contains("open") && !!st0 && st0.tiles > 0,
+        st0 ? `${st0.tiles} 个方格 / ${st0.photos} 张` : "无状态");
+      const tile = doc.querySelector("#wallPlane .wall-tile[data-id]");
+      const tileImg = tile && tile.querySelector("img");
+      check("方格用的是缩略图", !!tileImg && /\/thumb(\?|$)/.test(tileImg.src || ""), tileImg ? tileImg.src.slice(0, 60) : "无");
+      if (tile) {
+        tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+        await wait(140);
+        check("单击就地放大", tile.classList.contains("big") && window.__wallState().big === true);
+        tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+        await wait(140);
+        check("再点一次收起放大", !tile.classList.contains("big"));
+        // 双击：第一下放大、第二下（detail 2）忽略、dblclick 开灯箱
+        tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+        tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
+        tile.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+        await wait(250);
+        const lbNow = doc.getElementById("lightbox");
+        check("双击打开灯箱", lbNow.classList.contains("open") && lbNow.dataset.cur === tile.dataset.id, lbNow.dataset.cur || "(无)");
+        doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        await wait(250);
+        check("Esc 先关灯箱、画布墙还在", !lbNow.classList.contains("open") && doc.getElementById("wallPage").classList.contains("open"));
+        // 拖动平移
+        const before = window.__wallState();
+        const vp = doc.getElementById("wallViewport");
+        vp.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, clientX: 300, clientY: 300 }));
+        window.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 240, clientY: 250 }));
+        window.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }));
+        await wait(200);
+        const after = window.__wallState();
+        check("拖动平移画布", after.x !== before.x || after.y !== before.y, `${before.x},${before.y} → ${after.x},${after.y}`);
+        // 滚轮缩放
+        vp.dispatchEvent(new window.WheelEvent("wheel", { bubbles: true, deltaY: -150, clientX: 400, clientY: 300 }));
+        await wait(200);
+        check("滚轮缩放画布", window.__wallState().scale !== 1, String(window.__wallState().scale));
+        const back = doc.getElementById("wallBack");
+        if (back) clickEl(back);
+        await wait(450);
+        check("返回按钮关闭画布墙", !doc.getElementById("wallPage").classList.contains("open"));
+      }
+    }
+  }
+
   /* v0.75：筛选菜单修复 —— 位置移到主按钮上方 + 菜单内点击不误关 */
   {
     const tagMenuEl = doc.getElementById("tagMenu");

@@ -1366,8 +1366,10 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     // v0.81：信息面板开着就先收面板，灯箱留着
     if (lbInfoOpen()) { closeLbInfo(); return; }
+    // v0.91：灯箱开着 → 只关灯箱（画布墙留着）；否则画布墙开着 → 关画布墙
+    if (document.querySelector(".lightbox.open")) { closeLightbox(); return; }
+    if (wallOpen) { closeWall(); return; }
     // v0.38：关灯箱时一并停掉幻灯片、收起悬浮工具条
-    if (document.querySelector(".lightbox.open")) closeLightbox();
     document.querySelectorAll(".modal-mask.open").forEach((el) => el.classList.remove("open"));
     if (selectMode) exitSelectMode();
   }
@@ -6116,6 +6118,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initBatchFav();
   initBatchRating(); // v0.65：批量设置分级
   initAlbumPage(); // v0.34：相册整页（FAB 相册按钮 / 右边缘左滑进入）
+  initWall(); // v0.91：画布墙（无限画布 · 拖拽平移 · 单击放大 · 双击灯箱）
   initLogsUI();
   initLang();
   initFabHold();
@@ -6136,6 +6139,275 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderTagMenuContent();
   refreshTagManager();
 });
+
+/* ============================================================
+   画布墙（v0.91）：一堆小方格铺在无限画布上，可上下左右平移
+   · 平面只做 translate + scale；方格按 (列, 行) 绝对定位
+   · 只渲染视野内的方格（虚拟化）—— 几千张图也不卡
+   · (列,行) 用「整块平铺」映射到照片：一个 ceil(sqrt(N))² 的块就恰好覆盖全部照片，
+     块与块首尾相接 → 往任意方向推都是这张墙，看起来无限延展
+   · 单击 = 就地放大（其它方格淡出）；再点一次 / 点空白收起；双击 = 开灯箱
+   ============================================================ */
+const WALL_CELL = 132;                  // 一格的步长（含间距）
+const WALL_GAP = 10;
+const WALL_MIN_S = 0.45;
+const WALL_MAX_S = 2.2;
+let wallPhotos = [];
+let wallX = 0, wallY = 0, wallScale = 1;
+let wallOpen = false;
+let wallRAF = 0;
+let wallBigEl = null;
+let wallHintTimer = null;
+const wallTiles = new Map();            // "列,行" → 方格元素
+
+function wallViewport() { return document.getElementById("wallViewport"); }
+function wallPlaneEl() { return document.getElementById("wallPlane"); }
+
+/* (列,行) → 照片下标：按 ceil(sqrt(N)) 的方阵平铺，保证一个块里不重复、且覆盖全部照片 */
+function wallIndexAt(c, r) {
+  const n = wallPhotos.length;
+  if (!n) return -1;
+  const K = Math.ceil(Math.sqrt(n));
+  const cc = ((c % K) + K) % K;
+  const rr = ((r % K) + K) % K;
+  return (rr * K + cc) % n;
+}
+
+function wallMakeTile(c, r) {
+  const el = document.createElement("div");
+  el.className = "wall-tile";
+  el.style.left = (c * WALL_CELL) + "px";
+  el.style.top = (r * WALL_CELL) + "px";
+  el.style.width = el.style.height = (WALL_CELL - WALL_GAP) + "px";
+  const p = wallPhotos[wallIndexAt(c, r)];
+  if (p) {
+    el.dataset.id = p.id;
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.alt = "";
+    img.src = cardImgSrc(p); // v0.89 起这里一定是缩略图
+    el.appendChild(img);
+  }
+  return el;
+}
+
+function wallRender() {
+  const vp = wallViewport();
+  const plane = wallPlaneEl();
+  if (!vp || !plane) return;
+  const vw = vp.clientWidth || window.innerWidth || 1200;
+  const vh = vp.clientHeight || window.innerHeight || 800;
+  const C = WALL_CELL * wallScale;
+  const c0 = Math.floor(-wallX / C) - 1;
+  const c1 = Math.ceil((vw - wallX) / C) + 1;
+  const r0 = Math.floor(-wallY / C) - 1;
+  const r1 = Math.ceil((vh - wallY) / C) + 1;
+  const alive = new Set();
+  for (let c = c0; c <= c1; c++) {
+    for (let r = r0; r <= r1; r++) {
+      const key = c + "," + r;
+      alive.add(key);
+      if (!wallTiles.has(key)) {
+        const el = wallMakeTile(c, r);
+        plane.appendChild(el);
+        wallTiles.set(key, el);
+      }
+    }
+  }
+  wallTiles.forEach((el, key) => {
+    if (alive.has(key)) return;
+    if (el === wallBigEl) wallBigEl = null;
+    el.remove();
+    wallTiles.delete(key);
+  });
+  plane.style.transform = `translate3d(${wallX}px, ${wallY}px, 0) scale(${wallScale})`;
+}
+
+function wallSchedule() {
+  if (wallRAF) return;
+  const run = () => { wallRAF = 0; wallRender(); };
+  if (typeof requestAnimationFrame === "function") wallRAF = requestAnimationFrame(run);
+  else wallRAF = setTimeout(run, 16);
+}
+
+function wallClearBig() {
+  if (wallBigEl) wallBigEl.classList.remove("big");
+  wallBigEl = null;
+  const plane = wallPlaneEl();
+  if (plane) plane.classList.remove("has-big");
+}
+
+function wallKeepInView(tile) {
+  const vp = wallViewport();
+  if (!vp || !tile) return;
+  const vw = vp.clientWidth || window.innerWidth || 1200;
+  const vh = vp.clientHeight || window.innerHeight || 800;
+  const size = WALL_CELL * wallScale;
+  const cx = (parseFloat(tile.style.left) || 0) * wallScale + wallX + size / 2;
+  const cy = (parseFloat(tile.style.top) || 0) * wallScale + wallY + size / 2;
+  const padX = 110, padTop = 110, padBottom = 70;
+  let dx = 0, dy = 0;
+  if (cx < padX) dx = padX - cx;
+  else if (cx > vw - padX) dx = (vw - padX) - cx;
+  if (cy < padTop) dy = padTop - cy;
+  else if (cy > vh - padBottom) dy = (vh - padBottom) - cy;
+  if (dx || dy) { wallX += dx; wallY += dy; wallSchedule(); }
+}
+
+function wallToggleBig(tile) {
+  if (!tile) return;
+  if (tile === wallBigEl) { wallClearBig(); return; }
+  wallClearBig();
+  wallBigEl = tile;
+  tile.classList.add("big");
+  const plane = wallPlaneEl();
+  if (plane) plane.classList.add("has-big");
+  wallKeepInView(tile); // 放大后要是跑出视野，把它挪回来
+}
+
+function wallZoomAt(px, py, factor) {
+  const next = Math.min(WALL_MAX_S, Math.max(WALL_MIN_S, wallScale * factor));
+  if (Math.abs(next - wallScale) < 1e-4) return;
+  // 让指针下的那个画布点保持不动
+  wallX = px - ((px - wallX) / wallScale) * next;
+  wallY = py - ((py - wallY) / wallScale) * next;
+  wallScale = next;
+  wallSchedule();
+}
+function wallZoomCenter(factor) {
+  const vp = wallViewport();
+  if (!vp) return;
+  wallZoomAt((vp.clientWidth || window.innerWidth || 1200) / 2, (vp.clientHeight || window.innerHeight || 800) / 2, factor);
+}
+
+function wallShuffleList() {
+  const arr = sortPhotos(PHOTOS).slice();
+  for (let i = arr.length - 1; i > 0; i--) { // Fisher-Yates
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+function wallReload(photos) {
+  wallPhotos = photos || sortPhotos(PHOTOS).slice();
+  wallClearBig();
+  wallTiles.forEach((el) => el.remove());
+  wallTiles.clear();
+  const plane = wallPlaneEl();
+  if (plane) plane.innerHTML = "";
+  const count = document.getElementById("wallCount");
+  if (count) count.textContent = wallPhotos.length + " 张";
+  wallRender();
+}
+
+function openWall() {
+  const page = document.getElementById("wallPage");
+  if (!page) return;
+  if (!PHOTOS.length) { alert("图库里还没有图片"); return; }
+  // 浏览页（z-index 更高）开着时先把它们收掉，别让画布墙藏在后面
+  const alb = document.getElementById("albumPage");
+  if (alb && alb.classList.contains("open")) closeAlbumPage();
+  wallX = 0;
+  wallY = 0;
+  wallScale = 1;
+  page.classList.add("open");
+  page.setAttribute("aria-hidden", "false");
+  document.body.classList.add("wall-open");
+  wallOpen = true;
+  wallReload();
+  const hint = document.getElementById("wallHint");
+  if (hint) hint.classList.remove("gone");
+  clearTimeout(wallHintTimer);
+  wallHintTimer = setTimeout(() => { if (hint) hint.classList.add("gone"); }, 4200);
+}
+
+function closeWall() {
+  const page = document.getElementById("wallPage");
+  if (!page) return;
+  wallOpen = false;
+  wallClearBig();
+  clearTimeout(wallHintTimer);
+  page.classList.remove("open");
+  page.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("wall-open");
+  if (lbIsOpen()) closeLightbox();
+}
+
+function initWall() {
+  const vp = wallViewport();
+  if (!vp || vp.dataset.bound === "1") return;
+  vp.dataset.bound = "1";
+
+  /* ---- 拖拽平移（鼠标 + 单指触摸） ---- */
+  let dragging = false, moved = 0, sx = 0, sy = 0, ox = 0, oy = 0;
+  const down = (x, y) => {
+    dragging = true;
+    moved = 0;
+    sx = x; sy = y;
+    ox = wallX; oy = wallY;
+    vp.classList.add("dragging");
+  };
+  const move = (x, y) => {
+    if (!dragging) return;
+    const dx = x - sx, dy = y - sy;
+    moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+    wallX = ox + dx;
+    wallY = oy + dy;
+    wallSchedule();
+  };
+  const up = () => { dragging = false; vp.classList.remove("dragging"); };
+
+  vp.addEventListener("mousedown", (e) => { if (e.button === 0) down(e.clientX, e.clientY); });
+  window.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
+  window.addEventListener("mouseup", up);
+  vp.addEventListener("touchstart", (e) => { if (e.touches.length === 1) down(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+  vp.addEventListener("touchmove", (e) => { if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
+  vp.addEventListener("touchend", up);
+  vp.addEventListener("touchcancel", up);
+
+  /* ---- 滚轮缩放（以指针为中心） ---- */
+  vp.addEventListener("wheel", (e) => {
+    if (!wallOpen) return;
+    e.preventDefault();
+    const rect = vp.getBoundingClientRect();
+    wallZoomAt(e.clientX - (rect.left || 0), e.clientY - (rect.top || 0), Math.exp(-e.deltaY * 0.0016));
+  }, { passive: false });
+
+  /* ---- 单击就地放大 / 双击开灯箱 ---- */
+  vp.addEventListener("click", (e) => {
+    if (moved > 6) return;                 // 刚拖过，不算点击
+    const tile = e.target.closest(".wall-tile");
+    if (!tile) { wallClearBig(); return; }
+    if (e.detail >= 2) return;             // 双击的第二下交给 dblclick
+    wallToggleBig(tile);
+  });
+  vp.addEventListener("dblclick", (e) => {
+    const tile = e.target.closest(".wall-tile");
+    wallClearBig();
+    if (tile && tile.dataset.id) openLightboxById(tile.dataset.id);
+  });
+
+  /* ---- 顶栏按钮 ---- */
+  const back = document.getElementById("wallBack");
+  if (back) back.onclick = closeWall;
+  const zin = document.getElementById("wallZoomIn");
+  if (zin) zin.onclick = () => wallZoomCenter(1.25);
+  const zout = document.getElementById("wallZoomOut");
+  if (zout) zout.onclick = () => wallZoomCenter(0.8);
+  const shuf = document.getElementById("wallShuffle");
+  if (shuf) shuf.onclick = () => wallReload(wallShuffleList());
+
+  window.addEventListener("resize", () => { if (wallOpen) wallRender(); });
+
+  // 测试 / 调试钩子
+  window.__wallState = () => ({
+    open: wallOpen, photos: wallPhotos.length, tiles: wallTiles.size,
+    big: !!wallBigEl, x: Math.round(wallX), y: Math.round(wallY), scale: Number(wallScale.toFixed(3)),
+  });
+  window.__openWall = openWall;
+  window.__closeWall = closeWall;
+}
 
 /* ---------- 页面窗口（v0.8）· 上传/设置以独立窗口层叠悬浮于图库上方 ---------- */
 function initPageSwitch() {
@@ -6361,6 +6633,7 @@ function initPageSwitch() {
       flyoutOpenCount = 0;
       syncFabGroup();
       if (selectMode) exitSelectMode();
+      if (item.dataset.page === "wall") { closeAll(); openWall(); return; } // v0.91：画布墙
       if (item.dataset.page === "gallery") closeAll();
       else openWindow(item.dataset.page);
     });
