@@ -6292,17 +6292,20 @@ function wallComputeGrid() {
   /* v0.98：把最下面那一行补齐 —— 照片数不是列数的整数倍时，每块末尾会空出半行甚至整行，
      平铺后就是一条横贯全宽的黑带（用户截图里那条）。这里用照片循环补满，
      反正是无限墙，重复几张看不出来，但接缝彻底没了。 */
-  const lastRow = maxRow - 1;
+  /* v0.98 / v1.00：把整块里没被照片占到的格子补满 ——
+     照片数不是列数整数倍、或者最后一张正好是 2×2（跨到最后两行）时，
+     块底部会空出半行甚至整行，平铺后就是一道横贯全宽的黑带。
+     这里把 [0, maxRow) 里所有空格都用照片循环补上，块底彻底齐平。 */
   let fi = 0;
-  if (lastRow >= 0) {
+  for (let r = 0; r < maxRow; r++) {
     for (let c = 0; c < cols; c++) {
-      const key = lastRow + "," + c;
+      const key = r + "," + c;
       if (filled.has(key)) continue;
       // 兜底：万一 pending 到最后也没等到 2×2 的位置，就按 1×1 放进补齐的空格里
       const p = pendingBig || wallPhotos[fi++ % n];
       if (pendingBig) pendingBig = null;
       wallPhotoById.set(p.id, p);
-      items.push({ id: p.id, x: c * step, y: lastRow * step, w: cell, h: cell, big: false, expanded: false });
+      items.push({ id: p.id, x: c * step, y: r * step, w: cell, h: cell, big: false, expanded: false, filler: true });
       filled.add(key);
     }
   }
@@ -6381,7 +6384,9 @@ function wallComputeMasonry() {
 
   /* v0.96：把每列剩下的「尾巴」补齐 —— 各列长度天然不齐，直接按最高列收尾的话，
      每块交界处会出现一条横贯全宽的空带（图上那种大缝）。
-     这里用照片循环补填（同一块里可能重复出现几张，反正是无限墙，看不出接缝）。 */
+     v0.99：补填不能超过块高（否则最高列又被抬高，所有列的余量更大），
+     补完之后再把每列「差的那一点」均摊到该列每张照片的高度上 —— 每张只加几个像素，
+     肉眼看不出来，但块底变成齐的，交界处彻底没有黑带。 */
   let blockH = Math.max.apply(null, colH.concat([1]));
   const filler = wallPhotos.filter(Boolean);
   if (filler.length) {
@@ -6405,7 +6410,23 @@ function wallComputeMasonry() {
         colH[c] += pickH + WALL_GAP;
       }
     }
-    blockH = Math.max.apply(null, colH.concat([blockH]));
+  }
+
+  /* v0.99：最后把每列差的那一小截「用一个正好高度的补位块补齐」——
+     这样块底是齐的，交界处不会再出现黑带；补位块是从照片里循环取的，
+     高度不足一张时按比例裁切（cover），但只是每列最后一块，看不出来。 */
+  let closeCursor = 0;
+  for (let c = 0; c < cols; c++) {
+    const remain = blockH - colH[c] - WALL_GAP;
+    if (remain <= 12) continue;
+    if (!filler.length) break;
+    const p = filler[closeCursor++ % filler.length];
+    wallPhotoById.set(p.id, p);
+    items.push({
+      id: p.id, x: c * (WALL_COL + WALL_GAP), y: colH[c],
+      w: WALL_COL, h: remain, big: false, expanded: false, filler: true,
+    });
+    colH[c] += remain + WALL_GAP;
   }
 
   wallLayout = {
@@ -6705,17 +6726,28 @@ function initWall() {
     wallZoomAt(e.clientX - (rect.left || 0), e.clientY - (rect.top || 0), Math.exp(-e.deltaY * 0.0016));
   }, { passive: false });
 
-  /* ---- 单击就地放大 / 双击开灯箱 ---- */
+  /* ---- 单击就地放大 / 双击开灯箱 ----
+     v1.00：单击动作要**等 260ms**（确认不是双击）再执行 ——
+     否则双击时第一下会先把图片放大/收起，第二下才开灯箱，中间那下缩放很突兀。 */
+  let clickTimer = null;
+  const cancelClick = () => {
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+  };
   vp.addEventListener("click", (e) => {
     if (moved > 6) return;                 // 刚拖过，不算点击
     const tile = e.target.closest(".wall-tile");
-    if (!tile) { wallCollapse(); return; }
+    if (!tile) { cancelClick(); wallCollapse(); return; }
     if (e.detail >= 2) return;             // 双击的第二下交给 dblclick
-    wallToggleBig(tile);
+    cancelClick();
+    const target = tile;
+    clickTimer = setTimeout(() => {
+      clickTimer = null;
+      wallToggleBig(target);
+    }, 260);
   });
   vp.addEventListener("dblclick", (e) => {
+    cancelClick(); // 取消挂起的「单击放大」→ 双击时图片不会有任何缩放
     const tile = e.target.closest(".wall-tile");
-    wallCollapse(); // 双击进灯箱时把画布墙还原成正常排布
     if (tile && tile.dataset.id) openLightboxById(tile.dataset.id);
   });
 
@@ -6763,6 +6795,8 @@ function initWall() {
   };
   /* v0.98：方格模式的「每行都填满」自检 —— 用来验证块交界处不会出现黑带 */
   window.__wallGridStats = () => (wallLayout && wallLayout.gridStats) || null;
+  // 调试用：把当前排布原样吐出来（排查空洞 / 黑带）
+  window.__wallLayoutRaw = () => wallLayout;
 }
 
 /* v0.93：缩略图预热 —— 一次只处理 12 张，前端带 offset 循环调，避免撞函数执行时限 */

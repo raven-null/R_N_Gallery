@@ -890,13 +890,16 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
           }
           check("任意一张照片点下去都能放大（放不下就往后挪）", tried > 0 && ok === tried, `${ok}/${tried} 成功`);
         }
-        // 双击：第一下放大、第二下（detail 2）忽略、dblclick 开灯箱
+        // 双击：第一下（detail 1）挂起的放大要被取消 → 图片不会有任何缩放，直接开灯箱
+        const sizeBeforeDbl = tile.style.width;
         tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
         tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
         tile.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
-        await wait(300);
+        await wait(400);
         const lbNow = doc.getElementById("lightbox");
         check("双击打开灯箱", lbNow.classList.contains("open") && lbNow.dataset.cur === tile.dataset.id, lbNow.dataset.cur || "(无)");
+        check("双击过程中图片不会被放大 / 收起（单击动作已取消）",
+          tile.style.width === sizeBeforeDbl && window.__wallState().expanded === null, `宽度 ${tile.style.width}`);
         doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
         await wait(250);
         check("Esc 先关灯箱、画布墙还在", !lbNow.classList.contains("open") && doc.getElementById("wallPage").classList.contains("open"));
