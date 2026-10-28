@@ -1434,6 +1434,19 @@ async function aiTagSearch(query) {
 - 测试：`test:dom` 把原来的 4 项网格切换断言换成 1 项「按钮与网格卡片都不存在」，共 226 项全过；
   `test:tagrefresh` 29 项同样全过
 
+### 批次 79 · 返回图库不跳顶部 + 标签建议只在输入后弹出（v0.88，2026-10-27）🔧
+> 用户反馈：① 从「标签管理 / 设置」返回时图库会自动刷新并滚到顶部；② 标签输入框什么都没输入时也会弹下拉框。
+
+- **滚动跳顶根因**：`runClose()` 在最后一个窗口收起后调了 `window.scrollTo({ top: 0 })`。
+  这些窗口都是 `position: fixed` 的浮层，关掉并不改变图库布局 —— 现在记录并还回 `window.scrollY`
+  （`behavior: "instant"`），返回时停在原处
+- **面板自己也别跳**：`refreshTagManager()` 重渲染前记住 `#panelTags .panel-content` 的 `scrollTop`，
+  重渲染后还回去（改完一个标签回来不会「刷」回面板顶部）
+- **建议下拉**：`bindTagSuggest()` 原来 focus 时就铺开全部候选（空输入也弹）→ 去掉 focus 触发器，
+  只在 `input` 有内容时渲染匹配项，清空输入立刻收起；顺带把「回车添加 / 退格删最后一项」拆成
+  `bindTagInput()`，以后哪个弹窗不要建议列表也能保留基础输入行为
+- 测试：`test:dom` 新增 4 项（空输入不弹下拉 / 输入后才弹 / 清空后收起 / 编辑弹窗仍有输入框与建议容器），共 230 项全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

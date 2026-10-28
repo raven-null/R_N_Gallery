@@ -969,6 +969,26 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     check("编辑弹窗不再有描述输入", !doc.getElementById("edDesc") && !doc.querySelector(".modal-mask #edDesc"));
     check("上传项编辑弹窗不再有描述输入", !doc.getElementById("uqDesc"));
     check("搜索框文案不含描述", !/描述/.test((doc.getElementById("searchInput") || {}).placeholder || ""));
+    /* v0.88：标签建议下拉只在开始输入后才出现（空输入时不弹） */
+    if (editModal && editModal.classList.contains("open")) {
+      const edInp = doc.getElementById("edTagInput");
+      const edSug = doc.getElementById("edTagSuggest");
+      check("编辑弹窗有标签输入框与建议容器", !!edInp && !!edSug);
+      if (edInp && edSug) {
+        edInp.dispatchEvent(new window.Event("focus"));
+        await wait(80);
+        check("空输入时建议下拉不出现", edSug.hidden === true);
+        edInp.value = "冒烟";
+        edInp.dispatchEvent(new window.Event("input", { bubbles: true }));
+        await wait(120);
+        check("开始输入后才弹建议下拉", edSug.hidden === false && edSug.querySelectorAll(".ts-item").length > 0,
+          `${edSug.querySelectorAll(".ts-item").length} 条`);
+        edInp.value = "";
+        edInp.dispatchEvent(new window.Event("input", { bubbles: true }));
+        await wait(80);
+        check("清空输入后建议下拉收起", edSug.hidden === true);
+      }
+    }
     if (editModal && editModal.classList.contains("open")) {
       const cancel = doc.getElementById("edCancel");
       if (cancel) clickEl(cancel);

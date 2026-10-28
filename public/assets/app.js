@@ -106,8 +106,30 @@ function addTagChip(box, name) {
 }
 const tagsOfBox = (box) => [...box.querySelectorAll(".t")].map((el) => el.childNodes[0].textContent.trim()).filter(Boolean);
 
-/* 标签建议输入（v0.14 借鉴博客后台：focus 显示全部候选、退格删 chip、回车自定义） */
+/* 标签输入框的基础行为（回车添加 / 退格删掉最后一个 chip）。
+   v0.88：从 bindTagSuggest 里拆出来 —— 编辑图片弹窗不再要建议下拉，但回车 / 退格得照旧 */
+function bindTagInput(input, box, afterPick) {
+  if (!input) return;
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && input.value.trim()) {
+      e.preventDefault();
+      addTagChip(box, input.value.trim());
+      input.value = "";
+      if (afterPick) afterPick();
+    } else if (e.key === "Backspace" && !input.value.trim()) {
+      const chips = box.querySelectorAll(".t");
+      if (chips.length) {
+        chips[chips.length - 1].remove();
+        if (afterPick) afterPick();
+      }
+    }
+  });
+}
+
+/* 标签建议输入（v0.14 借鉴博客后台：focus 显示全部候选、退格删 chip、回车自定义）
+   suggest 传 null = 只要输入框本身的行为，不弹建议列表 */
 function bindTagSuggest(input, suggest, box, afterPick) {
+  bindTagInput(input, box, afterPick);
   if (!input || !suggest) return;
   const hide = () => { suggest.hidden = true; suggest.innerHTML = ""; };
   const renderHits = (kw) => {
@@ -130,39 +152,18 @@ function bindTagSuggest(input, suggest, box, afterPick) {
     }).join("");
     suggest.hidden = false;
   };
-  input.addEventListener("focus", () => {
-    if (TAGS.tags.length && !suggest.hidden) return;
-    if (input.value.trim()) return;
-    renderHits("");
-  });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && input.value.trim()) {
-      e.preventDefault();
-      addTagChip(box, input.value.trim());
-      input.value = "";
-      hide();
-      if (afterPick) afterPick();
-    } else if (e.key === "Backspace" && !input.value.trim()) {
-      const chips = box.querySelectorAll(".t");
-      if (chips.length) {
-        chips[chips.length - 1].remove();
-        if (afterPick) afterPick();
-      }
-    }
-  });
+  /* v0.88：不再「聚焦就铺开全部候选」——空输入时下拉框保持隐藏，
+     只有真的开始打字（且标签库非空）才弹出匹配项 */
   input.addEventListener("input", () => {
-    if (!suggest) return;
     const kw = input.value.trim().toLowerCase();
     if (!kw || !TAGS.tags.length) return hide();
     renderHits(kw);
   });
-  if (suggest) {
-    suggest.addEventListener("mousedown", (e) => {
-      const it = e.target.closest(".ts-item");
-      if (it) { e.preventDefault(); addTagChip(box, it.dataset.name); input.value = ""; hide(); if (afterPick) afterPick(); }
-    });
-    input.addEventListener("blur", () => setTimeout(hide, 150));
-  }
+  suggest.addEventListener("mousedown", (e) => {
+    const it = e.target.closest(".ts-item");
+    if (it) { e.preventDefault(); addTagChip(box, it.dataset.name); input.value = ""; hide(); if (afterPick) afterPick(); }
+  });
+  input.addEventListener("blur", () => setTimeout(hide, 150));
 }
 /* v0.52：判断事件目标是不是「正在打字」的地方（输入框 / 文本域 / 下拉框 / 可编辑区域）。
    所有全局键盘快捷键都要先过这一关，否则会抢走用户正在输入的数字、方向键、空格等。
@@ -3730,6 +3731,7 @@ function initEditModal() {
   document.getElementById("edSave").addEventListener("click", saveEditModal);
   const delBtn = document.getElementById("edDelete");
   if (delBtn) delBtn.addEventListener("click", delFromEditModal);
+  // v0.88：建议下拉只在**开始输入之后**才出现（空输入时不再自动弹出候选列表）
   bindTagSuggest(document.getElementById("edTagInput"), document.getElementById("edTagSuggest"), document.getElementById("edTagBox"));
   bindCatPicks(document.getElementById("edCats")); // v0.15 主分类单选
   bindRatingPicks(document.getElementById("edRating")); // v0.57 分级三档
@@ -4516,6 +4518,10 @@ let cwOpenInited = false;
 function refreshTagManager() {
   const root = document.getElementById("tagMgrRoot");
   if (!root) return;
+  /* v0.88：重渲染前记住标签管理窗口自己的滚动位置 —— 改完一个标签回来还停在原处，
+     不会「刷」一下跳回面板顶部（窗口本身是浮层，与图库滚动无关） */
+  const panelBox = document.querySelector("#panelTags .panel-content");
+  const panelY = panelBox ? panelBox.scrollTop : 0;
   if (tmgrFold === null) loadTmgrFold(); // v0.29：首次读取标签组折叠状态
   const counts = tagCounts();
   const used = Object.keys(counts);
@@ -4654,6 +4660,7 @@ function refreshTagManager() {
     </div>`;
   }
   root.innerHTML = html;
+  if (panelBox && panelY) panelBox.scrollTop = panelY; // v0.88：还回面板自己的滚动位置
 
   const q = (sel) => root.querySelector(sel);
   if (q("#btnNewCategory")) q("#btnNewCategory").addEventListener("click", () => openCatModal("new-category"));
@@ -6311,12 +6318,16 @@ function initPageSwitch() {
   }
   function runClose(el) {
     animating = true;
+    /* v0.88：关掉最后一个窗口时不再把图库滚回顶部 ——
+       面板是 position: fixed 的浮层，关掉它并不改变图库布局，
+       用户从「标签管理 / 设置」返回时应该还停在原来的位置。 */
+    const y = window.scrollY;
     genie(el, -1, () => {
       animating = false;
       if (closeQueue.length) {
         runClose(closeQueue.shift());
       } else if (!openStack.length) {
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        try { window.scrollTo({ top: y, behavior: "instant" }); } catch (e) { window.scrollTo(0, y); }
       }
     });
   }
