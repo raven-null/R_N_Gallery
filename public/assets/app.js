@@ -6241,42 +6241,79 @@ function wallComputeGrid() {
   const bigEvery = 8;
   const bigOffset = Math.floor(rnd() * bigEvery);
   const rows = Math.ceil(n / cols) + 2;
-  const occupied = new Set();           // "r,c" 已被别的格子占掉（被大图盖住）
+  const filled = new Set();             // "r,c" 已经有照片或已被大图盖住
   const items = [];
   wallPhotoById.clear();
   let pi = 0;
   let maxRow = 0;
+  let pendingBig = null;                // 想放大、但当前格子放不下 2×2 的那张，往后挪等位置
+  const cellFree = (r, c) => c < cols && !filled.has(r + "," + c);
+  const canBigAt = (r, c) => c + 1 < cols && cellFree(r, c) && cellFree(r, c + 1) && cellFree(r + 1, c) && cellFree(r + 1, c + 1);
+  const markCells = (r, c, span) => {
+    for (const [rr, cc] of [[r, c], [r, c + span - 1], [r + span - 1, c], [r + span - 1, c + span - 1]]) filled.add(rr + "," + cc);
+  };
   outer:
   for (let r = 0; r < rows + Math.ceil(n / cols) + 2; r++) {
     for (let c = 0; c < cols; c++) {
-      if (pi >= n) break outer;
-      if (occupied.has(r + "," + c)) continue;
+      if (pi >= n && !pendingBig) break outer;
+      if (!cellFree(r, c)) continue;
+      /* v0.99：被点开的那张如果当前格子放不下 2×2（右边/下边被别的大图占了），
+         就记成 pending 往后挪，等遇到能放开的位置再放大 —— 之前这种情况会「点了没反应」 */
+      if (pendingBig && canBigAt(r, c)) {
+        const p = pendingBig;
+        pendingBig = null;
+        markCells(r, c, 2);
+        items.push({ id: p.id, x: c * step, y: r * step, w: cell * 2 + WALL_GAP, h: cell * 2 + WALL_GAP, big: true, expanded: true });
+        maxRow = Math.max(maxRow, r + 2);
+        continue;
+      }
+      if (pi >= n) continue;            // 只剩 pending，继续往后找位置
       const p = wallPhotos[pi++];
       wallPhotoById.set(p.id, p);
       const wantBig = p.id === wallExpandedId || ((pi - 1 + bigOffset) % bigEvery === 0);
-      const canBig = c + 1 < cols && !occupied.has(r + "," + (c + 1))
-        && !occupied.has((r + 1) + "," + c) && !occupied.has((r + 1) + "," + (c + 1));
-      if (wantBig && canBig) {
-        occupied.add(r + "," + (c + 1));
-        occupied.add((r + 1) + "," + c);
-        occupied.add((r + 1) + "," + (c + 1));
+      if (wantBig && canBigAt(r, c)) {
+        markCells(r, c, 2);
         items.push({
           id: p.id, x: c * step, y: r * step,
           w: cell * 2 + WALL_GAP, h: cell * 2 + WALL_GAP,
           big: true, expanded: p.id === wallExpandedId,
         });
         maxRow = Math.max(maxRow, r + 2);
+      } else if (wantBig && p.id === wallExpandedId) {
+        pendingBig = p;                 // 被点开的这张：等有 2×2 的空位
       } else {
+        filled.add(r + "," + c);
         items.push({ id: p.id, x: c * step, y: r * step, w: cell, h: cell, big: false, expanded: false });
         maxRow = Math.max(maxRow, r + 1);
       }
     }
   }
+
+  /* v0.98：把最下面那一行补齐 —— 照片数不是列数的整数倍时，每块末尾会空出半行甚至整行，
+     平铺后就是一条横贯全宽的黑带（用户截图里那条）。这里用照片循环补满，
+     反正是无限墙，重复几张看不出来，但接缝彻底没了。 */
+  const lastRow = maxRow - 1;
+  let fi = 0;
+  if (lastRow >= 0) {
+    for (let c = 0; c < cols; c++) {
+      const key = lastRow + "," + c;
+      if (filled.has(key)) continue;
+      // 兜底：万一 pending 到最后也没等到 2×2 的位置，就按 1×1 放进补齐的空格里
+      const p = pendingBig || wallPhotos[fi++ % n];
+      if (pendingBig) pendingBig = null;
+      wallPhotoById.set(p.id, p);
+      items.push({ id: p.id, x: c * step, y: lastRow * step, w: cell, h: cell, big: false, expanded: false });
+      filled.add(key);
+    }
+  }
+
   wallLayout = {
     items,
     cols,
     blockW: cols * step,
     blockH: maxRow * step,
+    // v0.98：方格模式下「最后一行是否补齐」的自检数据（每块 = maxRow × cols 个格子）
+    gridStats: { rows: maxRow, cols, cells: maxRow * cols, filled: filled.size },
   };
 }
 
@@ -6724,6 +6761,8 @@ function initWall() {
     const shortfalls = bottom.map((b) => Math.max(0, blockH - b));
     return { cols, blockH, items: wallLayout.items.length, bottom, shortfalls };
   };
+  /* v0.98：方格模式的「每行都填满」自检 —— 用来验证块交界处不会出现黑带 */
+  window.__wallGridStats = () => (wallLayout && wallLayout.gridStats) || null;
 }
 
 /* v0.93：缩略图预热 —— 一次只处理 12 张，前端带 offset 循环调，避免撞函数执行时限 */

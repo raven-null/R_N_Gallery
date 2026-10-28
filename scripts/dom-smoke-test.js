@@ -826,6 +826,10 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         const bigTiles = tiles.filter((t) => t.classList.contains("big"));
         check("方格模式下有一些照片被随机放大（2×2）", bigTiles.length > 0 && bigTiles.every((t) => parseFloat(t.style.width) > 180),
           `${bigTiles.length} 张大图`);
+        // v0.98：每块的最后一行也要补齐，否则块交界处会出现一条横贯全宽的黑带
+        const gs = window.__wallGridStats ? window.__wallGridStats() : null;
+        check("方格块的最后一行被补齐（交界处没有黑带）", !!gs && gs.filled === gs.cells,
+          gs ? `${gs.filled}/${gs.cells} 格已填` : "无布局信息");
       }
       // 切到瀑布流：列宽统一、高度按原始比例
       {
@@ -869,6 +873,23 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
         await wait(600);
         check("再点一次收起、照片归位", !tile.classList.contains("expanded") && window.__wallState().expanded === null && tile.style.width === w0);
+        /* v0.99：即使这张照片所在格子右边/下边被别的大图占了，点下去也必须能放大
+           （以前会「点了没反应」——布局放不下 2×2 就直接跳过） */
+        {
+          const all = [...doc.querySelectorAll("#wallPlane .wall-tile[data-id]")];
+          let ok = 0, tried = 0;
+          for (const t of all.slice(0, 8)) {
+            tried++;
+            t.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+            await wait(450);
+            const st = window.__wallState();
+            const bigTile = [...doc.querySelectorAll("#wallPlane .wall-tile")].find((x) => x.dataset.id === t.dataset.id);
+            if (st.expanded === t.dataset.id && bigTile && parseFloat(bigTile.style.width) > 180) ok++;
+            t.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+            await wait(350);
+          }
+          check("任意一张照片点下去都能放大（放不下就往后挪）", tried > 0 && ok === tried, `${ok}/${tried} 成功`);
+        }
         // 双击：第一下放大、第二下（detail 2）忽略、dblclick 开灯箱
         tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
         tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
