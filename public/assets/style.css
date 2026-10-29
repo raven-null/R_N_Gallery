@@ -4173,6 +4173,7 @@ body.wall-open { overflow: hidden; }
     top 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
     width 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
     height 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 0.2s var(--ease-out),
     box-shadow 0.25s var(--ease-out),
     border-color 0.25s var(--ease-out);
 }
@@ -4184,13 +4185,21 @@ body.wall-open { overflow: hidden; }
   pointer-events: none;
   -webkit-user-drag: none;
 }
-.wall-tile:hover { border-color: var(--w020); box-shadow: 0 10px 26px rgba(0,0,0,0.32); }
+/* v1.05：桌面端悬停微微放大 + 抬起阴影（拖动过程中不生效，免得跟手时发飘） */
+.wall-tile:hover {
+  border-color: var(--w020);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.38);
+  transform: scale(1.045);
+  z-index: 6;
+}
+.wall-viewport.dragging .wall-tile:hover { transform: none; z-index: auto; }
 /* 点开的那张：占两列宽（尺寸由布局给），加个高亮描边 */
 .wall-tile.expanded {
   z-index: 20;
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   box-shadow: 0 22px 54px rgba(0,0,0,0.5);
 }
+.wall-tile.expanded:hover { transform: scale(1.02); }
 
 /* 顶栏与提示 */
 .wall-bar {

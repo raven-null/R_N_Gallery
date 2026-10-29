@@ -6186,6 +6186,7 @@ let wallOpen = false;
 let wallRAF = 0;
 let wallExpandedId = null;              // 当前被点开放大的照片 id（布局据此重新打包）
 let wallHintTimer = null;
+let wallPanTimer = null;                // v1.05：镜头平滑滑动用的过渡计时器
 let wallGridSeed = 1;                   // v0.97：方格模式下「随机放大哪些」的种子（换一次洗一次）
 const wallShrunk = new Set();           // v1.01：被用户点小掉的「随机放大」照片（它们回到 1×1）
 const WALL_VIEW_KEY = "rn_wall_view";   // grid（默认）| masonry
@@ -6326,6 +6327,8 @@ function wallComputeGrid() {
     }
   }
 
+  assignWallKeys(items); // v1.05：稳定 key（见函数注释），避免放大时元素「边滑边换图」
+
   wallLayout = {
     items,
     cols,
@@ -6458,12 +6461,28 @@ function wallComputeMasonry() {
     colH[c] += remain + WALL_GAP;
   }
 
+  assignWallKeys(items); // v1.05：稳定 key，放大时元素只挪位置、不换图
+
   wallLayout = {
     items,
     cols,
     blockW: cols * (WALL_COL + WALL_GAP),
     blockH: blockH + WALL_GAP,
   };
+}
+
+/* v1.05：给布局里每个格子一个稳定 key ——
+   普通照片用 id；补位用的重复照片用 `id#序号`（同一张图在一块里可能出现两次）。
+   wallRender 用它当 map key，于是「点开放大」重排时，同一个 DOM 元素还是那张照片，
+   只会平滑滑到新位置，不会出现「一边滑一边换图」的抽搐。 */
+function assignWallKeys(items) {
+  const seen = new Map();
+  for (const it of items) {
+    if (!it.filler) { it.key = it.id; continue; }
+    const n = (seen.get(it.id) || 0) + 1;
+    seen.set(it.id, n);
+    it.key = `${it.id}#${n}`;
+  }
 }
 
 function wallApplyGeom(el, item, wx, wy) {
@@ -6538,7 +6557,7 @@ function wallRender() {
         if (wy > y1 || wy + it.h < y0) continue;      // 上下不相交
         const wx = bx + it.x;
         if (wx > x1 || wx + it.w < x0) continue;      // 左右不相交
-        const key = k + "," + m + "," + i;
+        const key = k + "," + m + "," + (it.key || i); // v1.05：按照片 id 做 key（稳定）
         alive.add(key);
         const el = wallTiles.get(key);
         if (!el) {
@@ -6598,7 +6617,19 @@ function wallKeepInView(tile) {
   else if (cx > vw - padX) dx = (vw - padX) - cx;
   if (cy < padTop) dy = padTop - cy;
   else if (cy > vh - padBottom) dy = (vh - padBottom) - cy;
-  if (dx || dy) { wallX += dx; wallY += dy; wallSchedule(); }
+  if (dx || dy) {
+    /* v1.05：这一步是「把镜头挪一下」——以前是瞬间跳过去，
+       和照片自己的缩放动画叠在一起就像抽搐；现在给平面加个短过渡，镜头平滑滑过去 */
+    const plane = wallPlaneEl();
+    if (plane) {
+      plane.style.transition = "transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)";
+      clearTimeout(wallPanTimer);
+      wallPanTimer = setTimeout(() => { if (plane) plane.style.transition = ""; }, 340);
+    }
+    wallX += dx;
+    wallY += dy;
+    wallSchedule();
+  }
 }
 
 /* 点开 / 收起：
