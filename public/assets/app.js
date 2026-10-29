@@ -628,7 +628,14 @@ async function fetchPhotosPage(cursor, limit) {
   const qs = new URLSearchParams({ limit: String(limit) });
   if (cursor) qs.set("cursor", String(cursor));
   const hide = [...hiddenRatingSet];
-  if (hide.length) qs.set("hide", hide.join(",")); // v0.85：R18 / R16 分开隐藏（老服务端仍认 safe=1）
+  if (hide.length) {
+    qs.set("hide", hide.join(",")); // v0.85：R18 / R16 分开隐藏（老服务端仍认 safe=1）
+  } else if (!isAdmin()) {
+    /* v1.08：观光访客必须声明「要隐藏哪些分级」，服务端才放行列表。
+       如果把两个放行开关都打开了，这里仍按默认（两档都藏）来请求 ——
+       否则会拿到 401、整个图库都加载不出来。 */
+    qs.set("hide", "r16,r18");
+  }
   const res = await fetch(`/api/photos?${qs}`, { headers: apiHeaders(), cache: "no-store", signal: timeoutSignal(20000) }); // v0.54：加 20s 超时
   if (!res.ok) throw new Error("api unavailable");
   return res.json();
@@ -6144,12 +6151,16 @@ function initSearch() {
 /* ---------- 分发（v0.9.5：先显示加载动画 → 初始化 → 拉取数据） ---------- */
 document.addEventListener("DOMContentLoaded", async () => {
   showGalleryState("loading");
-  /* 访问密码门禁（v0.16）：启用了密码且本机没有凭证时，先登录、不加载任何数据 */
+  /* 访问密码门禁（v1.08）
+     以前：启用了密码且本机没有凭证 → 先弹门禁页，必须输入密码或点「以观光模式浏览」才能看图。
+     现在：**默认直接以观光模式进入**，不再弹任何门禁页 ——
+     要进管理员模式时，点右下角模式按钮（或设置页的「切换」）输入密码即可。 */
   const __auth = await fetchAuthState();
-  if (__auth.gate && !gateToken() && !guestVisiting()) { showGate(); return; }
-  // v0.49：观光访客（没输密码点了「以观光模式浏览」）→ 固定为观光模式
-  if (__auth.gate && !gateToken() && guestVisiting()) {
-    try { localStorage.setItem(MODE_KEY, "guest"); } catch (e) { /* ignore */ }
+  if (__auth.gate && !gateToken()) {
+    try {
+      localStorage.setItem(MODE_KEY, "guest");
+      localStorage.setItem(GUEST_VISIT_KEY, "1");
+    } catch (e) { /* ignore */ }
   }
   initMode();          // v0.49：观光 / 管理员模式（必须在加载数据前定好，观光模式要过滤成人向图片）
   initModeModal();
@@ -6962,6 +6973,8 @@ function initWall() {
   });
 
   /* ---- 顶栏按钮 ---- */
+  const openBtn = document.getElementById("btnOpenWall");
+  if (openBtn) openBtn.onclick = () => openWall(); // v1.08：图库顶部的照片墙入口
   const back = document.getElementById("wallBack");
   if (back) back.onclick = closeWall;
   const zin = document.getElementById("wallZoomIn");
@@ -7097,6 +7110,8 @@ function initPageSwitch() {
      顶层端正（轻微 -1deg），下层按深度旋转（角度交替方向）+ 向外散开，
      关闭/置顶时其余窗口经 CSS transition 平滑归位 */
   function refreshStack() {
+    // v1.08：有窗口打开时给 body 加个标记（图库顶部的「照片墙」按钮据此让位）
+    document.body.classList.toggle("panel-open", openStack.length > 0);
     const depthMax = openStack.length - 1;
     openStack.forEach((id, i) => {
       const el = panels[id];
@@ -7276,7 +7291,6 @@ function initPageSwitch() {
       flyoutOpenCount = 0;
       syncFabGroup();
       if (selectMode) exitSelectMode();
-      if (item.dataset.page === "wall") { closeAll(); openWall(); return; } // v0.91：画布墙
       if (item.dataset.page === "gallery") closeAll();
       else openWindow(item.dataset.page);
     });

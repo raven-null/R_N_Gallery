@@ -802,10 +802,12 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
-  /* v0.91：画布墙 —— 方格铺满无限画布，单击就地放大，双击开灯箱 */
+  /* v0.91：画布墙 —— 方格铺满无限画布，单击就地放大，双击开灯箱
+     v1.08：入口从 FAB 页面菜单挪到图库顶部的「照片墙」按钮 */
   {
-    const wallItem = doc.querySelector('#pageMenu [data-page="wall"]');
-    check("页面菜单有「画布墙」入口", !!wallItem);
+    const wallItem = doc.getElementById("btnOpenWall");
+    check("图库顶部有「照片墙」入口", !!wallItem);
+    check("页面菜单里不再有画布墙项", !doc.querySelector('#pageMenu [data-page="wall"]'));
     if (wallItem) {
       clickEl(wallItem);
       await wait(700);

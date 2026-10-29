@@ -4117,6 +4117,46 @@ body.perf-lite .card__content {
 body.album-open { overflow: hidden; }
 
 /* ============================================================
+   照片墙入口按钮（v1.08：从 FAB 页面菜单挪到图库顶部）
+   ============================================================ */
+.wall-open-btn {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 26;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--w012);
+  background: var(--s26);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.28);
+  transition: color 0.16s, border-color 0.16s, transform 0.16s;
+}
+.wall-open-btn svg { width: 15px; height: 15px; flex: none; }
+.wall-open-btn:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  transform: translateY(-1px);
+}
+/* 打开了窗口 / 浏览器其它整页 / 画布墙时，别浮在上面挡事 */
+body.panel-open .wall-open-btn,
+body.album-open .wall-open-btn,
+body.wall-open .wall-open-btn { display: none; }
+body.perf-lite .wall-open-btn { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--s05); }
+@media (max-width: 600px) {
+  .wall-open-btn { top: 10px; right: 12px; height: 32px; padding: 0 11px; font-size: 12px; }
+}
+
+/* ============================================================
    画布墙（v0.91）：一堆小方格铺在无限画布上，可上下左右平移
    · .wall-plane 只做 translate/scale，方格按 (列,行) 绝对定位
    · 只渲染视野内的方格（虚拟化），所以照片再多也不卡
