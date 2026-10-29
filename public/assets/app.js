@@ -6299,14 +6299,27 @@ function wallComputeGrid() {
      照片数不是列数整数倍、或者最后一张正好是 2×2（跨到最后两行）时，
      块底部会空出半行甚至整行，平铺后就是一道横贯全宽的黑带。
      这里把 [0, maxRow) 里所有空格都用照片循环补上，块底彻底齐平。 */
+  /* v1.03：补齐用的照片不能是本块里已经出现过的 ——
+     否则点开放大时，块里多出来的空格会被「刚放大的那张」再填一次，
+     屏幕上就出现「同一张图在旁边复制了一份」。 */
+  const placedIds = new Set(items.map((it) => it.id));
+  const pickFiller = (start) => {
+    for (let t = 0; t < n; t++) {
+      const cand = wallPhotos[(start + t) % n];
+      if (!placedIds.has(cand.id)) return { p: cand, next: (start + t + 1) % n };
+    }
+    return { p: wallPhotos[start % n], next: (start + 1) % n }; // 全都被用过了，只能重复
+  };
   let fi = 0;
   for (let r = 0; r < maxRow; r++) {
     for (let c = 0; c < cols; c++) {
       const key = r + "," + c;
       if (filled.has(key)) continue;
       // 兜底：万一 pending 到最后也没等到 2×2 的位置，就按 1×1 放进补齐的空格里
-      const p = pendingBig || wallPhotos[fi++ % n];
-      if (pendingBig) pendingBig = null;
+      let p = pendingBig;
+      if (p) pendingBig = null;
+      else { const pick = pickFiller(fi); p = pick.p; fi = pick.next; }
+      placedIds.add(p.id);
       wallPhotoById.set(p.id, p);
       items.push({ id: p.id, x: c * step, y: r * step, w: cell, h: cell, big: false, expanded: false, filler: true });
       filled.add(key);
@@ -6392,6 +6405,7 @@ function wallComputeMasonry() {
      肉眼看不出来，但块底变成齐的，交界处彻底没有黑带。 */
   let blockH = Math.max.apply(null, colH.concat([1]));
   const filler = wallPhotos.filter(Boolean);
+  const usedIds = new Set(items.map((it) => it.id)); // v1.03：补齐时避开本块已出现的照片
   if (filler.length) {
     let cursor = 0;
     for (let c = 0; c < cols; c++) {
@@ -6402,6 +6416,7 @@ function wallComputeMasonry() {
         let pick = null, pickH = 0;
         for (let t = 0; t < filler.length; t++) {
           const p = filler[(cursor + t) % filler.length];
+          if (usedIds.has(p.id)) continue;
           const pw = Number(p.width) > 0 ? Number(p.width) : 3;
           const ph0 = Number(p.height) > 0 ? Number(p.height) : 4;
           const ratio = Math.min(2.6, Math.max(0.42, ph0 / pw));
@@ -6409,6 +6424,7 @@ function wallComputeMasonry() {
           if (hh + WALL_GAP <= remain) { pick = p; pickH = hh; cursor = (cursor + t + 1) % filler.length; break; }
         }
         if (!pick) break;
+        usedIds.add(pick.id);
         items.push({ id: pick.id, x: c * (WALL_COL + WALL_GAP), y: colH[c], w: WALL_COL, h: pickH, big: false });
         colH[c] += pickH + WALL_GAP;
       }
@@ -6417,13 +6433,23 @@ function wallComputeMasonry() {
 
   /* v0.99：最后把每列差的那一小截「用一个正好高度的补位块补齐」——
      这样块底是齐的，交界处不会再出现黑带；补位块是从照片里循环取的，
-     高度不足一张时按比例裁切（cover），但只是每列最后一块，看不出来。 */
+     高度不足一张时按比例裁切（cover），但只是每列最后一块，看不出来。
+     v1.03：同样避开本块里已经出现过的照片，别让同一张图在旁边复制一份。 */
   let closeCursor = 0;
+  const usedInBlock = new Set(items.map((it) => it.id));
+  const pickClose = () => {
+    for (let t = 0; t < filler.length; t++) {
+      const cand = filler[(closeCursor + t) % filler.length];
+      if (!usedInBlock.has(cand.id)) { closeCursor = (closeCursor + t + 1) % filler.length; return cand; }
+    }
+    return filler[closeCursor++ % filler.length];
+  };
   for (let c = 0; c < cols; c++) {
     const remain = blockH - colH[c] - WALL_GAP;
     if (remain <= 12) continue;
     if (!filler.length) break;
-    const p = filler[closeCursor++ % filler.length];
+    const p = pickClose();
+    usedInBlock.add(p.id);
     wallPhotoById.set(p.id, p);
     items.push({
       id: p.id, x: c * (WALL_COL + WALL_GAP), y: colH[c],
@@ -6460,21 +6486,31 @@ function wallMakeTile(item, wx, wy) {
   img.loading = "lazy";
   img.decoding = "async";
   img.alt = "";
-  if (p) img.src = cardImgSrc(p); // v0.89 起这里一定是缩略图
+  if (p) img.src = wallTileSrc(p, item.big); // v1.04：按格子大小要小图，别下 960
   el.appendChild(img);
   return el;
+}
+
+/* v1.04：画布墙的图片只显示 180/372px，直接要 320/480 的小图 ——
+   首屏更快、流量更省，服务端会缓存这些小图变体（第一次生成后长期命中） */
+function wallTileSrc(p, big) {
+  const base = cardImgSrc(p);
+  if (!base || base.startsWith("data:")) return base;
+  const w = big ? 480 : 320;
+  return `${base}${base.includes("?") ? "&" : "?"}w=${w}`;
 }
 
 /* 布局变了（放大 / 收起 / 换排布）时，既有元素既要挪位置，也要换照片 ——
    方格模式下 2×2 会把后面几张往后挤，同一个位置的「第 i 张」可能已经是另一张照片了 */
 function wallUpdateTile(el, item, wx, wy) {
+  const sizeChanged = el.classList.contains("big") !== !!item.big;
   wallApplyGeom(el, item, wx, wy);
-  if (el.dataset.id === item.id) return;
-  el.dataset.id = item.id;
   const img = el.querySelector("img");
   if (!img) return;
+  if (el.dataset.id === item.id && !sizeChanged) return;
+  el.dataset.id = item.id;
   const p = wallPhotoById.get(item.id);
-  if (p) img.src = cardImgSrc(p);
+  if (p) img.src = wallTileSrc(p, item.big); // v1.04：大图换 480、小图换 320
 }
 
 function wallRender() {
@@ -6728,10 +6764,51 @@ function initWall() {
   });
   window.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
   window.addEventListener("mouseup", up);
-  vp.addEventListener("touchstart", (e) => { if (e.touches.length === 1) down(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-  vp.addEventListener("touchmove", (e) => { if (e.touches.length === 1) move(e.touches[0].clientX, e.touches[0].clientY); }, { passive: true });
-  vp.addEventListener("touchend", up);
-  vp.addEventListener("touchcancel", up);
+  /* v1.03：手机上双指捏合缩放（以两指中点为中心，同时支持两指拖动平移） */
+  let pinch = null;
+  const touchDist = (t1, t2) => Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+  vp.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2) {
+      stopInertia();
+      dragging = false;
+      vp.classList.remove("dragging");
+      moved = 99; // 捏合不算点击
+      const [a, b] = e.touches;
+      pinch = {
+        d0: Math.max(1, touchDist(a, b)),
+        s0: wallScale,
+        x0: wallX,
+        y0: wallY,
+        mx: (a.clientX + b.clientX) / 2,
+        my: (a.clientY + b.clientY) / 2,
+      };
+      return;
+    }
+    if (e.touches.length === 1 && !pinch) down(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  vp.addEventListener("touchmove", (e) => {
+    if (e.touches.length === 2 && pinch) {
+      const [a, b] = e.touches;
+      const d = touchDist(a, b);
+      const mx = (a.clientX + b.clientX) / 2;
+      const my = (a.clientY + b.clientY) / 2;
+      const factor = d / pinch.d0;
+      const next = Math.min(WALL_MAX_S, Math.max(WALL_MIN_S, pinch.s0 * factor));
+      const k = next / pinch.s0;
+      // 让两指中点下的画布点跟着手指走（缩放 + 平移一起处理）
+      wallX = mx - (pinch.mx - pinch.x0) * k;
+      wallY = my - (pinch.my - pinch.y0) * k;
+      wallScale = next;
+      wallSchedule();
+      return;
+    }
+    if (e.touches.length === 1 && !pinch) move(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  vp.addEventListener("touchend", (e) => {
+    if (e.touches.length === 0) pinch = null;
+    up();
+  });
+  vp.addEventListener("touchcancel", () => { pinch = null; up(); });
 
   /* ---- 滚轮缩放（以指针为中心） ---- */
   vp.addEventListener("wheel", (e) => {

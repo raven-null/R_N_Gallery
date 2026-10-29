@@ -116,10 +116,11 @@ function normCategories(list) {
    effort 4 → 3：编码耗时约少三成，肉眼几乎看不出差别；
    quality 80 → 76：同一张图体积再小 ~10-15%（首屏十几张缩略图，省的是实打实的带宽） */
 const THUMB_QUALITY = 76;
-async function genThumbBuf(buf) {
+async function genThumbBuf(buf, width) {
+  const w = width || THUMB_W;
   const out = await sharp(buf, { failOn: "none", animated: false })
     .rotate()
-    .resize(THUMB_W, THUMB_W, { fit: "inside", withoutEnlargement: true })
+    .resize(w, w, { fit: "inside", withoutEnlargement: true })
     .webp({ quality: THUMB_QUALITY, effort: 3 })
     .toBuffer();
   return out;
@@ -741,34 +742,56 @@ async function thumb(id, req, url, role) {
   const s = store();
   const metaKey = `${PREFIX_META}${id}.json`;
   const thumbKey = thumbKeyOf(id);
-  const [meta, cached] = await Promise.all([
+  /* v1.04：支持 ?w=320/480 的「小图」变体 —— 画布墙上的缩略图只有 180px 宽，
+     再去下 960px 的图纯属浪费带宽；小图另有自己的 key，第一次生成后照样长期缓存。
+     小图优先从已有的 960 缩略图缩放（比重新解原图快得多）。 */
+  const wantW = parseInt(url.searchParams.get("w"), 10);
+  const w = [320, 480].includes(wantW) ? wantW : THUMB_W;
+  const variantKey = w === THUMB_W ? thumbKey : `${thumbKey}@${w}`;
+  const [meta, cachedFull, cachedVar] = await Promise.all([
     s.get(metaKey, { type: "json" }).catch(() => null),
-    s.get(thumbKey, { type: "arrayBuffer" }).catch(() => null), // 先乐观取一份，尺寸不对再丢掉
+    w === THUMB_W ? s.get(thumbKey, { type: "arrayBuffer" }).catch(() => null) : Promise.resolve(null),
+    w === THUMB_W ? Promise.resolve(null) : s.get(variantKey, { type: "arrayBuffer" }).catch(() => null),
   ]);
   if (!meta) return notFound("Photo not found");
   // 成人向内容：只有管理员能看（观光访客与整理模式都拒绝）
   if (isAdultPhoto(meta) && role !== "admin") return unauthorized("当前模式不可查看该内容");
   // 只有「当前尺寸」的缩略图才算有效缓存；旧尺寸（480）或前端上传的未知尺寸会在下面自动升级为 THUMB_W
-  let buf = (meta.thumbKey && meta.thumbW === THUMB_W) ? cached : null;
+  let buf = w === THUMB_W
+    ? ((meta.thumbKey && meta.thumbW === THUMB_W) ? cachedFull : null)
+    : cachedVar;
   if (!buf) {
-    // 懒生成：读原图 → sharp THUMB_W → 存入 Blobs（下次直接命中，immutable 缓存）
-    let orig = await s.get(meta.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" }).catch(() => null);
-    if (!orig) {
-      // 老数据可能没记 origKey（原图 key 带扩展名）：按前缀找一次
-      const found = await s.list({ prefix: `${PREFIX_IMG}${id}.`, limit: 1 }).catch(() => null);
-      const k = found && found.blobs && found.blobs[0] && found.blobs[0].key;
-      if (k) orig = await s.get(k, { type: "arrayBuffer" }).catch(() => null);
+    // 懒生成：优先用已有的 960 缩略图缩放，没有再读原图
+    let srcBuf = null;
+    if (w !== THUMB_W) {
+      if (meta.thumbKey && meta.thumbW === THUMB_W) {
+        srcBuf = await s.get(thumbKey, { type: "arrayBuffer" }).catch(() => null);
+      }
     }
-    if (!orig) return notFound("Image data not found");
+    if (!srcBuf) {
+      let orig = await s.get(meta.origKey || `${PREFIX_IMG}${id}`, { type: "arrayBuffer" }).catch(() => null);
+      if (!orig) {
+        // 老数据可能没记 origKey（原图 key 带扩展名）：按前缀找一次
+        const found = await s.list({ prefix: `${PREFIX_IMG}${id}.`, limit: 1 }).catch(() => null);
+        const k = found && found.blobs && found.blobs[0] && found.blobs[0].key;
+        if (k) orig = await s.get(k, { type: "arrayBuffer" }).catch(() => null);
+      }
+      if (!orig) return notFound("Image data not found");
+      srcBuf = orig;
+    }
     try {
-      const out = await genThumbBuf(Buffer.from(orig));
-      meta.thumbKey = thumbKey;
-      meta.thumbMime = "image/webp";
-      meta.thumbW = THUMB_W;
-      meta.thumbSize = out.length; // v0.84：缩略图字节数（用量统计算得出来）
-      await s.set(meta.thumbKey, out);
-      await s.set(metaKey, JSON.stringify(meta));
-      await indexPut(s, meta); // v0.54 懒生成缩略图后同步索引
+      const out = await genThumbBuf(Buffer.from(srcBuf), w);
+      if (w === THUMB_W) {
+        meta.thumbKey = thumbKey;
+        meta.thumbMime = "image/webp";
+        meta.thumbW = THUMB_W;
+        meta.thumbSize = out.length; // v0.84：缩略图字节数（用量统计算得出来）
+        await s.set(thumbKey, out);
+        await s.set(metaKey, JSON.stringify(meta));
+        await indexPut(s, meta); // v0.54 懒生成缩略图后同步索引
+      } else {
+        await s.set(variantKey, out); // 小图只缓存自己，不动 meta
+      }
       buf = out;
     } catch (e) {
       return notFound("Thumbnail generation failed");
