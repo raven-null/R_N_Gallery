@@ -1606,6 +1606,16 @@ async function aiTagSearch(query) {
 - 测试：`test:dom` 新增 3 项（每个格子比例 = 照片比例、EXIF 宽高互换后自动重排、
   纠正后仍无异常），共 260 项；`test:tagrefresh` 29 项 —— 全过
 
+### 批次 90 · 画布墙的排布切换按钮只留图标（v1.12，2026-10-29）🎨
+> 用户：`▤ 瀑布` 这个按钮不要「瀑布 / 方块」这些字，只要一个图标。
+
+- `#wallViewBtn` 换成内联 SVG，两个图标各画一种排布：
+  `WALL_ICON_GRID`（2×2 方格）、`WALL_ICON_MASONRY`（三条不等高的瀑布列）
+- 图标表示**当前**排布（进来默认方格 → ▦），点一下换成另一种；说明文字放 `title` /
+  `aria-label`（「当前：方格 · 点击切换为瀑布流」），鼠标悬停能看到
+- CSS：`.wall-btn.icon-only` 去掉左右 padding、做成 34×34 正方形，`.wall-btn svg { display: block }`
+- 测试：`test:dom` 那条断言升级成「有 svg 且没有文字」，共 260 项全过
+
 
 
 

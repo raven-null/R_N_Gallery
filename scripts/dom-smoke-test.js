@@ -846,7 +846,10 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
       // 切到瀑布流：列宽统一、高度按原始比例
       {
         const vb = doc.getElementById("wallViewBtn");
-        check("画布墙有方格 / 瀑布流切换按钮", !!vb, vb ? vb.textContent.trim() : "无");
+        // v1.12：切换按钮只有图标，没有「瀑布 / 方格」文字
+        check("画布墙有方格 / 瀑布流切换按钮（只有图标）",
+          !!vb && !!vb.querySelector("svg") && !(vb.textContent || "").trim(),
+          vb ? `图标 ${vb.querySelector("svg") ? "有" : "无"} · 文字「${(vb.textContent || "").trim()}」` : "无");
         if (vb) {
           clickEl(vb);
           await wait(600);

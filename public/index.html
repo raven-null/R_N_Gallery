@@ -5,10 +5,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>渡·影·集</title>
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=202610292207">
-<link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png?v=202610292207">
-<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=202610292207">
-<link rel="stylesheet" href="assets/style.css?v=202610292207">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=202610292212">
+<link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png?v=202610292212">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=202610292212">
+<link rel="stylesheet" href="assets/style.css?v=202610292212">
 </head>
 <body data-page="gallery">
 
@@ -402,7 +402,7 @@
       <button class="wall-btn" id="wallBack" type="button" title="返回图库">←</button>
       <span class="wall-title">画布墙 <b id="wallCount"></b></span>
       <span class="wall-tools">
-        <button class="wall-btn" id="wallViewBtn" type="button" title="切换展示方式">▤ 瀑布</button>
+        <button class="wall-btn icon-only" id="wallViewBtn" type="button" title="当前：方格 · 点击切换为瀑布流" aria-label="切换展示方式"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg></button>
         <button class="wall-btn" id="wallShuffle" type="button" title="随机重排">⤨</button>
         <button class="wall-btn" id="wallZoomOut" type="button" title="缩小（滚轮也可以）">−</button>
         <button class="wall-btn" id="wallZoomIn" type="button" title="放大（滚轮也可以）">＋</button>
@@ -782,6 +782,6 @@
 
 <!-- v0.54：拼音库改为按需加载（原来写死在这里，首屏要多下 316KB / gzip 142KB）：
      首次真正要做拼音匹配时由 app.js 动态注入，见 app.js 的 loadPinyinLib -->
-<script src="assets/app.js?v=202610292207" defer></script>
+<script src="assets/app.js?v=202610292212" defer></script>
 </body>
 </html>

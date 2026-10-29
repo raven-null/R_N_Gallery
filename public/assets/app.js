@@ -6236,12 +6236,17 @@ function wallView() {
 function setWallView(v) {
   try { localStorage.setItem(WALL_VIEW_KEY, v === "masonry" ? "masonry" : "grid"); } catch (e) { /* ignore */ }
 }
+/* v1.12：切换按钮只留图标（用户要求不要「瀑布 / 方格」这些字）——
+   图标画的是**当前**排布：▦ = 方格、▤ = 瀑布流；点一下换成另一种，说明放在 title 里 */
+const WALL_ICON_GRID = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg>`;
+const WALL_ICON_MASONRY = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="4.6" height="7" rx="1.3"/><rect x="3.5" y="12.5" width="4.6" height="8" rx="1.3"/><rect x="9.7" y="3.5" width="4.6" height="11" rx="1.3"/><rect x="9.7" y="16.5" width="4.6" height="4" rx="1.3"/><rect x="15.9" y="3.5" width="4.6" height="5" rx="1.3"/><rect x="15.9" y="10.5" width="4.6" height="5" rx="1.3"/><rect x="15.9" y="17.5" width="4.6" height="3" rx="1.3"/></svg>`;
 function wallSyncViewBtn() {
   const b = document.getElementById("wallViewBtn");
   if (!b) return;
   const grid = wallView() === "grid";
-  b.textContent = grid ? "▤ 瀑布" : "▦ 方格";
-  b.title = grid ? "切换为瀑布流（按原比例）" : "切换为方格";
+  b.innerHTML = grid ? WALL_ICON_GRID : WALL_ICON_MASONRY;
+  b.title = grid ? "当前：方格 · 点击切换为瀑布流" : "当前：瀑布流 · 点击切换为方格";
+  b.setAttribute("aria-label", grid ? "切换为瀑布流" : "切换为方格");
 }
 const wallTiles = new Map();            // "块列,块行,序号" → 照片元素
 const wallPhotoById = new Map();
