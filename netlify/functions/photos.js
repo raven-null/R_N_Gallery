@@ -197,8 +197,9 @@ exports.default = async (req) => {
     if (method === "GET" && path.endsWith("/api/auth/state")) return authState();
     if (method === "POST" && path.endsWith("/api/auth/login")) return authLogin(req);
 
-    /* v0.84：任何写操作都让用量统计缓存失效（上传 / 删图 / 改标签都会改变占用） */
-    if (method !== "GET") statsCache.at = 0;
+    /* v0.84：任何写操作都让用量统计缓存失效（上传 / 删图 / 改标签都会改变占用）
+       v1.02：索引内存快照一并作废 */
+    if (method !== "GET") { statsCache.at = 0; idxMem.at = 0; }
 
     /* ---- 其余端点默认都需要密码（未设置密码时自动放行）----
        role：admin = 持访问密码（全部权限）；null = 无凭证
@@ -440,6 +441,66 @@ async function indexAll(s) {
   }
   return out; // 顺序由 key 保证：最新在前
 }
+
+/* ---------- v1.02：索引快照（让「打开页面」只读一个 blob） ----------
+   原来列表接口每页都要把这一页的索引条目逐条 get 出来（120 条 = 120 次 Blobs 往返），
+   几千张图时首屏光读索引就要好几秒，图片根本没开始加载。
+   现在把全量索引另存一份快照（一个 JSON blob）：
+     · 列表 → 读快照 1 次，分页在内存里切；
+     · 单张增删改 → 顺手把快照补一下（写自己的同时改一条）；
+     · 数量对不上 / 快照过期 → 回落到「逐条读」重建一次并写回。
+   逐条索引仍然是真身，快照坏了最多只是退化成慢路径，不会丢数据。 */
+const KEY_IDX_CACHE = "idx-cache.json";
+/* 同一实例内的内存快照：连续翻页（后台补齐几千张）不用每次都读那 2MB */
+let idxMem = { at: 0, entries: null };
+async function indexCacheGet(s) {
+  try { return await s.get(KEY_IDX_CACHE, { type: "json" }); } catch (e) { return null; }
+}
+async function indexCacheWrite(s, entries) {
+  try { await s.set(KEY_IDX_CACHE, JSON.stringify({ at: Date.now(), entries })); } catch (e) { /* ignore */ }
+}
+/* 读全量索引：内存快照 → Blob 快照 → 逐条重建 */
+async function indexList(s) {
+  if (idxMem.entries && Date.now() - idxMem.at < 60000) return idxMem.entries;
+  const cache = await indexCacheGet(s);
+  if (cache && Array.isArray(cache.entries) && Date.now() - (cache.at || 0) < 10 * 60 * 1000) {
+    const n = await indexCount(s);           // 只 list key，一次往返，用来发现「缓存漏了增删」
+    if (n === cache.entries.length) {
+      idxMem = { at: Date.now(), entries: cache.entries };
+      return cache.entries;
+    }
+  }
+  const entries = await indexAll(s);          // 慢路径：逐条重建
+  await indexCacheWrite(s, entries);
+  idxMem = { at: Date.now(), entries };
+  return entries;
+}
+/* 单张写入后补快照（快照不存在就跳过，等下次列表重建）；
+   条目特别多（>5000，快照 >1.5MB）时不再「读改写」——那样每传一张都要搬一次这么大的 JSON，
+   直接删掉快照，让下次列表重建一次更划算 */
+const IDX_CACHE_MAX_ENTRIES = 5000;
+async function indexCachePut(s, meta) {
+  idxMem.at = 0;
+  const cache = await indexCacheGet(s);
+  if (!cache || !Array.isArray(cache.entries)) return;
+  if (cache.entries.length > IDX_CACHE_MAX_ENTRIES) { await s.delete(KEY_IDX_CACHE).catch(() => {}); return; }
+  const entry = indexEntry(meta);
+  const i = cache.entries.findIndex((e) => e.id === meta.id);
+  if (i >= 0) cache.entries[i] = entry;
+  else cache.entries.push(entry);
+  cache.entries.sort((a, b) => String(b.uploadedAt || "").localeCompare(String(a.uploadedAt || "")));
+  cache.at = Date.now();
+  await indexCacheWrite(s, cache.entries);
+}
+async function indexCacheDrop(s, id) {
+  idxMem.at = 0;
+  const cache = await indexCacheGet(s);
+  if (!cache || !Array.isArray(cache.entries)) return;
+  if (cache.entries.length > IDX_CACHE_MAX_ENTRIES) { await s.delete(KEY_IDX_CACHE).catch(() => {}); return; }
+  cache.entries = cache.entries.filter((e) => e.id !== id);
+  cache.at = Date.now();
+  await indexCacheWrite(s, cache.entries);
+}
 async function indexCount(s) {
   let total = 0;
   let cursor;
@@ -451,9 +512,14 @@ async function indexCount(s) {
   return total;
 }
 /* 增量维护：只写 / 只删自己那一条 */
-const indexPut = (s, meta) => s.set(idxKeyOf(meta.id, meta.uploadedAt), JSON.stringify(indexEntry(meta)));
+const indexPut = async (s, meta) => {
+  await s.set(idxKeyOf(meta.id, meta.uploadedAt), JSON.stringify(indexEntry(meta)));
+  await indexCachePut(s, meta); // v1.02：顺手把索引快照补上，列表就不用重建
+};
 async function indexDrop(s, metas) { // metas: [{ id, uploadedAt }]，传完整 meta 即可
   await Promise.all(metas.map((m) => s.delete(idxKeyOf(m.id, m.uploadedAt))));
+  // v1.02：顺手把索引快照里的条目也删掉（通常一次就够）
+  for (const m of metas) await indexCacheDrop(s, m.id);
 }
 async function indexClear(s) { // 先收集再删：边列边删在不同 Blobs 实现下会漏删
   const keys = [];
@@ -467,6 +533,7 @@ async function indexClear(s) { // 先收集再删：边列边删在不同 Blobs 
     await Promise.all(keys.slice(i, i + 20).map((k) => s.delete(k)));
   }
   await s.delete(KEY_INDEX); // 顺手清掉 v0.54 之前遗留的单 Blob 索引
+  await s.delete(KEY_IDX_CACHE).catch(() => {}); // v1.02：索引快照一并清掉
   return keys.length;
 }
 /* 全量重建（低频：批量改写 / reindex 接口）：先写后删 ——
@@ -498,6 +565,7 @@ async function indexRebuild(s) {
     await Promise.all(stale.slice(i, i + 20).map((k) => s.delete(k)));
   }
   await s.delete(KEY_INDEX); // 清掉 v0.54 之前遗留的单 Blob 索引
+  await indexCacheWrite(s, entries); // v1.02：重建完顺手刷新索引快照
   return entries;
 }
 /* v0.54：原 indexUpsert / indexDrop（整表读改写）已由上面的 indexPut / indexDrop 取代 */
@@ -522,26 +590,17 @@ async function list(url) {
   const q = url.searchParams;
   const limit = Math.min(parseInt(q.get("limit"), 10) || 60, 500);
   const s = store();
-  const healed = await indexHeal(s); // v0.54：老库首次访问自动重建索引
+  await indexHeal(s); // v0.54：老库首次访问自动重建索引
   const hideSet = hiddenRatings(q); // 观光模式：分页前剔除要隐藏的分级（v0.85 可按 r16 / r18 分开）
-  let photos;
-  let cursor = null;
-  let total;
-
-  if (!hideSet.size) {
-    const page = await indexGetPage(s, { limit, cursor: q.get("cursor") || undefined });
-    photos = page.entries.map((e) => ({ ...e, rating: ratingOf(e) }));
-    cursor = page.cursor;
-    total = healed !== null ? healed : await indexCount(s);
-  } else {
-    const arr = (await indexAll(s)).filter((e) => !hideSet.has(ratingOf(e)));
-    const start = Math.max(parseInt(q.get("cursor"), 10) || 0, 0);
-    photos = arr.slice(start, start + limit).map((e) => ({ ...e, rating: ratingOf(e) }));
-    const nextStart = start + limit;
-    cursor = nextStart < arr.length ? String(nextStart) : null;
-    total = arr.length;
-  }
-  return json({ photos, cursor, hasMore: !!cursor, total });
+  /* v1.02：两种模式都走「索引快照 + 内存分页」——
+     快照是一次读取，列表接口从此只花 1 个往返，首屏不用先等 120 次索引读取。 */
+  let arr = await indexList(s);
+  if (hideSet.size) arr = arr.filter((e) => !hideSet.has(ratingOf(e)));
+  const start = Math.max(parseInt(q.get("cursor"), 10) || 0, 0);
+  const photos = arr.slice(start, start + limit).map((e) => ({ ...e, rating: ratingOf(e) }));
+  const nextStart = start + limit;
+  const cursor = nextStart < arr.length ? String(nextStart) : null;
+  return json({ photos, cursor, hasMore: !!cursor, total: arr.length });
 }
 
 /* ---------- CORS 预检（v0.77：前端图库改由博客等外部站点直连） ---------- */

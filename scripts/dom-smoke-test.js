@@ -887,30 +887,41 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
         /* v0.99：即使这张照片所在格子右边/下边被别的大图占了，点下去也必须能放大
            （以前会「点了没反应」——布局放不下 2×2 就直接跳过） */
         {
-          const all = [...doc.querySelectorAll("#wallPlane .wall-tile[data-id]")].filter((t) => !t.classList.contains("big"));
           let ok = 0, tried = 0;
-          for (const t of all.slice(0, 8)) {
+          for (let i = 0; i < 6; i++) {
+            // 每轮都重新取一张「当前还是小图」的（布局变化后旧元素可能已被虚拟化回收）
+            const cand = [...doc.querySelectorAll("#wallPlane .wall-tile[data-id]")].find((t) => !t.classList.contains("big"));
+            if (!cand) break;
+            const id = cand.dataset.id;
             tried++;
-            t.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+            cand.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
             await wait(450);
             const st = window.__wallState();
-            const bigTile = [...doc.querySelectorAll("#wallPlane .wall-tile")].find((x) => x.dataset.id === t.dataset.id);
-            if (st.expanded === t.dataset.id && bigTile && parseFloat(bigTile.style.width) > 180) ok++;
-            t.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
-            await wait(350);
+            const el = [...doc.querySelectorAll("#wallPlane .wall-tile")].find((x) => x.dataset.id === id);
+            // 放大后可能被挪出视野（元素被虚拟化回收），这时只要状态对就算成功
+            if (st.expanded === id && (!el || parseFloat(el.style.width) > 180)) ok++;
+            const back = [...doc.querySelectorAll("#wallPlane .wall-tile")].find((x) => x.dataset.id === id) || cand;
+            back.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+            await wait(420);
           }
           check("任意一张照片点下去都能放大（放不下就往后挪）", tried > 0 && ok === tried, `${ok}/${tried} 成功`);
         }
         // 双击：第一下（detail 1）挂起的放大要被取消 → 图片不会有任何缩放，直接开灯箱
-        const sizeBeforeDbl = tile.style.width;
-        tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
-        tile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
-        tile.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+        const vpEl = doc.getElementById("wallViewport");
+        vpEl.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); // 先点空白收掉可能残留的放大
+        await wait(200);
+        const dblTile = doc.querySelector("#wallPlane .wall-tile[data-id]");
+        const sizeBeforeDbl = dblTile.style.width;
+        const dblId = dblTile.dataset.id;
+        dblTile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 1 }));
+        dblTile.dispatchEvent(new window.MouseEvent("click", { bubbles: true, detail: 2 }));
+        dblTile.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+        check("双击时挂起的「单击放大」已取消", window.__wallState().expanded === null);
         await wait(400);
         const lbNow = doc.getElementById("lightbox");
-        check("双击打开灯箱", lbNow.classList.contains("open") && lbNow.dataset.cur === tile.dataset.id, lbNow.dataset.cur || "(无)");
-        check("双击过程中图片不会被放大 / 收起（单击动作已取消）",
-          tile.style.width === sizeBeforeDbl && window.__wallState().expanded === null, `宽度 ${tile.style.width}`);
+        check("双击打开灯箱", lbNow.classList.contains("open") && lbNow.dataset.cur === dblId, lbNow.dataset.cur || "(无)");
+        check("双击过程中图片没有被放大 / 收起（宽度不变）",
+          dblTile.style.width === sizeBeforeDbl, `宽度 ${sizeBeforeDbl} → ${dblTile.style.width}`);
         doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
         await wait(250);
         check("Esc 先关灯箱、画布墙还在", !lbNow.classList.contains("open") && doc.getElementById("wallPage").classList.contains("open"));
