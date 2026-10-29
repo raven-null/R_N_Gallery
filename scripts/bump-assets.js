@@ -38,6 +38,9 @@ const bump = (file) => {
 bump("style.css");
 bump("app.js");
 bump("pinyin-pro.min.js");
+bump("favicon-32.png");
+bump("favicon-192.png");
+bump("apple-touch-icon.png");
 
 if (s === before) {
   console.error("✗ index.html 里没找到任何 ?v= 引用，检查文件是否正确");

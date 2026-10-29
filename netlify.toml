@@ -24,4 +24,15 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# 网站图标同样带 ?v= 版本号（scripts/bump-assets.js 会一起刷新）
+[[headers]]
+  for = "/favicon-*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/apple-touch-icon.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
 # API 路由由 Functions v2 的 config.path 声明（见 netlify/functions/photos.js），无需 redirects

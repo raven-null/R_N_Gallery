@@ -1572,6 +1572,19 @@ async function aiTagSearch(query) {
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）
 
+### 批次 88 · 用渡鸦图做网站图标（v1.09，2026-10-29）🎨
+> 用户给了张方图（圆角窗口里一只渡鸦），要做成浏览器标签页图标。
+
+- 新增 `scripts/make-favicon.js`：自动找出图里「非白色」像素的包围盒（圆角窗口图案），
+  按正方形居中裁切（四周留 4% 边距），一次输出 4 个尺寸
+- 产物都在 `public/`：`favicon-32.png`（1.6 KB）、`favicon-192.png`（22.7 KB）、
+  `apple-touch-icon.png`（180×180）、`favicon-512.png`（108 KB，留给 PWA / 分享卡片）
+- `index.html` 里原来那个内联 SVG 小图标换成三个 `<link>`：32 / 192 / apple-touch-icon
+- 源图放 `scripts/data/favicon-src.png`（**不**放 `public/`，免得 296 KB 原图被部署上线）
+- `scripts/bump-assets.js` 增加 favicon 三处 `?v=` 的刷新；`netlify.toml` 给 `/favicon-*.png`
+  和 `/apple-touch-icon.png` 加 7 天缓存头（带版本号，换图改 v 即可）
+- 测试：`test:tagrefresh` 29 项、`test:dom` 257 项全过；四个图标在 dev server 上均 200 image/png
+- 换图流程：`node scripts/make-favicon.js 新图.png` → `node scripts/bump-assets.js` → 提交
 
 
 
