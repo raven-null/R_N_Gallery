@@ -1557,6 +1557,17 @@ async function aiTagSearch(query) {
   拖动过程中（`.wall-viewport.dragging`）不生效，避免跟手时发飘
 - 测试：`test:dom` 255 项、`test:tagrefresh` 29 项全过
 
+### 批次 87 · 改完标签刷新后「变回去」（v1.06，2026-10-29）🔧
+> 用户反馈：改了标签，刷新页面后部分标签又变回没改前的样子。
+
+- **根因**：Netlify Blobs 有 1~2 分钟的「写后读」延迟 —— 保存成功、界面已经更新，
+  但刷新时 `GET /api/tags` 在另一个边缘/实例上读到的是**旧副本**，于是标签「变回去了」
+- **服务端兜底**：配置加 `updatedAt` 时间戳 + 统一写入口 `saveConfig()`（写 Blobs 的同时留在实例内存里）；
+  `loadConfig()` 读到的版本比内存里旧时**用内存里的那份** —— 刚改完的请求立刻就能读到新配置
+- **前端兜底**：本地存一份配置镜像（含 `updatedAt`）；页面加载时若服务端版本更旧，
+  就用本地这份并把 PUT 推回去自愈（防止跨实例/跨边缘的读延迟）
+- 测试：`test:dom` 新增 1 项（`/api/tags` 带 updatedAt，PUT 后立刻 GET 能读到更新的时间戳），共 256 项全过
+
 - 测试：新增 `npm run test:tagrefresh`（scripts/tag-refresh-test.js，jsdom + fetch 桩，21 项断言）——
   改名 / 删除 / 单张编辑 / 收藏后**卡片 DOM 节点必须是同一批**（给节点打探针验证），chips 与标签菜单同步更新
 - 浏览器侧无需刷新即可看到效果（index.html 的 `?v=` 已 bump）

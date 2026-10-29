@@ -1628,6 +1628,26 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     }
   }
 
+  /* v1.06：标签配置带 updatedAt，且刚 PUT 完立刻 GET 就该读到新版本（防 Blobs 写后读延迟） */
+  {
+    try {
+      const hdr = Object.assign({}, TOKEN ? { "X-Auth-Token": TOKEN } : {});
+      const cfg1 = await (await fetch(`${BASE}/api/tags`, { headers: hdr })).json();
+      const before = Number(cfg1.updatedAt) || 0;
+      const put = await fetch(`${BASE}/api/tags`, {
+        method: "PUT",
+        headers: Object.assign({ "Content-Type": "application/json" }, hdr),
+        body: JSON.stringify({ categories: cfg1.categories, groups: cfg1.groups, tags: cfg1.tags }),
+      });
+      const cfg2 = await (await fetch(`${BASE}/api/tags`, { headers: hdr })).json();
+      check("标签配置带 updatedAt，写后立即可读到新版本",
+        put.status === 200 && Number(cfg2.updatedAt) > before && (cfg2.tags || []).length === (cfg1.tags || []).length,
+        `updatedAt ${before} → ${cfg2.updatedAt}`);
+    } catch (e) {
+      check("标签配置带 updatedAt，写后立即可读到新版本", false, e.message);
+    }
+  }
+
   /* v0.53：所有前端会用到的接口都必须挂载在函数的 config.path 里（漏加会直接 404） */
   {
     const hdr = Object.assign({ "Content-Type": "application/json" }, TOKEN ? { "X-Auth-Token": TOKEN } : {});

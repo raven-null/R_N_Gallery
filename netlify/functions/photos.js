@@ -1329,11 +1329,33 @@ async function importStatic(req) {
    - 配置描述：categories（主分类字典）/ groups（作品等分组）/ tags（组内标签、别名、颜色）
    ============================================================ */
 
-async function loadConfig(s) {
-  const raw = await s.get(KEY_TAGS, { type: "json" });
-  return raw && Array.isArray(raw.groups) && Array.isArray(raw.tags)
+/* ---------- 标签配置读写（v1.06：刚改完就刷新，不会再读到旧副本） ----------
+   Netlify Blobs 有 1~2 分钟的「写后读」延迟：改完标签、前端刷新时 GET 可能读到旧配置，
+   界面就「恢复成没改前的样子」。这里两处兜住：
+     1) 每次保存都给配置打 `updatedAt` 时间戳；
+     2) 写入后把配置留在实例内存里，读的时候若 Blobs 里的版本比内存旧，就用内存里的。 */
+let tagsMemCfg = { cfg: null };
+function normTagsCfg(raw) {
+  const cfg = raw && Array.isArray(raw.groups) && Array.isArray(raw.tags)
     ? { categories: Array.isArray(raw.categories) ? raw.categories : [], groups: raw.groups, tags: raw.tags }
     : { categories: [], groups: [], tags: [] };
+  cfg.updatedAt = Number(raw && raw.updatedAt) || 0;
+  return cfg;
+}
+async function loadConfig(s) {
+  const raw = await s.get(KEY_TAGS, { type: "json" }).catch(() => null);
+  const cfg = normTagsCfg(raw);
+  const mem = tagsMemCfg.cfg;
+  if (mem && (mem.updatedAt || 0) > (cfg.updatedAt || 0)) return mem; // 读到旧副本 → 用刚写的
+  tagsMemCfg.cfg = cfg;
+  return cfg;
+}
+/* 统一写入口：打时间戳 + 写 Blobs + 更新内存副本 */
+async function saveConfig(s, cfg) {
+  cfg.updatedAt = Math.max(Date.now(), ((tagsMemCfg.cfg && tagsMemCfg.cfg.updatedAt) || 0) + 1);
+  await s.set(KEY_TAGS, JSON.stringify(cfg));
+  tagsMemCfg.cfg = cfg;
+  return cfg;
 }
 
 /* 遍历全部照片元数据，fn(tags) 返回新数组则写回（去重 + 上限 10） */
@@ -1492,7 +1514,7 @@ async function tagsPut(req) {
     return badRequest(`「${freshCat.name}」是图库分级档位（大众级 / R16 / R18），不是主分类 —— 分级请在图片编辑里设置`);
   }
   const cfg = { categories, groups, tags };
-  await s.set(KEY_TAGS, JSON.stringify(cfg));
+  await saveConfig(s, cfg);
 
   // 本次提交删除了某主分类 → 同步从引用照片的 categories 数组里移除（v0.15 / v0.19 多选）
   const del = new Set((oldCfg.categories || []).filter((o) => !categories.some((n) => n.name === o.name)).map((c) => c.name));
@@ -1559,7 +1581,7 @@ async function tagsRename(req) {
     // v0.55：旧名一并留成别名 —— 照片上的游离标签（有引用、库里没有）改名后也该能按旧名搜到。
     cfg.tags.push({ id: `t-${nanoid(6)}`, name: to, aliases: [from], group: "", color: null, sort: cfg.tags.length });
   }
-  await s.set(KEY_TAGS, JSON.stringify(cfg));
+  await saveConfig(s, cfg);
 
   const photos = await rewritePhotos(s, (tags) => {
     const next = [];
@@ -1591,7 +1613,7 @@ async function tagsRemove(req) {
   const s = store();
   const cfg = await loadConfig(s);
   cfg.tags = cfg.tags.filter((t) => t.name !== name);
-  await s.set(KEY_TAGS, JSON.stringify(cfg));
+  await saveConfig(s, cfg);
 
   const photos = await rewritePhotos(s, (tags) => {
     const next = tags.filter((t) => t !== name);
@@ -1635,7 +1657,7 @@ async function categoryRename(req) {
     // v0.33：配置里暂时看不到旧名（刚新建、Blobs 写入还没传播）时不要失败，至少保证新名在配置里
     cfg.categories = [...cats, { id: `c-${nanoid(6)}`, name: to, color: null, sort: cats.length }];
   }
-  await s.set(KEY_TAGS, JSON.stringify(cfg));
+  await saveConfig(s, cfg);
 
   const photos = await rewriteByCategory(s, (cats2) => (cats2.includes(from) ? [...new Set(cats2.map((c) => (c === from ? to : c)))] : null));
   await logAction(req, merged ? "主分类合并" : "主分类改名", `${from} → ${to}（${photos} 张照片）`);
@@ -1657,7 +1679,7 @@ async function categoryRemove(req) {
   const cfg = await loadConfig(s);
   // v0.33：配置里找不到该分类也继续（可能刚删除或写入未传播）——照片引用照样清理，不再直接报错
   cfg.categories = (Array.isArray(cfg.categories) ? cfg.categories : []).filter((c) => c.name !== name);
-  await s.set(KEY_TAGS, JSON.stringify(cfg));
+  await saveConfig(s, cfg);
 
   const photos = await rewriteByCategory(s, (cats) => (cats.includes(name) ? cats.filter((c) => c !== name) : null));
   await logAction(req, "删除主分类", `${name}（清空 ${photos} 张照片的分类）`);

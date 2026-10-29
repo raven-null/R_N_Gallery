@@ -413,14 +413,37 @@ async function loadTags() {
     // v0.77：no-store —— 配置要读到最新的一份；命中 HTTP 缓存会让本地分类 / 标签列表落后于服务端
     const res = await apiFetch("/api/tags", { cache: "no-store" });
     const d = await res.json();
-    TAGS = (d && Array.isArray(d.groups) && Array.isArray(d.tags))
-      ? { categories: Array.isArray(d.categories) ? d.categories : DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: d.groups, tags: d.tags }
-      : { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] };
+    const server = (d && Array.isArray(d.groups) && Array.isArray(d.tags))
+      ? { categories: Array.isArray(d.categories) ? d.categories : DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: d.groups, tags: d.tags, updatedAt: Number(d.updatedAt) || 0 }
+      : { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [], updatedAt: 0 };
+    /* v1.06：Blobs 写后读有延迟，刷新时可能拿到旧配置（看起来像「标签改回去了」）。
+       本地留一份镜像 + 时间戳，服务端版本更旧就用本地的，并把它推回去自愈。 */
+    const mirror = tagsMirrorRead();
+    if (mirror && mirror.cfg && (server.updatedAt || 0) < (mirror.updatedAt || 0)) {
+      TAGS = mirror.cfg;
+      apiSaveTags().catch(() => { /* 推不回去也没关系，界面至少是对的 */ });
+    } else {
+      TAGS = server;
+      tagsMirrorWrite(TAGS);
+    }
     clearGroupNameCache(); // v0.55：标签 / 组变了，整组筛选用的名字集合必须重建
   } catch (e) {
     TAGS = { categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })), groups: [], tags: [] }; // API 不可用时降级为纯自由标签
     clearGroupNameCache();
   }
+}
+/* v1.06：标签配置的本地镜像（服务端配置 + 它的 updatedAt） */
+const TAGS_MIRROR_KEY = "rn_tags_mirror";
+function tagsMirrorRead() {
+  try {
+    const m = JSON.parse(localStorage.getItem(TAGS_MIRROR_KEY) || "null");
+    return m && m.cfg && Array.isArray(m.cfg.tags) ? m : null;
+  } catch (e) { return null; }
+}
+function tagsMirrorWrite(cfg) {
+  try {
+    localStorage.setItem(TAGS_MIRROR_KEY, JSON.stringify({ updatedAt: Number(cfg.updatedAt) || Date.now(), cfg }));
+  } catch (e) { /* ignore */ }
 }
 async function apiSaveTags() {
   const res = await apiFetch("/api/tags", {
@@ -430,7 +453,13 @@ async function apiSaveTags() {
   });
   const d = await res.json();
   if (!d.ok) throw new Error(d.error || "保存标签配置失败");
-  if (d.config) TAGS = d.config;
+  if (d.config) {
+    TAGS = { ...d.config, updatedAt: Number(d.config.updatedAt) || Date.now() };
+    tagsMirrorWrite(TAGS);
+  } else if (d.updatedAt) {
+    TAGS.updatedAt = Number(d.updatedAt);
+    tagsMirrorWrite(TAGS);
+  }
 }
 /* v0.31：改名 / 删除类接口不再内部重读配置（loadTags）。
    Netlify Blobs 写入后读取有 1~2 分钟延迟，重读会拿到旧数据，
@@ -6520,16 +6549,17 @@ function wallTileSrc(p, big) {
 }
 
 /* 布局变了（放大 / 收起 / 换排布）时，既有元素既要挪位置，也要换照片 ——
-   方格模式下 2×2 会把后面几张往后挤，同一个位置的「第 i 张」可能已经是另一张照片了 */
+   方格模式下 2×2 会把后面几张往后挤，同一个位置的「第 i 张」可能已经是另一张照片了。
+   v1.05：**不再因为尺寸变化换 src** —— 换 URL 会重新下载并闪一下，
+   放大后把 320 的图放大显示即可（180→372 才 2 倍，看不出糊）。 */
 function wallUpdateTile(el, item, wx, wy) {
-  const sizeChanged = el.classList.contains("big") !== !!item.big;
   wallApplyGeom(el, item, wx, wy);
+  if (el.dataset.id === item.id) return;
+  el.dataset.id = item.id;
   const img = el.querySelector("img");
   if (!img) return;
-  if (el.dataset.id === item.id && !sizeChanged) return;
-  el.dataset.id = item.id;
   const p = wallPhotoById.get(item.id);
-  if (p) img.src = wallTileSrc(p, item.big); // v1.04：大图换 480、小图换 320
+  if (p) img.src = wallTileSrc(p, item.big);
 }
 
 function wallRender() {
@@ -6742,6 +6772,11 @@ function initWall() {
   };
   const down = (x, y) => {
     stopInertia(); // 手一按就停住惯性
+    /* v1.05：刚才若在做「镜头平滑滑动」，手指一按就立刻接管，
+       否则过渡还在跑、手也在拖，画面会打架（看起来像抽搐） */
+    if (wallPanTimer) { clearTimeout(wallPanTimer); wallPanTimer = null; }
+    const planeEl = wallPlaneEl();
+    if (planeEl) planeEl.style.transition = "";
     dragging = true;
     moved = 0;
     sx = x; sy = y;
