@@ -6973,8 +6973,9 @@ function initWall() {
   });
 
   /* ---- 顶栏按钮 ---- */
-  const openBtn = document.getElementById("btnOpenWall");
-  if (openBtn) openBtn.onclick = () => openWall(); // v1.08：图库顶部的照片墙入口
+  // v1.08：照片墙入口 = 悬浮按钮「上分支」最上面那个
+  const wallFab = document.getElementById("fabWallBtn");
+  if (wallFab) wallFab.addEventListener("click", (e) => { e.stopPropagation(); openWall(); });
   const back = document.getElementById("wallBack");
   if (back) back.onclick = closeWall;
   const zin = document.getElementById("wallZoomIn");
