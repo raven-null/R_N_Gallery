@@ -133,7 +133,42 @@ function nanoid(len = 8) {
   return s;
 }
 
-/* 解析图片尺寸（webp / jpeg / png / gif），返回 { width, height } 或 null */
+/* v1.11：读 JPEG 的 EXIF 方向（1~8，没有就是 1）。
+   手机竖着拍的照片，像素其实是横着存的、靠 EXIF 标一个「转 90°」——
+   缩略图生成时调用了 sharp().rotate()（按 EXIF 转正），所以显示出来是竖的；
+   但这里读到的 SOF 尺寸是「转正前」的，直接用会导致宽高颠倒：
+   瀑布流按错的宽高比排版，照片就被裁得不像原样（看着像被拉长 / 压扁）。 */
+function jpegExifOrientation(buf, segStart, segLen) {
+  try {
+    const dataStart = segStart + 4;             // marker(2) + 段长(2)
+    const end = Math.min(buf.length, segStart + 2 + segLen);
+    if (end - dataStart < 14) return 1;
+    if (buf.toString("ascii", dataStart, dataStart + 4) !== "Exif") return 1;
+    if (buf[dataStart + 4] !== 0 || buf[dataStart + 5] !== 0) return 1;
+    const tiff = dataStart + 6;
+    const order = buf.toString("ascii", tiff, tiff + 2);
+    const le = order === "II";
+    if (!le && order !== "MM") return 1;
+    const u16 = (o) => (le ? buf.readUInt16LE(o) : buf.readUInt16BE(o));
+    const u32 = (o) => (le ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+    const ifd0 = tiff + u32(tiff + 4);
+    if (ifd0 + 2 > end) return 1;
+    const n = u16(ifd0);
+    for (let k = 0; k < n; k++) {
+      const e = ifd0 + 2 + k * 12;
+      if (e + 12 > end) break;
+      if (u16(e) !== 0x0112) continue;
+      const v = u16(e + 8);
+      return v >= 1 && v <= 8 ? v : 1;
+    }
+    return 1;
+  } catch {
+    return 1;
+  }
+}
+
+/* 解析图片尺寸（webp / jpeg / png / gif），返回 { width, height } 或 null
+   v1.11：JPEG 会带上 EXIF 方向修正 —— 返回的是「转正之后」的宽高 */
 function imageSize(buf) {
   if (!buf || buf.length < 24) return null;
   // PNG
@@ -144,16 +179,21 @@ function imageSize(buf) {
   if (buf[0] === 0x47 && buf[1] === 0x49) {
     return { width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) };
   }
-  // JPEG：扫描 SOF 段
+  // JPEG：扫描 SOF 段（顺手记录 EXIF 方向）
   if (buf[0] === 0xff && buf[1] === 0xd8) {
     let i = 2;
+    let orientation = 1;
     while (i < buf.length - 9) {
       if (buf[i] !== 0xff) { i++; continue; }
       const marker = buf[i + 1];
       if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
       const len = buf.readUInt16BE(i + 2);
+      if (marker === 0xe1 && orientation === 1) orientation = jpegExifOrientation(buf, i, len);
       if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-        return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+        const height = buf.readUInt16BE(i + 5);
+        const width = buf.readUInt16BE(i + 7);
+        // 5~8 = 旋转 90°，转正之后宽高互换
+        return orientation >= 5 ? { width: height, height: width } : { width, height };
       }
       i += 2 + len;
     }

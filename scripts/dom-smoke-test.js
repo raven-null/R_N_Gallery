@@ -863,6 +863,33 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
           const worst = cov && cov.shortfalls.length ? Math.max(...cov.shortfalls) : 9999;
           check("瀑布流各列尾部补齐（块交界处没有大空档）", !!cov && worst < 130,
             cov ? `块高 ${cov.blockH}，各列尾部余量 ${cov.shortfalls.join("/")}` : "无布局信息");
+          /* v1.11：照片不许被拉长 / 压扁 —— 每个格子的宽高比必须等于照片自己的显示比例
+             （补位块是为了块底齐平硬裁的，不算） */
+          const asp = window.__wallAspectInfo ? window.__wallAspectInfo() : null;
+          check("瀑布流每个格子的比例 = 照片比例（不拉伸）", !!asp && asp.bad.length === 0,
+            asp ? `${asp.items} 个格子，比例异常 ${asp.bad.length} 个` : "无布局信息");
+          /* v1.11：手机照片带 EXIF 方向时，元数据里的宽高是颠倒的；
+             图片加载完会报出真实尺寸，墙要按新比例自动重排，而不是把照片裁成一条 */
+          {
+            const raw0 = window.__wallLayoutRaw();
+            const cell = raw0 && raw0.items.find((it) => !it.filler && it.w === 180);
+            let fixed = false, desc = "无可用格子";
+            if (cell && window.__wallNoteNatural) {
+              const before = cell.h / cell.w;
+              const swapped = Math.min(4, Math.max(0.2, 1 / before));
+              window.__wallNoteNatural(cell.id, cell.h, cell.w); // 报一个「宽高互换」的真实尺寸
+              await wait(520);
+              const raw1 = window.__wallLayoutRaw();
+              const after = raw1 && raw1.items.find((it) => it.id === cell.id);
+              const now = after ? after.h / after.w : 0;
+              fixed = Math.abs(now - swapped) < 0.06;
+              desc = `${before.toFixed(2)} → ${now.toFixed(2)}（应为 ${swapped.toFixed(2)}）`;
+            }
+            check("照片报出真实尺寸（EXIF 宽高互换）后自动按正确比例重排", fixed, desc);
+            const asp2 = window.__wallAspectInfo ? window.__wallAspectInfo() : null;
+            check("纠正之后仍没有比例异常的格子", !!asp2 && asp2.bad.length === 0,
+              asp2 ? `比例异常 ${asp2.bad.length} 个` : "无布局信息");
+          }
           clickEl(vb); // 切回方格，后面按方格继续测
           await wait(600);
         }

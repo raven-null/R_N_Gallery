@@ -6246,6 +6246,65 @@ function wallSyncViewBtn() {
 const wallTiles = new Map();            // "块列,块行,序号" → 照片元素
 const wallPhotoById = new Map();
 
+/* v1.11：图片「真实显示比例」缓存（id → 高/宽）。
+   服务端记的 width/height 有两个坑，会让瀑布流里的照片被裁得看不出原样（用户说的「变形」）：
+   ① 老照片可能没记尺寸（0×0）→ 布局按默认 3:4 摆，横图只剩中间一条；
+   ② 手机照片带 EXIF 方向（拍照时竖持 = 旋转 90°），记录的宽高和实际显示方向相反，比例整个反了。
+   缩略图是按「转正之后」的样子生成的，所以浏览器加载出来的 naturalWidth / naturalHeight
+   才是唯一可信的来源 —— 记一份在这里，布局优先用它；发现和元数据不一致时自动重排一次。
+   注意：不管比例怎么算，图片始终是 `object-fit: cover`（等比铺满、多出来的裁掉），
+   所以「放大」只会让照片变大，绝不会被拉长或压扁。 */
+const wallNatRatio = new Map();
+let wallRelayoutTimer = 0;
+const WALL_RATIO_MIN = 0.2;   // 高/宽 下限：超宽全景最少留 36px 高，不至于变成一条线
+const WALL_RATIO_MAX = 4.0;   // 上限：超长竖图（长截图）最多 4 倍高度
+
+function wallRatioOf(p) {
+  const nat = p ? wallNatRatio.get(p.id) : 0;
+  if (nat > 0) return nat;
+  const w = Number(p && p.width) || 0;
+  const h = Number(p && p.height) || 0;
+  if (w > 0 && h > 0) return h / w;
+  return 1.25;                // 完全不知道：先按 4:5 摆，图片加载完会自己纠正
+}
+/* 布局用的比例：极端长条限一下长度（极端情况靠 cover 裁一点，但绝不拉伸） */
+function wallLayoutRatio(p) {
+  return Math.min(WALL_RATIO_MAX, Math.max(WALL_RATIO_MIN, wallRatioOf(p)));
+}
+/* 图片加载完才知道真实比例 —— 和元数据差得比较多就重排一次（防抖，免得墙一直抖） */
+function wallNoteNaturalRatio(id, nw, nh) {
+  if (!id || !(nw > 0) || !(nh > 0)) return false;
+  const nat = nh / nw;
+  const prev = wallNatRatio.get(id);
+  if (prev > 0 && Math.abs(prev - nat) <= prev * 0.02) return false;   // 已知且没变
+  wallNatRatio.set(id, nat);
+  const p = wallPhotoById.get(id);
+  const meta = p && Number(p.width) > 0 && Number(p.height) > 0 ? Number(p.height) / Number(p.width) : 0;
+  // 元数据本来就对（差 2% 以内）→ 不用重排
+  if (!(prev > 0) && meta > 0 && Math.abs(meta - nat) <= nat * 0.02) return false;
+  wallScheduleRelayout();
+  return true;
+}
+function wallScheduleRelayout() {
+  if (!wallOpen || wallRelayoutTimer) return;
+  wallRelayoutTimer = setTimeout(() => {
+    wallRelayoutTimer = 0;
+    if (!wallOpen || !wallLayout) return;
+    wallComputeLayout();
+    wallRender();
+  }, 220);
+}
+/* 新元素 / 换了照片的元素都要盯着它到底加载出多大 */
+function wallBindTileRatio(el, id) {
+  const img = el.querySelector("img");
+  if (!img) return;
+  const measure = () => {
+    if (el.dataset.id === id) wallNoteNaturalRatio(id, img.naturalWidth | 0, img.naturalHeight | 0);
+  };
+  if (img.complete && img.naturalWidth > 0) { measure(); return; }
+  img.addEventListener("load", measure, { once: true });
+}
+
 function wallViewport() { return document.getElementById("wallViewport"); }
 function wallPlaneEl() { return document.getElementById("wallPlane"); }
 
@@ -6410,10 +6469,7 @@ function wallComputeMasonry() {
   const bigOffset = Math.floor(rnd() * bigEvery);
   let pi = 0;
   for (const p of wallPhotos) {
-    const w = Number(p.width) > 0 ? Number(p.width) : 3;
-    const h = Number(p.height) > 0 ? Number(p.height) : 4;
-    // 限定宽高比范围，免得超长条把整列拉爆
-    const ratio = Math.min(2.6, Math.max(0.42, h / w));
+    const ratio = wallLayoutRatio(p);   // v1.11：真实比例（图片自己报的优先）
     const mine = pi++;
     const randBig = (mine + bigOffset) % bigEvery === 0 && !wallShrunk.has(p.id) && cols >= 2;
     const isBig = (!!bigId && p.id === bigId) || randBig;
@@ -6479,10 +6535,7 @@ function wallComputeMasonry() {
         for (let t = 0; t < filler.length; t++) {
           const p = filler[(cursor + t) % filler.length];
           if (usedIds.has(p.id)) continue;
-          const pw = Number(p.width) > 0 ? Number(p.width) : 3;
-          const ph0 = Number(p.height) > 0 ? Number(p.height) : 4;
-          const ratio = Math.min(2.6, Math.max(0.42, ph0 / pw));
-          const hh = Math.round(WALL_COL * ratio);
+          const hh = Math.round(WALL_COL * wallLayoutRatio(p));
           if (hh + WALL_GAP <= remain) { pick = p; pickH = hh; cursor = (cursor + t + 1) % filler.length; break; }
         }
         if (!pick) break;
@@ -6499,18 +6552,33 @@ function wallComputeMasonry() {
      v1.03：同样避开本块里已经出现过的照片，别让同一张图在旁边复制一份。 */
   let closeCursor = 0;
   const usedInBlock = new Set(items.map((it) => it.id));
-  const pickClose = () => {
+  /* v1.11：补位块的高度是「为了齐平硬凑的」，照片必然要被裁掉一点 ——
+     那就挑一张**自身高度最接近这个高度**的照片，裁得最少。
+     以前是循环取，抽到张横图时会被裁成一条窄缝，看着就像「照片被压扁了」。 */
+  const pickClose = (need) => {
+    if (!(need > 0)) {
+      for (let t = 0; t < filler.length; t++) {
+        const cand = filler[(closeCursor + t) % filler.length];
+        if (!usedInBlock.has(cand.id)) { closeCursor = (closeCursor + t + 1) % filler.length; return cand; }
+      }
+      return filler[closeCursor++ % filler.length];
+    }
+    let best = null, bestDiff = Infinity, bestAt = 0;
     for (let t = 0; t < filler.length; t++) {
       const cand = filler[(closeCursor + t) % filler.length];
-      if (!usedInBlock.has(cand.id)) { closeCursor = (closeCursor + t + 1) % filler.length; return cand; }
+      if (usedInBlock.has(cand.id)) continue;
+      const diff = Math.abs(Math.round(WALL_COL * wallLayoutRatio(cand)) - need);
+      if (diff < bestDiff) { best = cand; bestDiff = diff; bestAt = t; if (diff <= 4) break; }
     }
-    return filler[closeCursor++ % filler.length];
+    if (!best) return filler[closeCursor++ % filler.length];
+    closeCursor = (closeCursor + bestAt + 1) % filler.length;
+    return best;
   };
   for (let c = 0; c < cols; c++) {
     const remain = blockH - colH[c] - WALL_GAP;
     if (remain <= 12) continue;
     if (!filler.length) break;
-    const p = pickClose();
+    const p = pickClose(remain);
     usedInBlock.add(p.id);
     wallPhotoById.set(p.id, p);
     items.push({
@@ -6535,7 +6603,7 @@ function wallComputeMasonry() {
     }
     const fillGap = (c, y, h) => {
       if (h <= 10 || !filler.length) return;
-      const p = pickClose();
+      const p = pickClose(h);   // v1.11：挑高度最接近的，裁得最少
       usedInBlock.add(p.id);
       wallPhotoById.set(p.id, p);
       items.push({
@@ -6599,6 +6667,7 @@ function wallMakeTile(item, wx, wy) {
   img.alt = "";
   if (p) img.src = wallTileSrc(p, item.big); // v1.04：按格子大小要小图，别下 960
   el.appendChild(img);
+  wallBindTileRatio(el, item.id);            // v1.11：等图片加载完核对真实比例
   return el;
 }
 
@@ -6623,6 +6692,7 @@ function wallUpdateTile(el, item, wx, wy) {
   if (!img) return;
   const p = wallPhotoById.get(item.id);
   if (p) img.src = wallTileSrc(p, item.big);
+  wallBindTileRatio(el, item.id);            // v1.11：换照片后重新核对比例
 }
 
 function wallRender() {
@@ -7023,6 +7093,24 @@ function initWall() {
   };
   /* v0.98：方格模式的「每行都填满」自检 —— 用来验证块交界处不会出现黑带 */
   window.__wallGridStats = () => (wallLayout && wallLayout.gridStats) || null;
+  /* v1.11：比例自检 —— 每张非补位照片的「格子比例」必须等于它自己的显示比例
+     （补位块是为了齐平硬裁的，不计）。差得多就是「照片被拉长 / 压扁」了。 */
+  window.__wallAspectInfo = () => {
+    if (!wallLayout) return null;
+    const bad = [];
+    for (const it of wallLayout.items) {
+      if (it.filler) continue;
+      const p = wallPhotoById.get(it.id);
+      if (!p) continue;
+      const want = wallLayoutRatio(p);
+      const got = it.h / it.w;
+      if (Math.abs(got - want) > 0.04) bad.push({ id: it.id, want: +want.toFixed(3), got: +got.toFixed(3) });
+    }
+    return { view: wallView(), items: wallLayout.items.length, bad };
+  };
+  // 测试用：模拟「图片加载完报出自己的真实尺寸」（多半是 EXIF 方向导致的宽高互换）
+  window.__wallNoteNatural = (id, nw, nh) => wallNoteNaturalRatio(id, nw | 0, nh | 0);
+  window.__wallNatRatio = (id) => wallNatRatio.get(id) || 0;
   // 调试用：把当前排布原样吐出来（排查空洞 / 黑带）
   window.__wallLayoutRaw = () => wallLayout;
 }
