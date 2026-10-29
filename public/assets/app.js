@@ -6381,12 +6381,31 @@ function wallComputeMasonry() {
   const gaps = [];                        // { col, y, h }：大图跨列留下的空档，等后面的照片来填
   wallPhotoById.clear();
   const bigId = wallExpandedId;
+  /* v1.07：瀑布流也随机放大一些照片（和方格模式同一套种子）。
+     每 8 张挑 1 张变「两列宽」，跨列留下的空档先由后续照片补，
+     补不掉的在最后用「正好高度的补位块」填平 —— 不会留明显空位。 */
+  const bigEvery = 8;
+  let seed = wallGridSeed | 0;
+  const rnd = (() => {
+    let s = seed;
+    return () => {
+      s = (s + 0x6D2B79F5) | 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), 1 | t);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  })();
+  const bigOffset = Math.floor(rnd() * bigEvery);
+  let pi = 0;
   for (const p of wallPhotos) {
     const w = Number(p.width) > 0 ? Number(p.width) : 3;
     const h = Number(p.height) > 0 ? Number(p.height) : 4;
     // 限定宽高比范围，免得超长条把整列拉爆
     const ratio = Math.min(2.6, Math.max(0.42, h / w));
-    const isBig = !!bigId && p.id === bigId;
+    const mine = pi++;
+    const randBig = (mine + bigOffset) % bigEvery === 0 && !wallShrunk.has(p.id) && cols >= 2;
+    const isBig = (!!bigId && p.id === bigId) || randBig;
     const span = isBig ? Math.min(2, cols) : 1;
     const colW = span === 2 ? WALL_COL * 2 + WALL_GAP : WALL_COL;
     const ph = Math.round(colW * ratio);
@@ -6418,7 +6437,7 @@ function wallComputeMasonry() {
       const shortCol = colH[left] < colH[left + 1] ? left : left + 1;
       const gapH = Math.abs(colH[left] - colH[left + 1]) - WALL_GAP;
       if (gapH > 24) gaps.push({ col: shortCol, y: Math.min(colH[left], colH[left + 1]), h: gapH });
-      items.push({ id: p.id, x: left * (WALL_COL + WALL_GAP), y, w: colW, h: ph, big: true, expanded: true });
+      items.push({ id: p.id, x: left * (WALL_COL + WALL_GAP), y, w: colW, h: ph, big: true, expanded: p.id === bigId });
       colH[left] = y + ph + WALL_GAP;
       colH[left + 1] = y + ph + WALL_GAP;
     } else {
@@ -6488,6 +6507,39 @@ function wallComputeMasonry() {
       w: WALL_COL, h: remain, big: false, expanded: false, filler: true,
     });
     colH[c] += remain + WALL_GAP;
+  }
+
+  /* v1.07：把**列内残留的空档**也填平 —— 多个大图跨列时，后续照片不一定填得严丝合缝，
+     剩下的缝隙在这里用一个「正好高度」的补位块补掉（图片按 cover 裁切），
+     于是放大照片之后不会留下明显的空洞。 */
+  {
+    const perCol = Array.from({ length: cols }, () => []);
+    for (const it of items) {
+      const span = it.w > WALL_COL ? 2 : 1;
+      const c0 = Math.round(it.x / (WALL_COL + WALL_GAP));
+      for (let k = 0; k < span; k++) {
+        const c = c0 + k;
+        if (c >= 0 && c < cols) perCol[c].push(it);
+      }
+    }
+    const fillGap = (c, y, h) => {
+      if (h <= 10 || !filler.length) return;
+      const p = pickClose();
+      usedInBlock.add(p.id);
+      wallPhotoById.set(p.id, p);
+      items.push({
+        id: p.id, x: c * (WALL_COL + WALL_GAP), y,
+        w: WALL_COL, h, big: false, expanded: false, filler: true,
+      });
+    };
+    for (let c = 0; c < cols; c++) {
+      const list = perCol[c].sort((a, b) => (a.y - b.y) || (b.h - a.h));
+      let y = 0;
+      for (const it of list) {
+        if (it.y - y > 10) fillGap(c, y, it.y - WALL_GAP - y);
+        y = Math.max(y, it.y + it.h);
+      }
+    }
   }
 
   assignWallKeys(items); // v1.05：稳定 key，放大时元素只挪位置、不换图
@@ -6943,9 +6995,13 @@ function initWall() {
     const cols = wallLayout.cols;
     const bottom = new Array(cols).fill(0);
     for (const it of wallLayout.items) {
-      if (it.w > WALL_COL) continue;   // 跳过大图（跨两列）
-      const c = Math.round(it.x / (WALL_COL + WALL_GAP));
-      if (c >= 0 && c < cols) bottom[c] = Math.max(bottom[c], it.y + it.h);
+      // v1.07：跨两列的大图对「两列」都算占位，别把它的高度漏掉
+      const span = it.w > WALL_COL ? 2 : 1;
+      const c0 = Math.round(it.x / (WALL_COL + WALL_GAP));
+      for (let k = 0; k < span; k++) {
+        const c = c0 + k;
+        if (c >= 0 && c < cols) bottom[c] = Math.max(bottom[c], it.y + it.h);
+      }
     }
     const blockH = Math.max(1, wallLayout.blockH);
     const shortfalls = bottom.map((b) => Math.max(0, blockH - b));

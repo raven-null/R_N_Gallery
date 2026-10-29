@@ -853,7 +853,8 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
           const widths = new Set(tiles.map((t) => t.style.width));
           const heights = new Set(tiles.map((t) => t.style.height));
           check("切到瀑布流（view=masonry）", st.view === "masonry", `view=${st.view}`);
-          check("瀑布流列宽统一 180px", widths.size === 1 && [...widths][0] === "180px", [...widths].join("/"));
+          // v1.07：瀑布流也会随机放大一些（372px 两列宽），其余仍是 180px
+          check("瀑布流列宽只有 180 / 372 两种", [...widths].every((w) => w === "180px" || w === "372px"), [...widths].join("/"));
           check("瀑布流高度按原始比例各不相同", heights.size > 1, [...heights].slice(0, 4).join(" / "));
           // v0.96：块的下沿要齐 —— 每列尾部都补满，交界处不会出现横贯全宽的空带
           const cov = window.__wallCoverage ? window.__wallCoverage() : null;
