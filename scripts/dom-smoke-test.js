@@ -94,6 +94,10 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
 
   const cards0 = doc.querySelectorAll("#grid .card").length;
   check("首屏渲染出卡片", cards0 > 0, `${cards0} 张${gotCards ? "" : "（等待超时）"}`);
+  /* v1.13：打开图库默认「正方形网格」，而且不记忆上次的选择（每次刷新都回到方格） */
+  check("打开图库默认是正方形网格", doc.getElementById("grid").classList.contains("grid-square")
+    && (window.__layoutMode ? window.__layoutMode() : "?") === "square",
+    `mode=${window.__layoutMode ? window.__layoutMode() : "?"}`);
   /* v0.89：网格卡片一律走缩略图 —— 不再因为「高清档」或「缺 thumbKey」去拉原图 */
   {
     const imgs = [...doc.querySelectorAll("#grid .card img")];
@@ -508,6 +512,18 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
   {
     const fabMain = doc.getElementById("fabMain");
     const inf = () => (window.__infiniteState ? window.__infiniteState() : { wanted: null, active: null });
+    /* v1.13：图库现在默认方格，而循环滚动只在瀑布流下生效 —— 先切到瀑布流再测 */
+    const gEl = doc.getElementById("grid");
+    const lbtn = doc.getElementById("fabLayoutBtn");
+    const toMasonry = async () => {
+      if (gEl && lbtn && gEl.classList.contains("grid-square")) { clickEl(lbtn); await wait(600); }
+    };
+    const toSquare = async () => {
+      if (!gEl || !lbtn) return;
+      const sq = window.__layoutMode ? window.__layoutMode() === "square" : gEl.classList.contains("grid-square");
+      if (!sq) { clickEl(lbtn); await wait(600); }
+    };
+    await toMasonry();
     const dbl = async () => {
       fabMain.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, button: 0 }));
       fabMain.dispatchEvent(new window.MouseEvent("click", { bubbles: true })); // 第一次单击：展开菜单
@@ -591,6 +607,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await dbl();
     check("再双击关闭循环滚动", inf().wanted === false, JSON.stringify(inf()));
     check("关闭后主按钮取消点亮", !fabMain.classList.contains("inf"));
+    await toSquare(); // v1.13：测完切回方格，后面的用例按默认方格继续
   }
 
   /* v0.65：批量条上的「⚑ 分级」—— 给选中的多张一次性设置分级 */
@@ -724,7 +741,8 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     window.__exitSelectMode && window.__exitSelectMode();
     await wait(300);
     check("退出多选后全选按钮隐藏（body 无 select-mode）", !doc.body.classList.contains("select-mode"));
-    if (gridEl && gridEl.classList.contains("grid-square")) { tap(layoutBtn); await wait(600); }
+    // v1.13：测完切回方格（现在默认就是方格，后面的用例都按方格跑）
+    if (gridEl && !gridEl.classList.contains("grid-square")) { tap(layoutBtn); await wait(600); }
   }
 
   /* v0.73：鼠标按住向左拖 = 批量选择（框选划过） */
@@ -1267,7 +1285,7 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     await wait(200);
   }
 
-  /* 展示方式切换（v0.46）：瀑布流 ↔ 正方形网格 */
+  /* 展示方式切换（v0.46 / v1.13）：默认正方形网格，切换后不写 localStorage（刷新回到方格） */
   const layoutBtn = doc.getElementById("fabLayoutBtn");
   const gridEl = doc.getElementById("grid");
   check("FAB 分支有展示方式切换按钮", !!layoutBtn && !!gridEl);
@@ -1278,10 +1296,22 @@ const TOKEN = process.env.GALLERY_TOKEN || ""; // 线上启用访问密码时填
     const afterFirst = gridEl.classList.contains("grid-square");
     check("点一下切换展示方式", afterFirst !== before, `${before ? "方格" : "瀑布流"} → ${afterFirst ? "方格" : "瀑布流"}`);
     check("切换后卡片仍在（布局变化不影响渲染）", doc.querySelectorAll("#grid .card").length > 0);
-    check("选择已写入 localStorage", window.localStorage.getItem("rn_layout") === (afterFirst ? "square" : "masonry"));
+    check("展示方式不写 localStorage（每次刷新都回到方格）",
+      window.localStorage.getItem("rn_layout") === null && window.__layoutMode() === (afterFirst ? "square" : "masonry"),
+      `rn_layout=${window.localStorage.getItem("rn_layout")} mode=${window.__layoutMode()}`);
     clickEl(layoutBtn);
     await wait(400);
     check("再点一下切回原样", gridEl.classList.contains("grid-square") === before);
+  }
+  /* v1.13：卡片用小图变体 + 首屏立刻加载（打开图库不等懒加载） */
+  {
+    const imgs = [...doc.querySelectorAll("#grid .card > img")];
+    const first = imgs[0];
+    check("卡片图片用小图变体（?w=480）", !!first && /\?w=480|&w=480/.test(first.getAttribute("src") || ""),
+      first ? (first.getAttribute("src") || "").split("?")[1] || "(无 query)" : "无卡片");
+    check("首屏卡片立刻加载（前几张是 eager + high 优先级）",
+      !!first && first.getAttribute("loading") === "eager" && first.getAttribute("fetchpriority") === "high",
+      first ? `loading=${first.getAttribute("loading")} prio=${first.getAttribute("fetchpriority")}` : "无卡片");
   }
 
   /* ---------- 标签筛选 v0.55：多选 / 且或 / 排除 / 我的筛选 ----------

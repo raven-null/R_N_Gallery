@@ -1616,6 +1616,26 @@ async function aiTagSearch(query) {
 - CSS：`.wall-btn.icon-only` 去掉左右 padding、做成 34×34 正方形，`.wall-btn svg { display: block }`
 - 测试：`test:dom` 那条断言升级成「有 svg 且没有文字」，共 260 项全过
 
+### 批次 91 · 图库默认方格 + 打开更快（v1.13，2026-10-30）⚡
+> 用户：图库每次刷新打开优先以方格形态展示，并且要快速加载图片。
+
+- **默认方格且不再记忆**：`layoutMode()` 改成会话变量（初始 `square`），不再读写
+  `localStorage.rn_layout` —— 以前会记住上次的瀑布流，刷新后首屏按原比例铺满一堆卡片，明显更慢；
+  现在每次刷新 / 重开都是正方形网格，会话内点按钮照样能切瀑布流
+- **卡片改用小图变体**：新增 `cardGridSrc(p)` → 缩略图 URL 加 `?w=480`。
+  960 的缩略图一张几十上百 KB，而方格卡片才 200px 宽（2 倍屏 400 出头），
+  480 版本体积约 1/3。原图 / 灯箱仍走 `cardImgSrc`（960 → 原图渐进）
+- **首屏不再等懒加载**：前 12 张 `loading="eager"`、前 4 张再加 `fetchpriority="high"`
+  （`itemsHTML` 把序号传到 `cardHTML`，日期分段分支也传）
+- **预取同步换 URL**：`prefetchThumbs` 预取的是同一个 `?w=480`，命中率才真的高
+- **照片墙复用图库的缓存**：方格模式下 `wallTileSrc` 也要 `?w=480`（和图库卡片同一个 URL），
+  打开照片墙直接命中浏览器缓存；打开后前 24 张 `loading="eager"`（前 8 张 high），
+  不再等 lazy 触发
+- 测试：`test:dom` 新增 3 项（默认方格、卡片用 `?w=480`、首屏 eager+high），
+  循环滚动 / 日期全选那几段改成「先切到需要的排布再测」，共 263 项；
+  `test:tagrefresh` 29 项、`test:api` 24 项 —— 全过
+
+
 
 
 

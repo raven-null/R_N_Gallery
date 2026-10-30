@@ -1038,6 +1038,14 @@ function cardImgSrc(p) {
      原图只在灯箱里看（openLightboxById 先缩略图后原图渐进替换）。 */
   return p.thumbUrl || p.url;
 }
+/* v1.13：卡片本体改用「小图」变体（?w=480）——
+   960 的缩略图一张几十上百 KB，可方格网格里卡片才 200px 宽、2 倍屏也只要 400 出头；
+   480 版本体积约 1/3，一屏十几张卡能快一大截（原图 / 灯箱仍走 cardImgSrc）。 */
+function cardGridSrc(p) {
+  const u = cardImgSrc(p);
+  if (!u || u.startsWith("data:")) return u;
+  return `${u}${u.includes("?") ? "&" : "?"}w=480`;
+}
 function makeThumbDataUrl(dataUrl) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -2622,7 +2630,7 @@ function initGallery() {
     const counts = {};
     if (allForCount) allForCount.forEach((p) => { const k = dayKeyOf(p); if (k) counts[k] = (counts[k] || 0) + 1; });
     let last = prevKey || null;
-    return list.map((p) => {
+    return list.map((p, i) => {
       const key = dayKeyOf(p);
       let head = "";
       if (key && key !== last) {
@@ -2632,16 +2640,21 @@ function initGallery() {
           <button class="day-pick" type="button" data-daypick="${escAttr(key)}" title="${t("选中这一天的全部图片", "Select every photo from this day")}">${t("全选", "select all")}</button></div>`;
         last = key;
       }
-      return head + cardHTML(p);
+      return head + cardHTML(p, i);   // v1.13：序号传下去，首屏那几张才走 eager
     }).join("");
   }
 
-  function cardHTML(p) {    // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
+  function cardHTML(p, idx) {    // 卡片比例：服务端已记录宽高，渲染时就写死 aspect-ratio（CSS 瀑布流不会因图片懒加载完成而重排）
     // 老数据缺尺寸时不写，退回原来的自然高度
     const ratio = (p.width > 0 && p.height > 0) ? ` style="aspect-ratio:${p.width} / ${p.height}"` : "";
     const favorite = favOf(p);
+    /* v1.13：首屏这十几张**立刻加载**（loading=lazy 在部分浏览器会把刚插入的图也推迟，
+       打开图库要等一拍才出图）；前三张再抬成 high 优先级，先出图先见人 */
+    const n = Number(idx) || 0;
+    const loadAttr = n < 12 ? ' loading="eager"' : ' loading="lazy"';
+    const prioAttr = n < 4 ? ' fetchpriority="high"' : "";
     return `<div class="card${selected.has(p.id) ? " sel" : ""}${favorite ? " fav" : ""}" data-id="${p.id}" draggable="${isAdmin()}" title="单击看大图 · 双击编辑"${ratio}>
-      <img loading="lazy" decoding="async" draggable="false" src="${cardImgSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
+      <img${loadAttr}${prioAttr} decoding="async" draggable="false" src="${cardGridSrc(p)}" data-orig="${p.url}" alt="${escAttr(p.title)}" onerror="this.onerror=null;this.src=this.dataset.orig">
       <button class="pick" title="选中">✓</button>
       ${manageAllowed() ? `<button class="fv" data-fav="${p.id}" title="${favorite ? "取消收藏" : "收藏"}">${favorite ? "♥" : "♡"}</button>` : ""}
       ${ratingBadge(p)}
@@ -2796,12 +2809,14 @@ function initGallery() {
     const end = Math.min(list.length, (from || 0) + (count || 24));
     for (let i = Math.max(0, from || 0); i < end; i++) {
       const p = list[i];
-      if (!p || !p.thumbUrl || prefetchedThumbs.has(p.thumbUrl)) continue;
-      prefetchedThumbs.add(p.thumbUrl);
+      if (!p || !p.thumbUrl) continue;
+      const src = cardGridSrc(p);   // v1.13：和卡片同一个小图 URL，预取才真的命中缓存
+      if (prefetchedThumbs.has(src)) continue;
+      prefetchedThumbs.add(src);
       const im = new Image();
       im.decoding = "async";
       if ("fetchPriority" in im) im.fetchPriority = "low";
-      im.src = p.thumbUrl;
+      im.src = src;
     }
   }
   window.__renderGallery = () => render();
@@ -2962,6 +2977,7 @@ function initGallery() {
     scheduleFill(); // 追加后继续补足视口（可能一次追加还不够填满）
   }
   window.__appendMore = appendMore; // 调试/测试钩子：手动触发追加
+  window.__layoutMode = () => layoutMode();   // v1.13：当前展示方式（square / masonry）
   window.__galleryState = () => ({
     shown, filtered: filtered.length, total: PHOTOS.length, busy: scrollBusy,
     filter: filterSnapshot(), // v0.55：当前筛选状态（测试 / 调试用）
@@ -5813,13 +5829,15 @@ function applyPerfLite(on) {
 try { if (localStorage.getItem(PERF_KEY) === "1") applyPerfLite(true); } catch (e) { /* ignore */ }
 const COLS_KEY = "rn_cols";
 
-/* ---------- 展示方式：瀑布流 / 正方形网格（v0.46） ----------
+/* ---------- 展示方式：瀑布流 / 正方形网格（v0.46）
    正方形模式给 #grid 加 .grid-square，CSS 把多列瀑布流换成等比方格网格
-   （像手机相册那样排列）；选择记在 localStorage，刷新后保持。 */
-const LAYOUT_KEY = "rn_layout";
-function layoutMode() {
-  try { return localStorage.getItem(LAYOUT_KEY) === "square" ? "square" : "masonry"; } catch (e) { return "masonry"; }
-}
+   （像手机相册那样排列）。
+   v1.13：**默认正方形网格，而且每次刷新 / 重开页面都回到方格**（用户要求：打开先看方格）。
+   所以选择只在本次会话里记（模块变量），不再读写 localStorage —— 以前存了 rn_layout
+   刷新后保持上次的瀑布流，结果首屏要按原比例铺一大堆卡片，加载明显更慢。 */
+let galleryLayout = "square";          // square | masonry
+function layoutMode() { return galleryLayout; }
+function setLayoutMode(v) { galleryLayout = v === "masonry" ? "masonry" : "square"; }
 function applyLayout() {
   const grid = document.getElementById("grid");
   const square = layoutMode() === "square";
@@ -5842,7 +5860,7 @@ function initLayoutSwitch() {
     btn.dataset.bound = "1";
     btn.addEventListener("click", (e) => {
       e.stopPropagation(); // 别让 FAB 主按钮把分支收起来
-      try { localStorage.setItem(LAYOUT_KEY, layoutMode() === "square" ? "masonry" : "square"); } catch (err) { /* ignore */ }
+      setLayoutMode(layoutMode() === "square" ? "masonry" : "square"); // v1.13：只记在本次会话里
       applyLayout();
       // v0.54：日期分段只在方格模式出现 → 切换布局后必须重渲染，否则分组头会残留 / 缺失
       if (window.__renderGallery) window.__renderGallery();
@@ -6260,6 +6278,7 @@ const wallPhotoById = new Map();
    注意：不管比例怎么算，图片始终是 `object-fit: cover`（等比铺满、多出来的裁掉），
    所以「放大」只会让照片变大，绝不会被拉长或压扁。 */
 const wallNatRatio = new Map();
+let wallEagerLeft = 0;        // v1.13：打开墙后前 N 张立刻加载（wallReload 时重置）
 let wallRelayoutTimer = 0;
 const WALL_RATIO_MIN = 0.2;   // 高/宽 下限：超宽全景最少留 36px 高，不至于变成一条线
 const WALL_RATIO_MAX = 4.0;   // 上限：超长竖图（长截图）最多 4 倍高度
@@ -6667,7 +6686,12 @@ function wallMakeTile(item, wx, wy) {
   el.dataset.id = item.id;
   const p = wallPhotoById.get(item.id);
   const img = document.createElement("img");
-  img.loading = "lazy";
+  /* v1.13：刚打开墙时视野内的这批**立刻加载**（lazy 在变换过的容器里常常推迟很多帧，
+     看着就是「打开空白一会儿才出图」）；前 8 张再抬成 high 优先级 */
+  const eager = wallEagerLeft > 0;
+  if (eager) wallEagerLeft--;
+  img.loading = eager ? "eager" : "lazy";
+  if (eager && "fetchPriority" in img) img.fetchPriority = wallEagerLeft >= 16 ? "high" : "auto";
   img.decoding = "async";
   img.alt = "";
   if (p) img.src = wallTileSrc(p, item.big); // v1.04：按格子大小要小图，别下 960
@@ -6677,11 +6701,13 @@ function wallMakeTile(item, wx, wy) {
 }
 
 /* v1.04：画布墙的图片只显示 180/372px，直接要 320/480 的小图 ——
-   首屏更快、流量更省，服务端会缓存这些小图变体（第一次生成后长期命中） */
+   首屏更快、流量更省，服务端会缓存这些小图变体（第一次生成后长期命中）
+   v1.13：方格模式统一要 ?w=480 —— 和图库卡片是同一个 URL，图库已经下过的图
+   打开照片墙时直接命中浏览器缓存，等于「秒出」 */
 function wallTileSrc(p, big) {
   const base = cardImgSrc(p);
   if (!base || base.startsWith("data:")) return base;
-  const w = big ? 480 : 320;
+  const w = wallView() === "grid" ? 480 : (big ? 480 : 320);
   return `${base}${base.includes("?") ? "&" : "?"}w=${w}`;
 }
 
@@ -6853,6 +6879,7 @@ function wallReload(photos) {
   wallExpandedId = null;
   wallShrunk.clear();                       // 换一批照片，之前「点小掉」的记录作废
   wallGridSeed = (Math.random() * 1e9) | 0; // v0.97：重新决定「随机放大」是哪几张
+  wallEagerLeft = 24;                       // v1.13：新开一次墙，前 24 张立刻加载
   wallTiles.forEach((el) => el.remove());
   wallTiles.clear();
   const plane = wallPlaneEl();
